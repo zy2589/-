@@ -248,11 +248,11 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
     '拼接图片必须独立于分区、置于视频轨上层，并在导出时保持同一层级。',
   );
   requireBuildCheck(
-    baseStyle.includes('background:#123b2d') &&
-      timelineStyle.includes('background: #123b2d') &&
-      timelineStyle.includes('background: linear-gradient(180deg, #174b38, #123b2d)') &&
+    baseStyle.includes('background:#478f68') &&
+      timelineStyle.includes('background: #478f68') &&
+      timelineStyle.includes('background: linear-gradient(180deg, #4d986f, #438561)') &&
       waveformScript.includes('ctx.strokeStyle = "#ffffff"'),
-    '所有音频轨片段需统一暗绿色底色与白色波形。',
+    '所有音频轨片段需统一绿色底色与白色波形。',
   );
   requireBuildCheck(
     inspector.includes('id="spliceAngleRange"') &&

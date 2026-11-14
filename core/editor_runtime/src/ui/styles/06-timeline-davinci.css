@@ -394,7 +394,7 @@
         z-index: 24;
       }
       .clip.audio {
-        background: #123b2d;
+        background: #478f68;
         padding: 0;
       }
       .clip.image {
@@ -561,7 +561,7 @@
         overflow: hidden;
       }
       .clip.compound-proxy.audio {
-        background: linear-gradient(180deg, #174b38, #123b2d);
+        background: linear-gradient(180deg, #4d986f, #438561);
       }
       .clip.compound-proxy .compound-name {
         position:relative; z-index:2; display:flex; align-items:center; height:100%; padding:0 9px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import ctypes
 import importlib.util
 import os
 import queue
@@ -81,6 +82,7 @@ class ClipAssistant:
             self.root.attributes("-topmost", True)
         except tk.TclError:
             pass
+        self._download_topmost_active = True
         # Keep the preferred ratio only for the initial window size. A hard
         # WM aspect/max-size constraint prevents Windows from maximizing to
         # the full monitor work area and leaves visible strips around the app.
@@ -419,10 +421,11 @@ class ClipAssistant:
         # only changes their stacking order, so returning to a page reuses its
         # existing widgets and media/WebView state instead of remapping and
         # repainting the full surface.
-        target.tkraise()
+        if self.current_page != name:
+            target.tkraise()
         try:
-            self.root.attributes("-topmost", name == "download")
-        except tk.TclError:
+            self._set_download_topmost(name == "download")
+        except (OSError, AttributeError, tk.TclError):
             pass
         if name != "projects" and self.embedded_editor and self.embedded_editor.is_running():
             # Release editor keyboard focus while its native child stays alive
@@ -442,6 +445,31 @@ class ClipAssistant:
             editor = item.get("editor")
             if editor is not None:
                 editor.set_background_active(name == "cutout" and index == self.current_cutout_page)
+
+    def _set_download_topmost(self, active: bool) -> None:
+        """Change only the window z-order, without forcing a Tk/WebView repaint."""
+        active = bool(active)
+        if getattr(self, "_download_topmost_active", None) == active:
+            return
+        if os.name == "nt":
+            from ctypes import wintypes
+
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            set_window_pos = user32.SetWindowPos
+            set_window_pos.argtypes = (
+                wintypes.HWND, wintypes.HWND,
+                ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                wintypes.UINT,
+            )
+            set_window_pos.restype = wintypes.BOOL
+            hwnd = wintypes.HWND(self.root.winfo_id())
+            insert_after = ctypes.c_void_p(-1 if active else -2)  # HWND_TOPMOST / HWND_NOTOPMOST
+            flags = 0x0001 | 0x0002 | 0x0010 | 0x0200  # NOSIZE | NOMOVE | NOACTIVATE | NOOWNERZORDER
+            if not set_window_pos(hwnd, insert_after, 0, 0, 0, 0, flags):
+                raise ctypes.WinError(ctypes.get_last_error())
+        else:
+            self.root.attributes("-topmost", active)
+        self._download_topmost_active = active
 
     def _card(self, parent, **kwargs):
         return tk.Frame(

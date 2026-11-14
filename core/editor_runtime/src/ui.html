@@ -1326,26 +1326,28 @@ om: 1px solid var(--line);
         position: absolute;
         left: 0;
         right: 0;
-        top: -6px;
-        height: 12px;
+        top: -5px;
+        height: 10px;
         cursor: row-resize;
         z-index: 45;
         touch-action: none;
       }
-      .timeline-resizer:hover { background: rgba(31, 131, 255, .55); }
+      .timeline-resizer:hover { background: transparent; }
       .timeline-resizer::after {
         content: "";
         position: absolute;
         left: 50%;
         top: 4px;
-        width: 44px;
-        height: 3px;
-        border-radius: 2px;
+        width: 32px;
+        height: 2px;
+        border-radius: 1px;
         background: #55575e;
         transform: translateX(-50%);
         pointer-events: none;
+        transition: background-color 100ms ease, width 100ms ease;
       }
-      .timeline-resizer:hover::after, .timeline-resizer.dragging::after { background: #58a6ff; }
+      .timeline-resizer:hover::after { background: #8a9099; }
+      .timeline-resizer.dragging::after { background: #aeb7c2; }
       .timelinebar {
         display: grid;
         grid-template-columns: var(--track-label-width) 5px minmax(0, 1fr);
@@ -1443,11 +1445,23 @@ om: 1px solid var(--line);
       }
       .track-resizer {
         cursor: col-resize;
-        background: var(--line);
+        background: transparent;
         position: relative;
         z-index: 12;
       }
-      .track-resizer:hover { background: var(--blue); }
+      .track-resizer::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 50%;
+        width: 1px;
+        background: var(--line);
+        transform: translateX(-50%);
+        pointer-events: none;
+        transition: background-color 100ms ease, width 100ms ease;
+      }
+      .track-resizer:hover::after { width: 2px; background: #818892; }
       .tracklabels-col {
         display: flex;
         flex-direction: column;
@@ -1695,7 +1709,7 @@ om: 1px solid var(--line);
         z-index: 24;
       }
       .clip.audio {
-        background: #123b2d;
+        background: #478f68;
         padding: 0;
       }
       .clip.image {
@@ -1862,7 +1876,7 @@ om: 1px solid var(--line);
         overflow: hidden;
       }
       .clip.compound-proxy.audio {
-        background: linear-gradient(180deg, #174b38, #123b2d);
+        background: linear-gradient(180deg, #4d986f, #438561);
       }
       .clip.compound-proxy .compound-name {
         position:relative; z-index:2; display:flex; align-items:center; height:100%; padding:0 9px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
@@ -3610,7 +3624,7 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
       }
       .clip.audio {
         overflow: hidden;
-        background-color: #123b2d;
+        background-color: #478f68;
         background-repeat: no-repeat;
         transform-origin: center;
       }
@@ -4118,7 +4132,15 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
       #selectTool.active, #trimTool.active, #bladeTool.active { color: #f2574f !important; background: transparent !important; border-color: transparent !important; }
       #snapToggle.active, #linkAV.active, #selectionFollowsPlayhead.active { color: #f4f4f5 !important; background: transparent !important; border-color: transparent !important; }
       .tool-separator { height: 27px; background: #3b3c41; margin: 0 7px; }
-      .timelinebody { grid-template-columns: max(275px, var(--track-label-width)) 2px minmax(0, 1fr); background: var(--timeline-bg); }
+      .timelinebody { grid-template-columns: max(275px, var(--track-label-width)) 4px minmax(0, 1fr); background: var(--timeline-bg); }
+      .timeline-resizer { top: -5px; height: 10px; background: transparent; }
+      .timeline-resizer:hover { background: transparent; }
+      .timeline-resizer::after { top: 4px; width: 32px; height: 2px; border-radius: 1px; background: #55575e; transition: background-color 100ms ease; }
+      .timeline-resizer:hover::after { background: #8a9099; }
+      .timeline-resizer.dragging::after { background: #aeb7c2; }
+      .track-resizer { background: transparent; }
+      .track-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: #393a3f; transform: translateX(-50%); pointer-events: none; transition: background-color 100ms ease, width 100ms ease; }
+      .track-resizer:hover::after { width: 2px; background: #818892; }
       .tracklabels-col { background: #1d1e22; border-right: 1px solid #090a0b; }
       .ruler-spacer, .ruler-bar { flex: 0 0 var(--timeline-ruler-h); height: var(--timeline-ruler-h); background: #1d1e22; border-bottom: 1px solid #101114; }
       .ruler-spacer { justify-content: center; padding: 0 12px; font: 700 20px/1 ui-monospace, "SFMono-Regular", Consolas, monospace; color: #d7d8db; letter-spacing: -.7px; }
@@ -4273,19 +4295,23 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
       .tracklabel.track-roomy .track-clip-count { font-size: 12px; }
       .tracklabel.audio, .tracklabel.video, .tracklabel.image, .tracklabel.caption, .tracklabel.review { border-left:3px solid #77797e; }
       .tracklabel.audio { border-left-color:#176b3a; }
-      .track-resize-grip { position: absolute; left: 0; right: 0; bottom: 0; height: 7px; z-index: 70; cursor: ns-resize; touch-action: none; }
-      .track-resize-grip:hover, .tracklabel.resizing .track-resize-grip { background: rgba(82, 169, 221, .85); }
+      .track-resize-grip { position: absolute; left: 0; right: 0; bottom: 0; height: 7px; z-index: 70; cursor: ns-resize; touch-action: none; background: transparent; }
+      .track-resize-grip::after { content: ""; position: absolute; left: 50%; bottom: 2px; width: 26px; height: 1px; border-radius: 1px; background: #45474d; transform: translateX(-50%); pointer-events: none; transition: background-color 100ms ease, width 100ms ease; }
+      .track-resize-grip:hover::after, .tracklabel.resizing .track-resize-grip::after { width: 32px; background: #858b95; }
       .trackrow { position: relative; min-height: 56px; }
-      .trackrow::after { content: ""; position: absolute; left: 0; right: 0; bottom: -3px; height: 8px; cursor: ns-resize; touch-action: none; z-index: 70; }
-      .trackrow:hover::after, .trackrow.resizing-track::after { background: rgba(82,169,221,.28); }
-      .trackrow.resizing-track::after { background: rgba(82,169,221,.85); }
+      .trackrow::after { content: ""; position: absolute; left: 0; right: 0; bottom: -3px; height: 8px; cursor: ns-resize; touch-action: none; z-index: 70; background: transparent; }
+      .trackrow::before { content: ""; position: absolute; left: 50%; bottom: 0; width: 26px; height: 1px; border-radius: 1px; background: transparent; transform: translateX(-50%); pointer-events: none; z-index: 71; transition: background-color 100ms ease, width 100ms ease; }
+      .trackrow:hover::before, .trackrow.resizing-track::before { width: 32px; background: #858b95; }
+      .tracklabel.track-section-start .track-resize-grip,
+      .trackrow.track-section-start::after,
+      .trackrow.track-section-start::before { display: none; }
       .trackrow.drop-target-track { background-color: rgba(64,149,227,.17); box-shadow: inset 0 0 0 2px #55aaff; }
       .trackrow.drop-invalid-track { background-color: rgba(220,70,70,.1); box-shadow: inset 0 0 0 2px rgba(235,90,90,.7); }
       .tracklabel.track-family-start[data-track-kind="audio"] { border-top: 3px solid #090a0b; }
       .tracklabel.track-family-start[data-track-kind="video"] { border-top: 2px solid #55575e; }
       .clip.track-drag-preview { will-change: translate; }
       .clip { top: 3px; height: calc(var(--timeline-track-h) - 7px); padding: 5px 7px; border-radius: 2px; border: 1px solid #101113; box-shadow: inset 0 0 0 1px rgba(255,255,255,.10); font-size: 11px; }
-      .clip.video { background:#477da2; }.clip.audio{background:#123b2d}.clip.image{background:#477a9d}.clip.text{background:#816b3f}.clip.caption{background:#76556f}
+      .clip.video { background:#477da2; }.clip.audio{background:#478f68}.clip.image{background:#477a9d}.clip.text{background:#816b3f}.clip.caption{background:#76556f}
       .clip.selected { outline:1px solid #73c9ff;outline-offset:-1px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.35),0 0 0 1px #090a0b; }
       .clip.compound-member { border-top-color:#f0f0f1;border-bottom-color:#f0f0f1; }
       .trim-handle { width: 14px; background: transparent; }
@@ -4294,7 +4320,7 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
       .trim-handle.end::after { right: 2px; }
       .clip:hover .trim-handle::after, .clip.selected .trim-handle::after { background: rgba(255,255,255,.82); }
       .timeline.drag .clip { cursor: grabbing; }
-      .playhead { width: 2px; background: #ff4d45; z-index: 80; box-shadow: 0 0 0 1px rgba(70,0,0,.45), 0 0 6px rgba(255,77,69,.6); }
+      .playhead { width: 1px; background: #ff514a; z-index: 80; box-shadow: 0 0 2px rgba(255,77,69,.42); }
       .playhead:before { left: -6px; border-left-width: 7px; border-right-width: 7px; border-top: 10px solid #ff4d45; filter: drop-shadow(0 1px 1px #000); }
       .zoom { accent-color: #8d8f94; }
       @media (max-height: 780px) { :root { --timeline: 310px; --timeline-track-h: 48px; } }
@@ -14133,6 +14159,8 @@ function rulerTickPlan(zoom) {
           .map((key, orderIndex) => {
             const meta = trackInfo(key),
               familyStart = orderIndex === 0 || trackInfo(state.trackOrder[orderIndex - 1]).kind !== meta.kind,
+              reviewCaptionGroupStart = key === "review" && state.trackOrder[orderIndex + 1] === "caption",
+              reviewCaptionGroupEnd = key === "caption" && state.trackOrder[orderIndex - 1] === "review",
               visible = state.trackVisibility[key] !== false,
               locked = isTrackLocked(key),
               soloed = !!state.trackSolo?.[key],
@@ -14151,7 +14179,7 @@ function rulerTickPlan(zoom) {
             const labelTitle = key === "review"
               ? "待处理片段：点击试听，Alt+点击替换为识别口播，Ctrl+点击保留，Shift+点击删除"
               : trackName;
-            return `<div class="tracklabel ${escapeHtml(meta.className)}${familyStart ? " track-family-start" : ""}" draggable="true" data-track-key="${escapeHtml(key)}" data-track-kind="${escapeHtml(meta.kind)}"><div class="track-header-bar"><span class="trackhandle" title="拖动调整轨道顺序">⠿</span><span class="track-badge" title="${escapeHtml(labelTitle)}">${escapeHtml(badge)}</span><div class="track-controls"><button class="tracklock ${locked ? "on" : ""}" data-lock-track="${escapeHtml(key)}" title="${locked ? "解锁轨道" : "锁定轨道"}">${locked ? "■" : "□"}</button><button class="tracksync ${isTrackSyncLocked(key) ? "on" : ""}" data-sync-track="${escapeHtml(key)}" aria-pressed="${isTrackSyncLocked(key)}" title="同步锁：决定其他轨道波纹剪辑时此轨是否同步调整">↔</button><button class="trackauto ${autoSelected ? "on" : ""}" data-auto-track="${escapeHtml(key)}" title="自动轨道选择器：决定选择后方、全选等命令是否作用于此轨">⇥</button>${audioTrack ? `<button class="tracksolo ${soloed ? "on" : ""}" data-solo-track="${escapeHtml(key)}" title="独听此轨">S</button><button class="trackmute ${muted ? "on" : ""}" data-mute-track="${escapeHtml(key)}" title="静音此轨">M</button><span class="audio-channel-tag">2.0</span>` : ""}<button class="visibility ${visible ? "" : "off"}" data-toggle-track="${escapeHtml(key)}" title="${visible ? "关闭轨道" : "显示轨道"}">${symbol}</button>${remove}</div></div><div class="track-info-body"><span class="track-title" title="${escapeHtml(labelTitle)}">${escapeHtml(trackName)}</span><span class="track-clip-count">${clipCount}</span></div><span class="track-resize-grip" data-resize-track="${escapeHtml(key)}" title="按住拖动自由调节轨道高度；双击恢复默认高度"></span></div>`;
+            return `<div class="tracklabel ${escapeHtml(meta.className)}${familyStart ? " track-family-start" : ""}${reviewCaptionGroupStart ? " track-section-start" : ""}${reviewCaptionGroupEnd ? " track-section-end" : ""}" draggable="true" data-track-key="${escapeHtml(key)}" data-track-kind="${escapeHtml(meta.kind)}"><div class="track-header-bar"><span class="trackhandle" title="拖动调整轨道顺序">⠿</span><span class="track-badge" title="${escapeHtml(labelTitle)}">${escapeHtml(badge)}</span><div class="track-controls"><button class="tracklock ${locked ? "on" : ""}" data-lock-track="${escapeHtml(key)}" title="${locked ? "解锁轨道" : "锁定轨道"}">${locked ? "■" : "□"}</button><button class="tracksync ${isTrackSyncLocked(key) ? "on" : ""}" data-sync-track="${escapeHtml(key)}" aria-pressed="${isTrackSyncLocked(key)}" title="同步锁：决定其他轨道波纹剪辑时此轨是否同步调整">↔</button><button class="trackauto ${autoSelected ? "on" : ""}" data-auto-track="${escapeHtml(key)}" title="自动轨道选择器：决定选择后方、全选等命令是否作用于此轨">⇥</button>${audioTrack ? `<button class="tracksolo ${soloed ? "on" : ""}" data-solo-track="${escapeHtml(key)}" title="独听此轨">S</button><button class="trackmute ${muted ? "on" : ""}" data-mute-track="${escapeHtml(key)}" title="静音此轨">M</button><span class="audio-channel-tag">2.0</span>` : ""}<button class="visibility ${visible ? "" : "off"}" data-toggle-track="${escapeHtml(key)}" title="${visible ? "关闭轨道" : "显示轨道"}">${symbol}</button>${remove}</div></div><div class="track-info-body"><span class="track-title" title="${escapeHtml(labelTitle)}">${escapeHtml(trackName)}</span><span class="track-clip-count">${clipCount}</span></div><span class="track-resize-grip" data-resize-track="${escapeHtml(key)}" title="按住拖动自由调节轨道高度；双击恢复默认高度"></span></div>`;
           })
           .join("");
         content.querySelectorAll(".trackrow[data-track-key]").forEach((row) => {
@@ -14177,6 +14205,8 @@ function rulerTickPlan(zoom) {
           const familyStart = orderIndex === 0 || trackInfo(state.trackOrder[orderIndex - 1]).kind !== trackInfo(key).kind;
           row.dataset.trackKind = trackInfo(key).kind;
           row.classList.toggle("track-family-start", familyStart);
+          row.classList.toggle("track-section-start", key === "review" && state.trackOrder[orderIndex + 1] === "caption");
+          row.classList.toggle("track-section-end", key === "caption" && state.trackOrder[orderIndex - 1] === "review");
           const rowHeight = Math.max(56, Number(state.trackHeights?.[key] || 68));
           row.style.height = `${rowHeight}px`;
           if (tail) content.insertBefore(row, tail);
@@ -22694,6 +22724,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
         if (!row || event.target.closest(".clip")) return;
         const rect = row.getBoundingClientRect();
         if (event.clientY < rect.bottom - 7) return;
+        if (row.classList.contains("track-section-start")) return;
         const key = row.dataset.trackKey;
         startTrackHeightDrag(
           event,

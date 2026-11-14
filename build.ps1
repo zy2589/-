@@ -243,7 +243,7 @@ try {
         'for (const decoder of [$("video"), $("videoAlt")])',
         '? getActiveVideo()',
         'ctx.strokeStyle = "#ffffff"',
-        'background-color: #123b2d',
+        'background-color: #478f68',
         'data-handle="n"',
         'data-handle="e"',
         'data-handle="s"',
@@ -278,7 +278,10 @@ if ($PageSwitchStart -lt 0 -or $PageSwitchEnd -le $PageSwitchStart) {
 $PageSwitchSourceText = $UiHostSourceText.Substring($PageSwitchStart, $PageSwitchEnd - $PageSwitchStart)
 foreach ($RequiredPageSwitchToken in @(
     'target.tkraise()',
-    'self.root.attributes("-topmost", name == "download")',
+    'self._set_download_topmost(name == "download")',
+    'def _set_download_topmost(',
+    'SetWindowPos',
+    'NOACTIVATE',
     'self.page_body = target',
     'set_view_active'
 )) {
