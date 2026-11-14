@@ -278,7 +278,11 @@ if ($PageSwitchStart -lt 0 -or $PageSwitchEnd -le $PageSwitchStart) {
 $PageSwitchSourceText = $UiHostSourceText.Substring($PageSwitchStart, $PageSwitchEnd - $PageSwitchStart)
 foreach ($RequiredPageSwitchToken in @(
     'target.tkraise()',
-    'self._set_download_topmost(name == "download")',
+    'self._queue_download_topmost(name == "download")',
+    'self._set_download_topmost(active)',
+    'self._page_transition_generation += 1',
+    'if generation != self._page_transition_generation',
+    'self.root.after_idle(apply_if_current)',
     'def _set_download_topmost(',
     'get_ancestor(widget_hwnd, 2)',
     'SetWindowPos',
@@ -304,6 +308,9 @@ foreach ($RemovedPageSwitchToken in @('grid_remove()', 'RedrawWindow', 'embedded
 if (!$UiHostSourceText.Contains('for frame in self.page_frames.values():') -or
     !$UiHostSourceText.Contains('frame.grid(row=0, column=0, sticky="nsew")')) {
     throw '区域页面未在初始化时常驻映射，已中止打包。'
+}
+if ($PageSwitchSourceText.Contains('self.root.update_idletasks()')) {
+    throw '页面切换仍同步强制刷新 Tk 绘制队列，已中止打包。'
 }
 $DownloaderAppSourceText = [IO.File]::ReadAllText((Join-Path $Root 'core\downloader_runtime\app.py'))
 $DownloadMethodStart = $DownloaderAppSourceText.IndexOf('    def _download(self, key, url, cancel, settings):')

@@ -71,6 +71,7 @@ class ClipAssistant:
         self.root.withdraw()
         self._startup_window_revealed = False
         self._startup_window_started_at = time.monotonic()
+        self._page_transition_generation = 0
         self.root.title("剪辑助手")
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
@@ -457,15 +458,28 @@ class ClipAssistant:
         # frame; this avoids painting an intermediate, partially updated page.
         if page_changed:
             target.tkraise()
-            # Flush Tk's pending geometry/paint work for the chosen page
-            # before the native window is restacked without a repaint.
-            self.root.update_idletasks()
-        # The destination must be the active surface before Windows changes
-        # the top-level Z group. Otherwise the old page is briefly presented
-        # during the HWND restack, which looks like a full-page flash.
+            # Let Tk coalesce its normal paint work. Forcing update_idletasks()
+            # here synchronously repaints the whole widget tree between the
+            # Tk page restack and the native WebView2 child surface, exposing
+            # an intermediate frame as a visible flash.
+            self._queue_download_topmost(name == "download")
+
+    def _queue_download_topmost(self, active: bool) -> None:
+        """Apply the download-only z-order after the current page paint settles."""
+        self._page_transition_generation += 1
+        generation = self._page_transition_generation
+
+        def apply_if_current():
+            if generation != self._page_transition_generation:
+                return
+            try:
+                self._set_download_topmost(active)
+            except (OSError, AttributeError, tk.TclError):
+                pass
+
         try:
-            self._set_download_topmost(name == "download")
-        except (OSError, AttributeError, tk.TclError):
+            self.root.after_idle(apply_if_current)
+        except tk.TclError:
             pass
 
     def _reveal_startup_window_when_ready(self):
