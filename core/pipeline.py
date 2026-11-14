@@ -18,6 +18,7 @@ VIDEO_SUFFIXES = {
     ".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi", ".mpeg", ".mpg",
     ".ts", ".flv", ".wmv", ".3gp", ".mts", ".m2ts", ".ogv", ".vob",
 }
+COMPRESS_SIZE_LIMIT_BYTES = 80 * 1024 * 1024
 
 
 @dataclass
@@ -151,8 +152,6 @@ def _download_files(
     else:
         import yt_dlp
 
-        ffmpeg_dir = resource_dir / "ffmpeg"
-
         def hook(data):
             if cancel.is_set():
                 raise RuntimeError("任务已取消")
@@ -164,13 +163,11 @@ def _download_files(
                 else:
                     progress("下载中")
             elif data.get("status") == "finished":
-                progress("下载完成，准备降噪")
+                progress("下载完成，准备压缩/降噪")
 
         options = {
             "outtmpl": str(target / "%(title).150B [%(id)s].%(ext)s"),
-            "format": "bestvideo*+bestaudio/best",
-            "merge_output_format": "mp4",
-            "ffmpeg_location": str(ffmpeg_dir),
+            "format": "best",
             "noplaylist": True,
             "windowsfilenames": True,
             "overwrites": False,
@@ -228,18 +225,35 @@ def run_task(
         for index, source in enumerate(downloaded, start=1):
             if cancel.is_set():
                 raise RuntimeError("任务已取消")
-            progress(f"正在降噪 {index}/{len(downloaded)}")
-            try:
-                final_source = denoise_video(
-                    source,
-                    strength_percent=strength_percent,
-                    resource_dir=resource_dir,
-                    progress=progress,
-                    cancel=cancel,
-                )
-            except Exception as exc:
-                errors.append(f"{source.name}：{exc}")
-                final_source = source
+            final_source = source
+            if source.stat().st_size > COMPRESS_SIZE_LIMIT_BYTES:
+                progress(f"下载完成，正在压缩 {index}/{len(downloaded)}")
+                try:
+                    from .downloader_runtime.compress_video import transcode_mp4
+
+                    final_source = transcode_mp4(
+                        final_source,
+                        resource_dir=resource_dir,
+                        progress=progress,
+                        cancel=cancel,
+                        remove_source=False,
+                        compress=True,
+                    )
+                except Exception as exc:
+                    errors.append(f"{source.name}：压缩失败：{exc}")
+                    final_source = source
+            if strength_percent > 0:
+                progress(f"下载完成，正在降噪 {index}/{len(downloaded)}")
+                try:
+                    final_source = denoise_video(
+                        final_source,
+                        strength_percent=strength_percent,
+                        resource_dir=resource_dir,
+                        progress=progress,
+                        cancel=cancel,
+                    )
+                except Exception as exc:
+                    errors.append(f"{source.name}：降噪失败：{exc}")
             destination = folder / final_source.name
             if destination.exists():
                 progress(f"同名视频已存在，保留原文件：{destination.name}")
@@ -247,7 +261,7 @@ def run_task(
             shutil.move(str(final_source), str(destination))
             output_files.append(destination)
         if errors:
-            raise RuntimeError("有视频降噪失败，原视频已保留：\n" + "\n".join(errors))
+            raise RuntimeError("有视频处理失败；可用的视频版本已保留：\n" + "\n".join(errors))
         return output_files
     finally:
         shutil.rmtree(stage, ignore_errors=True)

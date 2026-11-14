@@ -245,7 +245,12 @@ if ($PageSwitchStart -lt 0 -or $PageSwitchEnd -le $PageSwitchStart) {
     throw '区域切换代码段缺失，已中止打包。'
 }
 $PageSwitchSourceText = $UiHostSourceText.Substring($PageSwitchStart, $PageSwitchEnd - $PageSwitchStart)
-foreach ($RequiredPageSwitchToken in @('target.tkraise()', 'self.page_body = target', 'set_view_active')) {
+foreach ($RequiredPageSwitchToken in @(
+    'target.tkraise()',
+    'self.root.attributes("-topmost", name == "download")',
+    'self.page_body = target',
+    'set_view_active'
+)) {
     if (!$PageSwitchSourceText.Contains($RequiredPageSwitchToken)) {
         throw "区域常驻切换缺少必要逻辑，已中止打包：$RequiredPageSwitchToken"
     }
@@ -258,6 +263,36 @@ foreach ($RemovedPageSwitchToken in @('grid_remove()', 'RedrawWindow', 'embedded
 if (!$UiHostSourceText.Contains('for frame in self.page_frames.values():') -or
     !$UiHostSourceText.Contains('frame.grid(row=0, column=0, sticky="nsew")')) {
     throw '区域页面未在初始化时常驻映射，已中止打包。'
+}
+$DownloaderAppSourceText = [IO.File]::ReadAllText((Join-Path $Root 'core\downloader_runtime\app.py'))
+$DownloadMethodStart = $DownloaderAppSourceText.IndexOf('    def _download(self, key, url, cancel, settings):')
+$DownloadMethodEnd = $DownloaderAppSourceText.IndexOf('    def cancel(self):', $DownloadMethodStart)
+$DownloadGroupStart = $DownloaderAppSourceText.IndexOf('    def _download_group(self, batch):')
+$DownloadGroupEnd = $DownloaderAppSourceText.IndexOf('    def _download_uncached(', $DownloadGroupStart)
+if ($DownloadMethodStart -lt 0 -or $DownloadMethodEnd -le $DownloadMethodStart -or
+    $DownloadGroupStart -lt 0 -or $DownloadGroupEnd -le $DownloadGroupStart) {
+    throw '下载后处理代码段缺失，已中止打包。'
+}
+$DownloadMethodSourceText = $DownloaderAppSourceText.Substring($DownloadMethodStart, $DownloadMethodEnd - $DownloadMethodStart)
+$DownloadGroupSourceText = $DownloaderAppSourceText.Substring($DownloadGroupStart, $DownloadGroupEnd - $DownloadGroupStart)
+if (!$DownloadMethodSourceText.Contains("'format': 'best'") -or
+    $DownloadMethodSourceText.Contains("'format': 'bv*+ba/b'") -or
+    $DownloadMethodSourceText.Contains('merge_output_format')) {
+    throw '下载阶段仍会合并独立音视频流，已中止打包。'
+}
+$DownloadStageIndex = $DownloadGroupSourceText.IndexOf('self._download(leader_key')
+$CompressionStageIndex = $DownloadGroupSourceText.IndexOf('output = transcode_mp4(')
+$DenoiseStageIndex = $DownloadGroupSourceText.IndexOf('output = denoise_video(')
+if ($DownloadStageIndex -lt 0 -or $CompressionStageIndex -le $DownloadStageIndex -or
+    $DenoiseStageIndex -le $CompressionStageIndex -or
+    !$DownloadGroupSourceText.Contains('source_work.stat().st_size <= COMPRESS_SIZE_LIMIT_BYTES')) {
+    throw '下载后压缩/降噪顺序或压缩阈值异常，已中止打包。'
+}
+$LegacyPipelineSourceText = [IO.File]::ReadAllText((Join-Path $Root 'core\pipeline.py'))
+if (!$LegacyPipelineSourceText.Contains('"format": "best"') -or
+    $LegacyPipelineSourceText.Contains('bestvideo*+bestaudio') -or
+    $LegacyPipelineSourceText.Contains('merge_output_format')) {
+    throw '备用下载流程仍会在下载阶段合并音视频流，已中止打包。'
 }
     $RenderSourceText = [IO.File]::ReadAllText((Join-Path $EngineEditorSource 'media\render.mjs'))
     if (!$RenderSourceText.Contains('const hasMainAudio = !config.noMainVideoSource')) {

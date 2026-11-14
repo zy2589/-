@@ -30,8 +30,8 @@ VIDEO_SUFFIXES = frozenset({'.mp4', '.m4v', '.mov', '.mkv', '.webm', '.avi', '.m
                            '.flv', '.wmv', '.3gp', '.mts', '.m2ts', '.ogv', '.vob'})
 DENOISE_PRESERVED_STATE = '降噪失败（视频已保留）'
 DENOISE_ROW_LABEL = '降噪失败·已保留视频'
-COMPRESS_PRESERVED_STATE = '转码失败（源视频已保留）'
-COMPRESS_ROW_LABEL = '转码失败·源视频已保留'
+COMPRESS_PRESERVED_STATE = '压缩失败（源视频已保留）'
+COMPRESS_ROW_LABEL = '压缩失败·源视频已保留'
 COMPRESS_SIZE_LIMIT_BYTES = 80 * 1024 * 1024
 DEFAULT_CANVA_URL = 'https://www.canva.com/design/DAHRA0BP3kM/2iA1F04Kv1rmVAPeaFgF7w/edit'
 
@@ -880,7 +880,7 @@ class App:
         row = ttk.Frame(footer, style='Toolbar.TFrame')
         row.pack(fill='x')
         self.count = tk.StringVar(value='3')
-        self.quality = tk.StringVar(value='最佳（需要 FFmpeg）')
+        self.quality = tk.StringVar(value='最佳原始流（下载后处理）')
         self.cookies = tk.StringVar()
         self.cookie_temp = None
         self.start_button = ttk.Button(row, text='开始下载', command=self.start, style='Primary.TButton')
@@ -2091,7 +2091,7 @@ class App:
         return self._download_uncached(key, url, cancel, settings)
 
     def _download_group(self, batch):
-        """Download each link once; transcode before denoising, then share finished MP4s."""
+        """Download each link once, then compress large files and denoise as requested."""
         leader_key, url, cancel, leader_settings = batch[0]
         keys = [job[0] for job in batch]
         output_folders = {job[0]: Path(job[3][0]) for job in batch}
@@ -2116,7 +2116,7 @@ class App:
 
             retry_only_compression = bool(retry_compress_sources) and not retry_sources
             # Keep processing folders out of the user's download directory. If
-            # Windows temporarily holds a transcoder file open during cleanup,
+            # Windows temporarily holds a compression output open during cleanup,
             # a leftover work folder must never look like the final download.
             with tempfile.TemporaryDirectory(prefix='clipassistant-batch-') as temporary:
                 work_root = Path(temporary)
@@ -2129,7 +2129,7 @@ class App:
                             sources_by_name.setdefault(source.name.casefold(), source)
                     missing = sorted(expected_names - set(sources_by_name))
                     if missing:
-                        task = '转码' if retry_only_compression else '降噪'
+                        task = '压缩' if retry_only_compression else '降噪'
                         raise RuntimeError(f'待重试{task}的视频已移动或删除：\n' + '\n'.join(missing))
                     raw_sources = []
                     for index, source in enumerate(sources_by_name.values(), start=1):
@@ -2166,21 +2166,24 @@ class App:
                         shutil.copy2(source, source_work)
                         output = source_work
 
-                        # New downloads are compressed/transcoded first. A failed
-                        # denoise then leaves this validated MP4 as the deliverable.
-                        # Denoise retries already start from that preserved MP4;
-                        # compression retries still need the transcode step only.
-                        needs_transcode = (not retry_sources) or retry_only_compression
-                        small_input = (needs_transcode and
-                                       source_work.stat().st_size <= COMPRESS_SIZE_LIMIT_BYTES)
+                        # Download first without merging separate streams. Only
+                        # compress a new file when it exceeds the size limit;
+                        # denoise retries already point to the preserved source.
+                        small_input = (
+                            not retry_sources and not retry_only_compression and
+                            source_work.stat().st_size <= COMPRESS_SIZE_LIMIT_BYTES
+                        )
+                        needs_compression = (
+                            retry_only_compression or
+                            (not retry_sources and not small_input)
+                        )
                         if small_input:
                             skipped_compression.append(source.name.casefold())
                             for key in strength_keys:
-                                self.events.put((key, '处理中', f'文件不超过 80 MB，跳过压缩并转码 MP4 {index}/{len(raw_sources)}'))
-                        if needs_transcode:
+                                self.events.put((key, '处理中', f'文件不超过 80 MB，跳过压缩 {index}/{len(raw_sources)}'))
+                        if needs_compression:
                             for key in strength_keys:
-                                if not small_input:
-                                    self.events.put((key, '处理中', f'H.264 压缩转码 {index}/{len(raw_sources)} · x264 CRF {23}'))
+                                self.events.put((key, '处理中', f'H.264 压缩 {index}/{len(raw_sources)} · x264 CRF {23}'))
                             try:
                                 output = transcode_mp4(
                                     output,
@@ -2189,7 +2192,7 @@ class App:
                                         [self.events.put((key, '处理中', detail)) for key in group_keys],
                                     cancel=cancel,
                                     remove_source=True,
-                                    compress=not small_input,
+                                    compress=True,
                                 )
                             except Exception as exc:
                                 if cancel.is_set():
@@ -2219,9 +2222,9 @@ class App:
                                     raise
                                 denoise_errors[source.name.casefold()] = str(exc)
                                 denoise_preserved_as[source.name.casefold()] = (
-                                    'MP4 转码版（不超过 80 MB，跳过压缩）'
+                                    '未压缩的原视频（不超过 80 MB）'
                                     if source.name.casefold() in skipped_compression
-                                    else '压缩转码后的 MP4'
+                                    else '压缩后的 MP4'
                                 )
                         result_files[source.name.casefold()] = (source, output)
 
@@ -2254,10 +2257,10 @@ class App:
                         elif denoise_errors and compression_errors:
                             details = ('降噪失败：\n' + '\n'.join(
                                 f'{Path(name).name}：{error}' for name, error in denoise_errors.items()) +
-                                '\n转码失败：\n' + '\n'.join(
+                                '\n压缩失败：\n' + '\n'.join(
                                     f'{Path(name).name}：{error}' for name, error in compression_errors.items()))
                             self.events.put((key, '失败',
-                                             f'同一批视频中有降噪和转码失败项；已分别保留可恢复的视频。\n{details}'))
+                                             f'同一批视频中有降噪和压缩失败项；已分别保留可恢复的视频。\n{details}'))
                         elif denoise_errors:
                             details = '\n'.join(
                                 f'{Path(name).name}：保留{denoise_preserved_as.get(name, "视频")}; 降噪错误：{error}'
@@ -2268,30 +2271,25 @@ class App:
                             details = '\n'.join(f'{Path(name).name}：{error}'
                                                 for name, error in compression_errors.items())
                             self.events.put((key, COMPRESS_PRESERVED_STATE,
-                                             f'转码失败，未转码的视频已保留：\n{details}'))
+                                             f'压缩失败，原视频已保留：\n{details}'))
                         else:
                             if retry_only_compression:
-                                label = '已重试转码'
+                                label = '已重试压缩'
                             elif strength == 0:
-                                label = '同链接已复用 MP4' if len(batch) > 1 else '已转码为 MP4'
+                                label = '已压缩为 MP4'
                             elif len(strength_batch) > 1:
-                                label = '同链接已复用降噪转码成片'
+                                label = '同链接已复用压缩降噪成片'
                             elif retry_sources:
-                                label = '已重试降噪并转码'
+                                label = '已重试降噪'
                             else:
-                                label = '已降噪并转码为 MP4'
-                            if skipped_compression and len(skipped_compression) == len(raw_sources):
-                                if retry_only_compression or strength == 0:
-                                    label = '全部视频不超过 80 MB，跳过压缩并已转码 MP4'
+                                label = '已压缩并降噪为 MP4'
+                            if skipped_compression:
+                                if len(skipped_compression) == len(raw_sources):
+                                    label = ('已下载（文件不超过 80 MB，跳过压缩）'
+                                             if strength == 0 else
+                                             '已降噪（文件不超过 80 MB，跳过压缩）')
                                 else:
-                                    label = '已完成降噪；全部视频不超过 80 MB，跳过压缩并已转码 MP4'
-                            elif skipped_compression:
-                                if retry_only_compression:
-                                    label += f'；{len(skipped_compression)} 个不超过 80 MB 的视频跳过压缩并已转码 MP4'
-                                elif strength == 0:
-                                    label = f'部分视频不超过 80 MB，跳过压缩并已转码 MP4（{len(skipped_compression)} 个）'
-                                else:
-                                    label = f'已完成降噪；{len(skipped_compression)} 个不超过 80 MB 的视频跳过压缩并已转码 MP4'
+                                    label += f'；{len(skipped_compression)} 个不超过 80 MB 的文件跳过压缩'
                             self.events.put((key, '完成', f'100% · {len(raw_sources)} 个视频{label}'))
                         terminal_keys.add(key)
             return True
@@ -2507,9 +2505,11 @@ class App:
                         detail = f'{min(99, int(done * 100 / total))}%' if total else '—%（总大小未知）'
                         update('下载中', detail)
                     elif data['status'] == 'finished':
-                        update('处理中', '100% · 合并/保存')
-                best = quality.startswith('最佳') and shutil.which('ffmpeg')
-                opts = {'outtmpl': str(path / '%(title).150B [%(id)s].%(ext)s'), 'format': 'bv*+ba/b' if best else 'best', 'noplaylist': True, 'windowsfilenames': True, 'overwrites': False, 'continuedl': True, 'retries': 3, 'socket_timeout': 30, 'max_filesize': 2 * 1024 * 1024 * 1024, 'progress_hooks': [hook], 'quiet': True, 'no_warnings': True}
+                        update('处理中', '100% · 下载完成，准备后处理')
+                # Download one ready-to-play source stream. Do not download
+                # separate audio/video streams that require an FFmpeg merge;
+                # compression and denoising happen after the download returns.
+                opts = {'outtmpl': str(path / '%(title).150B [%(id)s].%(ext)s'), 'format': 'best', 'noplaylist': True, 'windowsfilenames': True, 'overwrites': False, 'continuedl': True, 'retries': 3, 'socket_timeout': 30, 'max_filesize': 2 * 1024 * 1024 * 1024, 'progress_hooks': [hook], 'quiet': True, 'no_warnings': True}
                 if cookie:
                     opts['cookiefile'] = cookie
                 with yt_dlp.YoutubeDL(opts) as downloader:
@@ -2570,7 +2570,7 @@ class App:
                         if denoise_failed:
                             summary.append(f'{len(denoise_failed)} 项降噪失败，已保留对应视频版本')
                         if compression_failed:
-                            summary.append(f'{len(compression_failed)} 项转码失败，待转码源视频已保留')
+                            summary.append(f'{len(compression_failed)} 项压缩失败，源视频已保留')
                         self.status.config(text='下载处理已结束；'+'；'.join(summary)+'。可查看失败原因或重试。')
                     elif all_resolved:
                         if hasattr(self, 'clear_on_finish') and self.clear_on_finish.get():
@@ -2605,7 +2605,7 @@ class App:
                         if denoise_failed:
                             status_text+=f'另有 {len(denoise_failed)} 项降噪失败，已保留对应视频版本。'
                         if compression_failed:
-                            status_text+=f'另有 {len(compression_failed)} 项转码失败，待转码源视频已保留。'
+                            status_text+=f'另有 {len(compression_failed)} 项压缩失败，源视频已保留。'
                         warnings=getattr(self,'batch_warnings',[])
                         if warnings:
                             status_text+='\n标题图保存失败（视频下载已继续）：\n'+'\n'.join(warnings)

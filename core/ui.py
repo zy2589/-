@@ -399,6 +399,10 @@ class ClipAssistant:
         # existing widgets and media/WebView state instead of remapping and
         # repainting the full surface.
         target.tkraise()
+        try:
+            self.root.attributes("-topmost", name == "download")
+        except tk.TclError:
+            pass
         if name != "projects" and self.embedded_editor and self.embedded_editor.is_running():
             # Release editor keyboard focus while its native child stays alive
             # behind the selected page.
