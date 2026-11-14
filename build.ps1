@@ -146,10 +146,13 @@ New-Item -ItemType Directory -Force -Path $EngineEditor, $EngineMedia | Out-Null
 # do not read another installation or another application's data directory.
 $EngineEditorSource = Join-Path $EngineEditor 'src'
 $RuntimeAssetStage = Join-Path $EngineEditor 'assets'
+$SourceAssetStage = Join-Path $EngineEditorSource 'assets'
 New-Item -ItemType Directory -Force -Path $EngineEditorSource, $RuntimeAssetStage | Out-Null
 Copy-Item -Path (Join-Path $EditorRuntimeCodeSource '*') -Destination $EngineEditorSource -Recurse -Force
 Copy-Item -Path (Join-Path $EditorRuntimeAssets '*') -Destination $RuntimeAssetStage -Recurse -Force
 foreach ($PrivateSeedPath in @(
+    (Join-Path $SourceAssetStage 'credential-seed'),
+    (Join-Path $SourceAssetStage 'user-seed'),
     (Join-Path $RuntimeAssetStage 'credential-seed'),
     (Join-Path $RuntimeAssetStage 'user-seed')
 )) {
