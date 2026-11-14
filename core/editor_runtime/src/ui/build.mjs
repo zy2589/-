@@ -191,6 +191,19 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
     '画中画必须能选中、分别移动框与内容、设置描边颜色和宽度，且选中提示不能覆盖实际描边。',
   );
   requireBuildCheck(
+    stageScript.includes('function timelinePreviewSceneAt(time = state.currentTime)') &&
+      stageScript.includes('window.timelinePreviewSceneAt = timelinePreviewSceneAt') &&
+      stageScript.includes('const previewScene = timelinePreviewSceneAt(state.currentTime)') &&
+      spliceScript.includes('window.timelinePreviewSceneAt?.(state.currentTime)') &&
+      stageScript.includes('t < Number(item.end || 0)') &&
+      stageScript.includes('if (!timelineVideoLayers.length && layerSeekHold) layerSeekHold.hidden = true') &&
+      stageScript.includes('timelineVideoLayers.some((item) => !item.missing') &&
+      stageScript.includes('const onTimeline = state.currentTime >= item.start && state.currentTime < item.end') &&
+      spliceScript.includes('pipEditTarget === "frame"') &&
+      spliceScript.includes('window.setSpliceEditTarget = setPipEditTarget'),
+    '预览与画中画命中测试必须共用当前时间场景；空档不能残留上一帧，框和内容必须各自使用明确的编辑目标。',
+  );
+  requireBuildCheck(
     stagePreview.includes('id="previewClipLayer"') &&
       stagePreview.indexOf('id="previewClipLayer"') < stagePreview.indexOf('id="selectionBox"') &&
       countMatches(stagePreview, /data-handle="/g) === 8 &&

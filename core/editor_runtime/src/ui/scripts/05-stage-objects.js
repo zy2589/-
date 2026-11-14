@@ -524,6 +524,45 @@ async function placeLibraryAsset(
         if (!covering.length) return null;
         return covering.sort((left, right) => Number(right.start) - Number(left.start))[0];
       }
+      function timelinePreviewSceneAt(time = state.currentTime) {
+        const t = Number(time || 0);
+        const activeMainClip = mainClips().find((clip) => t >= Number(clip.start || 0) && t < Number(clip.end || 0)) || null;
+        const activeMainTrack = activeMainClip ? state.mainVideoTrackMap?.[activeMainClip.id] || "video" : "video";
+        const preparedVideoLayers = previewVideoClips(state.videoLayers, t, {
+          visible: (track) => state.trackVisibility[track] !== false,
+          rate: Number(state.audio.speed || 1),
+          lead: 2 * Math.max(1, Number(state.playbackSpeed || 1)),
+        }).filter((item) => !item.missing && !!(item.url || item.path));
+        const timelineVideoLayers = preparedVideoLayers.filter(
+          (item) => t >= Number(item.start || 0) && t < Number(item.end || 0),
+        );
+        const activeImages = state.images.filter(
+          (item) => t >= Number(item.start || 0) && t < Number(item.end || 0) &&
+            state.trackVisibility[item.trackId] !== false && !item.missing && !!(item.url || item.path),
+        );
+        const activeTitles = state.titles.filter(
+          (item) => t >= Number(item.start || 0) && t < Number(item.end || 0) &&
+            state.trackVisibility[item.trackId] !== false,
+        );
+        const caption = captionAtTime(t);
+        const review = state.reviewCaptions.find(
+          (item) => t >= Number(item.start || 0) && t < Number(item.end || 0),
+        ) || null;
+        return {
+          time: t,
+          activeMainClip,
+          activeMainTrack,
+          duplicateMainHidden: activeMainClip && mainVideoSuppressedByDuplicateLayer(activeMainClip, activeMainTrack),
+          preparedVideoLayers,
+          timelineVideoLayers,
+          activeImages,
+          activeTitles,
+          caption,
+          review,
+          visibleVideoLayers: timelineVideoLayers.filter((item) => state.trackVisibility[item.trackId] !== false),
+        };
+      }
+      window.timelinePreviewSceneAt = timelinePreviewSceneAt;
       function auxiliaryCaptionOffset(caption) {
         if (!caption) return 0;
         const style = state.captionStyle || {};
@@ -564,45 +603,36 @@ async function placeLibraryAsset(
         if (liveTime != null) state.currentTime = liveTime;
         ensureIndependentTransforms();
         const layer = $("visualLayer");
-        const activeMainClip = mainClips().find(
-          (clip) => state.currentTime >= clip.start && state.currentTime < clip.end,
-        );
-        const activeMainTrack = activeMainClip
-          ? state.mainVideoTrackMap?.[activeMainClip.id] || "video"
-          : "video";
-        const duplicateMainHidden = activeMainClip && mainVideoSuppressedByDuplicateLayer(activeMainClip, activeMainTrack);
-        const activeVideoLayers = previewVideoClips(state.videoLayers,state.currentTime,{visible:track=>state.trackVisibility[track]!==false,rate:Number(state.audio.speed||1),lead:2*Math.max(1,Number(state.playbackSpeed||1))})
-          .filter(item => !item.missing && !!(item.url || item.path)),
-          activeImages = state.images
-            .filter(
-              (item) =>
-                state.currentTime >= item.start && state.currentTime < item.end,
-            )
-            .filter((item) => state.trackVisibility[item.trackId] !== false),
-          activeTitles = state.titles
-            .filter(
-              (item) =>
-                state.currentTime >= item.start && state.currentTime < item.end,
-            )
-            .filter((item) => state.trackVisibility[item.trackId] !== false),
-          caption = captionAtTime(state.currentTime),
-          review = state.reviewCaptions.find(
-            (item) =>
-              state.currentTime >= item.start && state.currentTime < item.end,
-          ),
-          sceneKey = JSON.stringify({
+        const previewScene = timelinePreviewSceneAt(state.currentTime);
+        const {
+          activeMainClip,
+          activeMainTrack,
+          duplicateMainHidden,
+          preparedVideoLayers: activeVideoLayers,
+          timelineVideoLayers,
+          activeImages,
+          activeTitles,
+          caption,
+          review,
+        } = previewScene;
+        const sceneKey = JSON.stringify({
             main: [activeMainClip?.id || "", state.video?.url || state.video?.path || "", !!state.video?.missing, activeMainTrack, state.trackVisibility[activeMainTrack] !== false],
-            videos: activeVideoLayers.map((item) => {
-              const decoder = layer.querySelector(`.layer-video-decoder[data-id="${item.id}"]`);
-              return [item.id, state.currentTime >= item.start, !!decoder?.seeking, Number(decoder?.readyState || 0) >= 2];
-            }),
+            // Readiness and `seeking` change while a frame is decoding. They
+            // are transport state, not scene structure: including them here
+            // recreated every visual object during playback and caused visible
+            // stutter. Keep preloaded standby decoders out of the composition
+            // key; the cached path still syncs them for frame-accurate entry.
+            videos: previewScene.visibleVideoLayers.map((item) => [item.id, item.url || item.path || "", item.trackId]),
             images: activeImages.map((item) => item.id),
             titles: activeTitles.map((item) => item.id),
             caption: caption?.id || "",
             review: review?.id || "",
             selected: selectionKey(state.selected.type, state.selected.id),
           });
-        if (!activeVideoLayers.length && layerSeekHold) layerSeekHold.hidden = true;
+        // `activeVideoLayers` also contains silent preloaded standby clips.
+        // They must never keep an outgoing frame visible in the gap before
+        // their own timeline start.
+        if (!timelineVideoLayers.length && layerSeekHold) layerSeekHold.hidden = true;
         if (!force && sceneKey === previewSceneKey) {
           for (const item of activeVideoLayers)
             syncLayerVideoElement(
@@ -650,7 +680,7 @@ async function placeLibraryAsset(
         const video = getActiveVideo();
         const hasPreviewVisual =
           (!!activeMainClip && state.trackVisibility[activeMainTrack] !== false && !state.video?.missing && !!(state.video?.url || state.video?.path)) ||
-          activeVideoLayers.some((item) => !item.missing && !!(item.url || item.path)) ||
+          timelineVideoLayers.some((item) => !item.missing && !!(item.url || item.path)) ||
           activeImages.some((item) => !item.missing && !!(item.url || item.path)) ||
           activeTitles.length > 0 || !!caption || !!review;
         $("stage").classList.toggle("empty", !hasPreviewVisual);

@@ -270,6 +270,21 @@ function scaleTimelineClipGeometry(ratio) {
           $("selectionBox").style.transform = spliceStyle?.region ? "none" : transform;
           if (objectDrag.widthResize)
             $("selectionBox").style.width = `${objectDrag.obj.width * (fw / state.width)}px`;
+          if (spliceStyle?.region && window.spliceSelectionMode?.({
+            type: state.selected.type === "video" ? "main" : "layer",
+            clip: objectDrag.obj,
+            settings: objectDrag.obj,
+            media: state.selected.type === "video" ? state.video : objectDrag.obj,
+          }) === "content") {
+            // The handles follow the inner media bounds while its transform
+            // changes; the PIP frame remains fixed in Layout mode.
+            const scale = Math.round(Number(objectDrag.obj.scale || 1) * 100);
+            if ($("objectScale")) $("objectScale").value = String(scale);
+            if ($("scaleOut")) $("scaleOut").textContent = `${scale}%`;
+            if ($("previewZoomRange")) $("previewZoomRange").value = String(clamp(scale, 10, 300));
+            if ($("previewZoomValue")) $("previewZoomValue").textContent = `${scale}%`;
+            window.updateSelectionBox?.();
+          }
         }
         if (["video", "videolayer", "image", "text"].includes(state.selected.type)) {
           window.syncPositionControlValue?.("X", objectDrag.obj.x);
@@ -1761,6 +1776,7 @@ function scaleTimelineClipGeometry(ratio) {
         { passive: false },
       );
       $("objectScale").oninput = (e) => {
+        window.setSpliceEditTarget?.("content", false);
         const targets = mutateSelectedVisualTransforms(
           (object) => { object.scale = Number(e.target.value) / 100; },
         );
@@ -1774,6 +1790,7 @@ function scaleTimelineClipGeometry(ratio) {
         if (state.selected?.type === "caption") scheduleCaptionReflow();
       };
       $("objectX").oninput = (e) => {
+        window.setSpliceEditTarget?.("content", false);
         window.syncPositionControlValue?.("X", e.target.value);
         const targets = mutateSelectedVisualTransforms(
           (object) => { object.x = Number(e.target.value); },
@@ -1784,6 +1801,7 @@ function scaleTimelineClipGeometry(ratio) {
         }
       };
       $("objectY").oninput = (e) => {
+        window.setSpliceEditTarget?.("content", false);
         window.syncPositionControlValue?.("Y", e.target.value);
         const targets = mutateSelectedVisualTransforms(
           (object) => { object.y = Number(e.target.value); },
@@ -1794,16 +1812,19 @@ function scaleTimelineClipGeometry(ratio) {
         }
       };
       $("objectXRange").oninput = (e) => {
+        window.setSpliceEditTarget?.("content", false);
         window.syncPositionControlValue?.("X", e.target.value);
         const targets = mutateSelectedVisualTransforms((object) => { object.x = Number(e.target.value); });
         if (targets.length) { updatePreviewTransformOnly(); queueAutosave(); }
       };
       $("objectYRange").oninput = (e) => {
+        window.setSpliceEditTarget?.("content", false);
         window.syncPositionControlValue?.("Y", e.target.value);
         const targets = mutateSelectedVisualTransforms((object) => { object.y = Number(e.target.value); });
         if (targets.length) { updatePreviewTransformOnly(); queueAutosave(); }
       };
       $("objectRotation").oninput = (e) => {
+        window.setSpliceEditTarget?.("content", false);
         const targets = mutateSelectedVisualTransforms(
           (object) => { object.rotation = Number(e.target.value); },
         );
@@ -1812,6 +1833,7 @@ function scaleTimelineClipGeometry(ratio) {
         updatePreviewTransformOnly();
       };
       $("objectOpacity").oninput = (e) => {
+        window.setSpliceEditTarget?.("content", false);
         const targets = mutateSelectedVisualTransforms(
           (object) => { object.opacity = Number(e.target.value) / 100; },
         );
@@ -1820,6 +1842,7 @@ function scaleTimelineClipGeometry(ratio) {
         updatePreviewTransformOnly();
       };
       $("objectBlendMode").onchange = (e) => {
+        window.setSpliceEditTarget?.("content", false);
         const targets = mutateSelectedVisualTransforms(
           (object) => { object.blendMode = e.target.value; },
         );

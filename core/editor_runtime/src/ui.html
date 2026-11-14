@@ -1326,12 +1326,26 @@ om: 1px solid var(--line);
         position: absolute;
         left: 0;
         right: 0;
-        top: -4px;
-        height: 8px;
+        top: -6px;
+        height: 12px;
         cursor: row-resize;
         z-index: 45;
+        touch-action: none;
       }
       .timeline-resizer:hover { background: rgba(31, 131, 255, .55); }
+      .timeline-resizer::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 4px;
+        width: 44px;
+        height: 3px;
+        border-radius: 2px;
+        background: #55575e;
+        transform: translateX(-50%);
+        pointer-events: none;
+      }
+      .timeline-resizer:hover::after, .timeline-resizer.dragging::after { background: #58a6ff; }
       .timelinebar {
         display: grid;
         grid-template-columns: var(--track-label-width) 5px minmax(0, 1fr);
@@ -2370,7 +2384,13 @@ select option, select optgroup {
 #spliceGuideLayer .splice-guide-region.selected { filter: drop-shadow(0 0 2px #f4d35e); }
 #spliceGuideLayer .splice-guide-region[data-region-kind="pip"] { pointer-events: all; cursor: move; touch-action: none; }
 #spliceGuideLayer .splice-guide-region[data-region-kind="pip"] { fill: rgba(104,169,162,.015); }
+#spliceGuideLayer .splice-guide-region[data-region-kind="pip"].selected { stroke: #f4d35e; }
 #spliceGuideLayer .splice-guide-region.drop-target { stroke: #f4d35e; stroke-width: 6; fill: rgba(244, 211, 94, .12); }
+.selectionbox[data-splice-target="frame"] { border-color: #f4d35e; box-shadow: 0 0 0 1px rgba(20,24,29,.75), 0 0 8px rgba(244,211,94,.28); }
+.selectionbox[data-splice-target="frame"] .resizehandle,
+.selectionbox[data-splice-target="frame"] .rotatehandle { background: #e5b82b; }
+.selectionbox[data-splice-target="content"] { border-color: #4ca6ff; box-shadow: 0 0 0 1px rgba(20,24,29,.75), 0 0 8px rgba(76,166,255,.22); }
+.pip-content-property-hint, .pip-frame-control-hint { margin: 3px 0 10px; line-height: 1.5; color: var(--muted); }
 .stage.splice-layout-active .frame { overflow: hidden !important; }
 .splice-freeze-frame { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; transform-origin: center; z-index: 1.5; pointer-events: none; }
 html, body, * {
@@ -4127,7 +4147,9 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
       }
       .timelinecontent { min-height: 100%; height: max-content; background-color: var(--timeline-lane); }
       .tracklabels { background: #1d1e22; }
-      .tracklabel, .trackrow { min-height: 68px; border-bottom: 1px solid #15161a; box-shadow: inset 0 -1px #35363b; }
+      .tracklabel, .trackrow { min-height: 56px; border-bottom: 1px solid #15161a; box-shadow: inset 0 -1px #35363b; }
+      .track-family-start[data-track-kind="video"] { border-top: 2px solid #55575e; }
+      .track-family-start[data-track-kind="audio"] { border-top: 3px solid #090a0b; box-shadow: inset 0 1px #4c4e54, inset 0 -1px #35363b; }
       .tracklabel {
         position: relative;
         display: flex;
@@ -4209,7 +4231,7 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
         justify-content: center;
         margin-top: 3px;
         flex: 1;
-        min-height: 30px;
+        min-height: 18px;
         overflow: hidden;
       }
       .track-info-body .track-title {
@@ -4231,8 +4253,17 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
       }
       .tracklabel.audio, .tracklabel.video, .tracklabel.image, .tracklabel.caption, .tracklabel.review { border-left:3px solid #77797e; }
       .tracklabel.audio { border-left-color:#176b3a; }
-      .track-resize-grip { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; z-index: 10; cursor: ns-resize; }
+      .track-resize-grip { position: absolute; left: 0; right: 0; bottom: 0; height: 7px; z-index: 70; cursor: ns-resize; touch-action: none; }
       .track-resize-grip:hover, .tracklabel.resizing .track-resize-grip { background: rgba(82, 169, 221, .85); }
+      .trackrow { position: relative; min-height: 56px; }
+      .trackrow::after { content: ""; position: absolute; left: 0; right: 0; bottom: -3px; height: 8px; cursor: ns-resize; touch-action: none; z-index: 70; }
+      .trackrow:hover::after, .trackrow.resizing-track::after { background: rgba(82,169,221,.28); }
+      .trackrow.resizing-track::after { background: rgba(82,169,221,.85); }
+      .trackrow.drop-target-track { background-color: rgba(64,149,227,.17); box-shadow: inset 0 0 0 2px #55aaff; }
+      .trackrow.drop-invalid-track { background-color: rgba(220,70,70,.1); box-shadow: inset 0 0 0 2px rgba(235,90,90,.7); }
+      .tracklabel.track-family-start[data-track-kind="audio"] { border-top: 3px solid #090a0b; }
+      .tracklabel.track-family-start[data-track-kind="video"] { border-top: 2px solid #55575e; }
+      .clip.track-drag-preview { will-change: translate; }
       .clip { top: 3px; height: calc(var(--timeline-track-h) - 7px); padding: 5px 7px; border-radius: 2px; border: 1px solid #101113; box-shadow: inset 0 0 0 1px rgba(255,255,255,.10); font-size: 11px; }
       .clip.video { background:#477da2; }.clip.audio{background:#123b2d}.clip.image{background:#477a9d}.clip.text{background:#816b3f}.clip.caption{background:#76556f}
       .clip.selected { outline:1px solid #73c9ff;outline-offset:-1px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.35),0 0 0 1px #090a0b; }
@@ -4248,8 +4279,19 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
       .zoom { accent-color: #8d8f94; }
       @media (max-height: 780px) { :root { --timeline: 310px; --timeline-track-h: 48px; } }
       /* The startup proportions take precedence over legacy fixed-width breakpoints. */
-      .app { grid-template-rows: var(--top) minmax(0, 1fr) var(--timeline) var(--footer); }
-      .workspace { grid-template-columns: var(--side) 5px minmax(0, 1fr) 5px var(--inspector); min-height: 0; }
+      .app { grid-template-rows: var(--top) minmax(0, 1fr) var(--footer); }
+      .workspace {
+        grid-template-columns: var(--side) 5px minmax(0, 1fr) 5px var(--inspector);
+        grid-template-rows: minmax(220px, 1fr) minmax(160px, var(--timeline));
+        min-height: 0;
+      }
+      .sidebar { grid-column: 1; grid-row: 1; }
+      #leftPanelResizer { grid-column: 2; grid-row: 1; }
+      .previewarea { grid-column: 3; grid-row: 1; min-height: 0; }
+      #rightPanelResizer { grid-column: 4; grid-row: 1 / 3; }
+      .inspector { grid-column: 5; grid-row: 1 / 3; min-height: 0; }
+      .timeline { grid-column: 1 / 4; grid-row: 2; min-height: 0; }
+      .appfooter { grid-column: 1 / -1; grid-row: 3; }
     </style>
   </head>
   <body>
@@ -4794,6 +4836,7 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
             <div class="sidepage active" id="inspect-basic">
               <div class="inspectsection">
                 <h3 id="selectionTitle">视频属性</h3>
+                <p class="small pip-content-property-hint" id="pipContentPropertyHint" hidden>这些属性只调整画中画框内的视频或图片。外框大小和位置请在“布局”页调整。</p>
                 <div class="field">
                   <div class="fieldhead">
                     <span>等比例缩放</span><output id="scaleOut">100%</output>
@@ -5099,6 +5142,7 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
               <label class="field splice-control"><span class="small">画中画外框大小</span><div class="splice-range-row"><input id="splicePipScaleRange" type="range" min="20" max="250" step="1" value="100"><output id="splicePipScaleValue">100%</output></div></label>
               <label class="field splice-control"><span class="small">外框位置 X</span><div class="splice-range-row"><input id="splicePipXRange" type="range" min="0" max="1000" step="1" value="580"><output id="splicePipXValue">58.0%</output></div></label>
               <label class="field splice-control"><span class="small">外框位置 Y</span><div class="splice-range-row"><input id="splicePipYRange" type="range" min="0" max="1000" step="1" value="50"><output id="splicePipYValue">5.0%</output></div></label>
+              <p class="small pip-frame-control-hint" id="splicePipFrameHint" hidden>这里的滑块和黄色选框只调整画中画外框；框内素材请到“属性”页调整。</p>
               <div class="splice-actions"><button class="btn" id="spliceApplyLayout" type="button">应用布局</button><span class="small" id="spliceHint">布局轨道会与现有时间轴、预览和导出同步。</span></div>
               </details>
             </div>
@@ -5472,8 +5516,6 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
             
           </div>
         </aside>
-      </section>
-      
 <section class="timeline" id="timeline" data-drop-zone="timeline">
         <div class="timeline-resizer" id="timelineResizer"></div>
         <div class="timelinebar">
@@ -5658,6 +5700,7 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
             </div>
           </div>
         </div>
+      </section>
       </section>
       
 <footer class="appfooter"><span>剪辑助手</span><span class="footer-separator">·</span><span>本地专业剪辑工作台</span></footer>
@@ -6619,9 +6662,10 @@ function captionMeaningContext(captions, review) {
           sideMin, Math.max(sideMin, w - inspectorMin - previewMin - 10)));
         const inspector = Math.round(bound(desired("inspector", w * 300 / 1982),
           inspectorMin, Math.max(inspectorMin, w - side - previewMin - 10)));
-        const availableHeight = Math.max(120, h - 50 - 24);
-        const timelineMin = Math.min(220, availableHeight * 0.4);
-        const timelineMax = Math.max(timelineMin, availableHeight - Math.min(300, availableHeight * 0.55));
+        const availableHeight = Math.max(240, h - 50 - 24);
+        const previewHeightMin = Math.min(300, availableHeight * 0.38);
+        const timelineMin = Math.min(180, availableHeight * 0.3);
+        const timelineMax = Math.max(timelineMin, availableHeight - previewHeightMin);
         return {
           side, inspector,
           timeline: Math.round(bound(desired("timeline", availableHeight * 367 / 1082), timelineMin, timelineMax)),
@@ -11115,14 +11159,6 @@ function updateFrameSize(force = false) {
       function applyLayout() {
         const layout = state.layout || (state.layout = defaultStartupLayout());
         Object.assign(layout, resolveWorkspaceLayout(innerWidth, innerHeight, layout));
-        if (state.editorActive) {
-          const trackHeight = (id) => Math.max(68, Number(state.trackHeights?.[id] || 68));
-          const tracksHeight = (state.trackOrder || []).reduce((sum, id) => sum + trackHeight(id), 0);
-          const required = 52 + 40 + tracksHeight + 10;
-          const available = Math.max(220, innerHeight - 74);
-          const maximum = Math.max(220, available - Math.min(180, available * 0.34));
-          layout.timeline = Math.min(maximum, Math.max(layout.timeline, required));
-        }
         document.documentElement.style.setProperty(
           "--side",
           `${layout.side}px`,
@@ -11168,7 +11204,9 @@ function updateFrameSize(force = false) {
           value: Number(layout[kind]),
         };
         event.currentTarget.classList.add("dragging");
+        event.currentTarget.setPointerCapture?.(event.pointerId);
         event.preventDefault();
+        event.stopPropagation();
       }
       $("leftPanelResizer").onpointerdown = (event) =>
         beginLayoutResize(event, "side");
@@ -12633,6 +12671,45 @@ async function placeLibraryAsset(
         if (!covering.length) return null;
         return covering.sort((left, right) => Number(right.start) - Number(left.start))[0];
       }
+      function timelinePreviewSceneAt(time = state.currentTime) {
+        const t = Number(time || 0);
+        const activeMainClip = mainClips().find((clip) => t >= Number(clip.start || 0) && t < Number(clip.end || 0)) || null;
+        const activeMainTrack = activeMainClip ? state.mainVideoTrackMap?.[activeMainClip.id] || "video" : "video";
+        const preparedVideoLayers = previewVideoClips(state.videoLayers, t, {
+          visible: (track) => state.trackVisibility[track] !== false,
+          rate: Number(state.audio.speed || 1),
+          lead: 2 * Math.max(1, Number(state.playbackSpeed || 1)),
+        }).filter((item) => !item.missing && !!(item.url || item.path));
+        const timelineVideoLayers = preparedVideoLayers.filter(
+          (item) => t >= Number(item.start || 0) && t < Number(item.end || 0),
+        );
+        const activeImages = state.images.filter(
+          (item) => t >= Number(item.start || 0) && t < Number(item.end || 0) &&
+            state.trackVisibility[item.trackId] !== false && !item.missing && !!(item.url || item.path),
+        );
+        const activeTitles = state.titles.filter(
+          (item) => t >= Number(item.start || 0) && t < Number(item.end || 0) &&
+            state.trackVisibility[item.trackId] !== false,
+        );
+        const caption = captionAtTime(t);
+        const review = state.reviewCaptions.find(
+          (item) => t >= Number(item.start || 0) && t < Number(item.end || 0),
+        ) || null;
+        return {
+          time: t,
+          activeMainClip,
+          activeMainTrack,
+          duplicateMainHidden: activeMainClip && mainVideoSuppressedByDuplicateLayer(activeMainClip, activeMainTrack),
+          preparedVideoLayers,
+          timelineVideoLayers,
+          activeImages,
+          activeTitles,
+          caption,
+          review,
+          visibleVideoLayers: timelineVideoLayers.filter((item) => state.trackVisibility[item.trackId] !== false),
+        };
+      }
+      window.timelinePreviewSceneAt = timelinePreviewSceneAt;
       function auxiliaryCaptionOffset(caption) {
         if (!caption) return 0;
         const style = state.captionStyle || {};
@@ -12673,37 +12750,23 @@ async function placeLibraryAsset(
         if (liveTime != null) state.currentTime = liveTime;
         ensureIndependentTransforms();
         const layer = $("visualLayer");
-        const activeMainClip = mainClips().find(
-          (clip) => state.currentTime >= clip.start && state.currentTime < clip.end,
-        );
-        const activeMainTrack = activeMainClip
-          ? state.mainVideoTrackMap?.[activeMainClip.id] || "video"
-          : "video";
-        const duplicateMainHidden = activeMainClip && mainVideoSuppressedByDuplicateLayer(activeMainClip, activeMainTrack);
-        const activeVideoLayers = previewVideoClips(state.videoLayers,state.currentTime,{visible:track=>state.trackVisibility[track]!==false,rate:Number(state.audio.speed||1),lead:2*Math.max(1,Number(state.playbackSpeed||1))})
-          .filter(item => !item.missing && !!(item.url || item.path)),
-          activeImages = state.images
-            .filter(
-              (item) =>
-                state.currentTime >= item.start && state.currentTime < item.end,
-            )
-            .filter((item) => state.trackVisibility[item.trackId] !== false),
-          activeTitles = state.titles
-            .filter(
-              (item) =>
-                state.currentTime >= item.start && state.currentTime < item.end,
-            )
-            .filter((item) => state.trackVisibility[item.trackId] !== false),
-          caption = captionAtTime(state.currentTime),
-          review = state.reviewCaptions.find(
-            (item) =>
-              state.currentTime >= item.start && state.currentTime < item.end,
-          ),
-          sceneKey = JSON.stringify({
+        const previewScene = timelinePreviewSceneAt(state.currentTime);
+        const {
+          activeMainClip,
+          activeMainTrack,
+          duplicateMainHidden,
+          preparedVideoLayers: activeVideoLayers,
+          timelineVideoLayers,
+          activeImages,
+          activeTitles,
+          caption,
+          review,
+        } = previewScene;
+        const sceneKey = JSON.stringify({
             main: [activeMainClip?.id || "", state.video?.url || state.video?.path || "", !!state.video?.missing, activeMainTrack, state.trackVisibility[activeMainTrack] !== false],
             videos: activeVideoLayers.map((item) => {
               const decoder = layer.querySelector(`.layer-video-decoder[data-id="${item.id}"]`);
-              return [item.id, state.currentTime >= item.start, !!decoder?.seeking, Number(decoder?.readyState || 0) >= 2];
+              return [item.id, state.currentTime >= item.start && state.currentTime < item.end, !!decoder?.seeking, Number(decoder?.readyState || 0) >= 2];
             }),
             images: activeImages.map((item) => item.id),
             titles: activeTitles.map((item) => item.id),
@@ -12711,7 +12774,10 @@ async function placeLibraryAsset(
             review: review?.id || "",
             selected: selectionKey(state.selected.type, state.selected.id),
           });
-        if (!activeVideoLayers.length && layerSeekHold) layerSeekHold.hidden = true;
+        // `activeVideoLayers` also contains silent preloaded standby clips.
+        // They must never keep an outgoing frame visible in the gap before
+        // their own timeline start.
+        if (!timelineVideoLayers.length && layerSeekHold) layerSeekHold.hidden = true;
         if (!force && sceneKey === previewSceneKey) {
           for (const item of activeVideoLayers)
             syncLayerVideoElement(
@@ -12759,7 +12825,7 @@ async function placeLibraryAsset(
         const video = getActiveVideo();
         const hasPreviewVisual =
           (!!activeMainClip && state.trackVisibility[activeMainTrack] !== false && !state.video?.missing && !!(state.video?.url || state.video?.path)) ||
-          activeVideoLayers.some((item) => !item.missing && !!(item.url || item.path)) ||
+          timelineVideoLayers.some((item) => !item.missing && !!(item.url || item.path)) ||
           activeImages.some((item) => !item.missing && !!(item.url || item.path)) ||
           activeTitles.length > 0 || !!caption || !!review;
         $("stage").classList.toggle("empty", !hasPreviewVisual);
@@ -13491,7 +13557,8 @@ function captionTextLayout() {
           if (clip && window.spliceRegionForExport?.({ type: "layer", clip, settings: clip, media: clip }))
             spliceTarget = { type: "layer", clip, settings: clip, media: clip };
         }
-        const spliceBounds = spliceTarget && window.spliceSelectionBounds?.(spliceTarget);
+        const spliceMode = spliceTarget && window.spliceSelectionMode?.(spliceTarget);
+        const spliceBounds = spliceMode === "frame" && spliceTarget && window.spliceSelectionBounds?.(spliceTarget);
         if (spliceBounds) {
           const frameWidth = frame.clientWidth || 1, frameHeight = frame.clientHeight || 1;
           box.style.left = `${spliceBounds.x * frameWidth}px`;
@@ -13500,11 +13567,29 @@ function captionTextLayout() {
           box.style.height = `${spliceBounds.h * frameHeight}px`;
           box.style.transform = "none";
           box.style.transformOrigin = "center center";
+          box.dataset.spliceTarget = "frame";
           box.classList.remove("text-width");
           box.classList.add("on");
           syncCropHandles();
           return;
         }
+        if (spliceMode === "content") {
+          const frameRect = frame.getBoundingClientRect(), elementRect = element.getBoundingClientRect();
+          const scaleX = frameRect.width / Math.max(1, frame.clientWidth);
+          const scaleY = frameRect.height / Math.max(1, frame.clientHeight);
+          box.style.left = `${(elementRect.left - frameRect.left) / Math.max(.001, scaleX)}px`;
+          box.style.top = `${(elementRect.top - frameRect.top) / Math.max(.001, scaleY)}px`;
+          box.style.width = `${elementRect.width / Math.max(.001, scaleX)}px`;
+          box.style.height = `${elementRect.height / Math.max(.001, scaleY)}px`;
+          box.style.transform = "none";
+          box.style.transformOrigin = "center center";
+          box.dataset.spliceTarget = "content";
+          box.classList.remove("text-width");
+          box.classList.add("on");
+          syncCropHandles();
+          return;
+        }
+        delete box.dataset.spliceTarget;
         box.style.left = `${element.offsetLeft}px`;
         box.style.top = `${element.offsetTop}px`;
         box.style.width = `${element.offsetWidth}px`;
@@ -13518,6 +13603,7 @@ function captionTextLayout() {
         box.classList.add("on");
         syncCropHandles();
       }
+      window.updateSelectionBox = updateSelectionBox;
       function captionRasterOverlayOffset(frameW, frameH, x, y, w, h) {
         return {
           x: Number(x || 0) - (Number(frameW || 0) - Number(w || 0)) / 2,
@@ -13879,8 +13965,9 @@ function rulerTickPlan(zoom) {
           tail = content.querySelector("#timelineMarquee");
         let draggingTrackKey = "";
         labels.innerHTML = state.trackOrder
-          .map((key) => {
+          .map((key, orderIndex) => {
             const meta = trackInfo(key),
+              familyStart = orderIndex === 0 || trackInfo(state.trackOrder[orderIndex - 1]).kind !== meta.kind,
               visible = state.trackVisibility[key] !== false,
               locked = isTrackLocked(key),
               soloed = !!state.trackSolo?.[key],
@@ -13899,7 +13986,7 @@ function rulerTickPlan(zoom) {
             const labelTitle = key === "review"
               ? "待处理片段：点击试听，Alt+点击替换为识别口播，Ctrl+点击保留，Shift+点击删除"
               : trackName;
-            return `<div class="tracklabel ${escapeHtml(meta.className)}" draggable="true" data-track-key="${escapeHtml(key)}"><div class="track-header-bar"><span class="trackhandle" title="拖动调整轨道顺序">⠿</span><span class="track-badge" title="${escapeHtml(labelTitle)}">${escapeHtml(badge)}</span><div class="track-controls"><button class="tracklock ${locked ? "on" : ""}" data-lock-track="${escapeHtml(key)}" title="${locked ? "解锁轨道" : "锁定轨道"}">${locked ? "■" : "□"}</button><button class="tracksync ${isTrackSyncLocked(key) ? "on" : ""}" data-sync-track="${escapeHtml(key)}" aria-pressed="${isTrackSyncLocked(key)}" title="同步锁：决定其他轨道波纹剪辑时此轨是否同步调整">↔</button><button class="trackauto ${autoSelected ? "on" : ""}" data-auto-track="${escapeHtml(key)}" title="自动轨道选择器：决定选择后方、全选等命令是否作用于此轨">⇥</button>${audioTrack ? `<button class="tracksolo ${soloed ? "on" : ""}" data-solo-track="${escapeHtml(key)}" title="独听此轨">S</button><button class="trackmute ${muted ? "on" : ""}" data-mute-track="${escapeHtml(key)}" title="静音此轨">M</button><span class="audio-channel-tag">2.0</span>` : ""}<button class="visibility ${visible ? "" : "off"}" data-toggle-track="${escapeHtml(key)}" title="${visible ? "关闭轨道" : "显示轨道"}">${symbol}</button>${remove}</div></div><div class="track-info-body"><span class="track-title" title="${escapeHtml(labelTitle)}">${escapeHtml(trackName)}</span><span class="track-clip-count">${clipCount}</span></div><span class="track-resize-grip" data-resize-track="${escapeHtml(key)}" title="按住拖动自由调节轨道高度；双击恢复默认高度"></span></div>`;
+            return `<div class="tracklabel ${escapeHtml(meta.className)}${familyStart ? " track-family-start" : ""}" draggable="true" data-track-key="${escapeHtml(key)}" data-track-kind="${escapeHtml(meta.kind)}"><div class="track-header-bar"><span class="trackhandle" title="拖动调整轨道顺序">⠿</span><span class="track-badge" title="${escapeHtml(labelTitle)}">${escapeHtml(badge)}</span><div class="track-controls"><button class="tracklock ${locked ? "on" : ""}" data-lock-track="${escapeHtml(key)}" title="${locked ? "解锁轨道" : "锁定轨道"}">${locked ? "■" : "□"}</button><button class="tracksync ${isTrackSyncLocked(key) ? "on" : ""}" data-sync-track="${escapeHtml(key)}" aria-pressed="${isTrackSyncLocked(key)}" title="同步锁：决定其他轨道波纹剪辑时此轨是否同步调整">↔</button><button class="trackauto ${autoSelected ? "on" : ""}" data-auto-track="${escapeHtml(key)}" title="自动轨道选择器：决定选择后方、全选等命令是否作用于此轨">⇥</button>${audioTrack ? `<button class="tracksolo ${soloed ? "on" : ""}" data-solo-track="${escapeHtml(key)}" title="独听此轨">S</button><button class="trackmute ${muted ? "on" : ""}" data-mute-track="${escapeHtml(key)}" title="静音此轨">M</button><span class="audio-channel-tag">2.0</span>` : ""}<button class="visibility ${visible ? "" : "off"}" data-toggle-track="${escapeHtml(key)}" title="${visible ? "关闭轨道" : "显示轨道"}">${symbol}</button>${remove}</div></div><div class="track-info-body"><span class="track-title" title="${escapeHtml(labelTitle)}">${escapeHtml(trackName)}</span><span class="track-clip-count">${clipCount}</span></div><span class="track-resize-grip" data-resize-track="${escapeHtml(key)}" title="按住拖动自由调节轨道高度；双击恢复默认高度"></span></div>`;
           })
           .join("");
         content.querySelectorAll(".trackrow[data-track-key]").forEach((row) => {
@@ -13921,13 +14008,17 @@ function rulerTickPlan(zoom) {
           );
           row.classList.toggle("locked-track", isTrackLocked(key));
           row.classList.toggle("solo-muted", trackInfo(key).kind === "audio" && !isTrackAudible(key));
-          const rowHeight = Math.max(68, Number(state.trackHeights?.[key] || 68));
+          const orderIndex = state.trackOrder.indexOf(key);
+          const familyStart = orderIndex === 0 || trackInfo(state.trackOrder[orderIndex - 1]).kind !== trackInfo(key).kind;
+          row.dataset.trackKind = trackInfo(key).kind;
+          row.classList.toggle("track-family-start", familyStart);
+          const rowHeight = Math.max(56, Number(state.trackHeights?.[key] || 68));
           row.style.height = `${rowHeight}px`;
           if (tail) content.insertBefore(row, tail);
           else content.appendChild(row);
         }
         labels.querySelectorAll("[data-track-key]").forEach((label) => {
-          const rowHeight = Math.max(68, Number(state.trackHeights?.[label.dataset.trackKey] || 68));
+          const rowHeight = Math.max(56, Number(state.trackHeights?.[label.dataset.trackKey] || 68));
           label.style.height = `${rowHeight}px`;
           label.ondragstart = (event) => {
             if (!event.target.closest?.(".trackhandle")) {
@@ -14072,7 +14163,7 @@ function rulerTickPlan(zoom) {
               })
               .join("");
           }
-          const configuredHeight = Math.max(68, Number(state.trackHeights?.[key] || 68));
+          const configuredHeight = Math.max(56, Number(state.trackHeights?.[key] || 68));
           const laneHeight = `${Math.max(configuredHeight, laneCount > 1 ? 6 + laneCount * 27 : 40)}px`;
           const gapSelection = timelineGapSelection?.trackId === key
             ? `<span class="timeline-gap-selection" data-selected-gap style="left:${timelineGapSelection.start * state.zoom}px;width:${Math.max(2, timelineGapSelection.duration * state.zoom)}px"></span>`
@@ -14134,7 +14225,7 @@ function rulerTickPlan(zoom) {
             proxy.title = `${group.name || "复合片段"} · 双击编辑内部时间线；拖动边缘裁切或恢复`;
             proxy.style.left = `${Number(group.start || 0) * state.zoom}px`;
             proxy.style.width = `${Math.max(4, (Number(group.end || group.start || 0) - Number(group.start || 0)) * state.zoom)}px`;
-            const configuredHeight = Math.max(68, Number(state.trackHeights?.[entry.clip.dataset.trackId || entry.member.type] || row.clientHeight || 68));
+            const configuredHeight = Math.max(56, Number(state.trackHeights?.[entry.clip.dataset.trackId || entry.member.type] || row.clientHeight || 68));
             proxy.style.top = "3px";
             proxy.style.height = `${Math.max(24, configuredHeight - 7)}px`;
             proxy.innerHTML = `${group.nestedTimeline?'<i class="trim-handle start" data-trim="start"></i>':''}${audioProxy ? `<canvas class="compound-wavecanvas" data-compound-waveform="${escapeHtml(group.id)}"></canvas>` : ""}<span class="compound-name">${escapeHtml(group.name || "复合片段")}</span>${group.nestedTimeline?'<i class="trim-handle end" data-trim="end"></i>':''}`;
@@ -15576,9 +15667,21 @@ function renderIssues() {
         const selectedVisualCount = (state.selectedItems || []).filter((item) =>
           ["video", "videolayer", "image"].includes(item.type),
         ).length;
+        let selectedSpliceTarget = null;
+        if (state.selected.type === "video") {
+          const clip = activeMainVideoClip?.();
+          if (clip) selectedSpliceTarget = { type: "main", clip, settings: obj, media: state.video };
+        } else if (["videolayer", "image"].includes(state.selected.type)) {
+          selectedSpliceTarget = { type: "layer", clip: obj, settings: obj, media: obj };
+        }
+        const pipContentSelected = selectedVisualCount <= 1 &&
+          window.spliceRegionForExport?.(selectedSpliceTarget)?.kind === "pip";
         $("selectionTitle").textContent = selectedVisualCount > 1
           ? `已选 ${selectedVisualCount} 个画面片段`
+          : pipContentSelected ? "画中画框内素材属性"
           : labels[state.selected.type] || "素材属性";
+        const pipHint = $("pipContentPropertyHint");
+        if (pipHint) pipHint.hidden = !pipContentSelected;
         if ($("multiTransformHint"))
           $("multiTransformHint").style.display = selectedVisualCount > 1 ? "block" : "none";
         $("objectScale").value = Math.round((obj.scale || 1) * 100);
@@ -22369,36 +22472,56 @@ function persistedMediaItem(item, preserveWaveform = false) {
         event.preventDefault();
       });
       let trackHeightDrag = null;
-      $("trackLabels").addEventListener("pointerdown", (event) => {
-        const grip = event.target.closest("[data-resize-track]");
-        if (!grip) return;
-        const key = grip.dataset.resizeTrack,
-          label = grip.closest(".tracklabel"),
-          current = Math.max(68, Number(state.trackHeights?.[key] || label?.offsetHeight || 68));
+      function startTrackHeightDrag(event, key, label, row, grip) {
+        if (event.button !== 0) return;
+        const current = Math.max(56, Number(state.trackHeights?.[key] || row?.offsetHeight || label?.offsetHeight || 68));
         beginTimelineGesture();
         trackHeightDrag = {
           pointer: event.pointerId,
           key,
           label,
+          row,
+          grip,
           startY: event.clientY,
           startHeight: current,
         };
         label?.classList.add("resizing");
-        grip.setPointerCapture?.(event.pointerId);
+        row?.classList.add("resizing-track");
+        grip?.setPointerCapture?.(event.pointerId);
         event.preventDefault();
         event.stopPropagation();
+      }
+      $("trackLabels").addEventListener("pointerdown", (event) => {
+        const grip = event.target.closest("[data-resize-track]");
+        if (!grip) return;
+        const key = grip.dataset.resizeTrack;
+        startTrackHeightDrag(event, key, grip.closest(".tracklabel"), $("timelineContent")?.querySelector(`.trackrow[data-track-key="${CSS.escape(key)}"]`), grip);
+      });
+      $("timelineContent").addEventListener("pointerdown", (event) => {
+        const row = event.target.closest(".trackrow[data-track-key]");
+        if (!row || event.target.closest(".clip")) return;
+        const rect = row.getBoundingClientRect();
+        if (event.clientY < rect.bottom - 7) return;
+        const key = row.dataset.trackKey;
+        startTrackHeightDrag(
+          event,
+          key,
+          $("trackLabels")?.querySelector(`.tracklabel[data-track-key="${CSS.escape(key)}"]`),
+          row,
+          row,
+        );
       });
       document.addEventListener("pointermove", (event) => {
         if (!trackHeightDrag || trackHeightDrag.pointer !== event.pointerId) return;
         const height = Math.round(clamp(
           trackHeightDrag.startHeight + event.clientY - trackHeightDrag.startY,
-          40,
+          56,
           220,
         ));
         state.trackHeights ||= {};
         state.trackHeights[trackHeightDrag.key] = height;
         if (trackHeightDrag.label) trackHeightDrag.label.style.height = `${height}px`;
-        const row = $("timelineContent").querySelector(
+        const row = trackHeightDrag.row || $("timelineContent").querySelector(
           `.trackrow[data-track-key="${trackHeightDrag.key}"]`,
         );
         if (row) {
@@ -22413,6 +22536,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
       document.addEventListener("pointerup", (event) => {
         if (!trackHeightDrag || trackHeightDrag.pointer !== event.pointerId) return;
         trackHeightDrag.label?.classList.remove("resizing");
+        trackHeightDrag.row?.classList.remove("resizing-track");
         trackHeightDrag = null;
         applyLayout();
         renderTimeline();
@@ -23159,6 +23283,21 @@ function scaleTimelineClipGeometry(ratio) {
           $("selectionBox").style.transform = spliceStyle?.region ? "none" : transform;
           if (objectDrag.widthResize)
             $("selectionBox").style.width = `${objectDrag.obj.width * (fw / state.width)}px`;
+          if (spliceStyle?.region && window.spliceSelectionMode?.({
+            type: state.selected.type === "video" ? "main" : "layer",
+            clip: objectDrag.obj,
+            settings: objectDrag.obj,
+            media: state.selected.type === "video" ? state.video : objectDrag.obj,
+          }) === "content") {
+            // The handles follow the inner media bounds while its transform
+            // changes; the PIP frame remains fixed in Layout mode.
+            const scale = Math.round(Number(objectDrag.obj.scale || 1) * 100);
+            if ($("objectScale")) $("objectScale").value = String(scale);
+            if ($("scaleOut")) $("scaleOut").textContent = `${scale}%`;
+            if ($("previewZoomRange")) $("previewZoomRange").value = String(clamp(scale, 10, 300));
+            if ($("previewZoomValue")) $("previewZoomValue").textContent = `${scale}%`;
+            window.updateSelectionBox?.();
+          }
         }
         if (["video", "videolayer", "image", "text"].includes(state.selected.type)) {
           window.syncPositionControlValue?.("X", objectDrag.obj.x);
@@ -24650,6 +24789,7 @@ function scaleTimelineClipGeometry(ratio) {
         { passive: false },
       );
       $("objectScale").oninput = (e) => {
+        window.setSpliceEditTarget?.("content", false);
         const targets = mutateSelectedVisualTransforms(
           (object) => { object.scale = Number(e.target.value) / 100; },
         );
@@ -24663,6 +24803,7 @@ function scaleTimelineClipGeometry(ratio) {
         if (state.selected?.type === "caption") scheduleCaptionReflow();
       };
       $("objectX").oninput = (e) => {
+        window.setSpliceEditTarget?.("content", false);
         window.syncPositionControlValue?.("X", e.target.value);
         const targets = mutateSelectedVisualTransforms(
           (object) => { object.x = Number(e.target.value); },
@@ -24673,6 +24814,7 @@ function scaleTimelineClipGeometry(ratio) {
         }
       };
       $("objectY").oninput = (e) => {
+        window.setSpliceEditTarget?.("content", false);
         window.syncPositionControlValue?.("Y", e.target.value);
         const targets = mutateSelectedVisualTransforms(
           (object) => { object.y = Number(e.target.value); },
@@ -24683,16 +24825,19 @@ function scaleTimelineClipGeometry(ratio) {
         }
       };
       $("objectXRange").oninput = (e) => {
+        window.setSpliceEditTarget?.("content", false);
         window.syncPositionControlValue?.("X", e.target.value);
         const targets = mutateSelectedVisualTransforms((object) => { object.x = Number(e.target.value); });
         if (targets.length) { updatePreviewTransformOnly(); queueAutosave(); }
       };
       $("objectYRange").oninput = (e) => {
+        window.setSpliceEditTarget?.("content", false);
         window.syncPositionControlValue?.("Y", e.target.value);
         const targets = mutateSelectedVisualTransforms((object) => { object.y = Number(e.target.value); });
         if (targets.length) { updatePreviewTransformOnly(); queueAutosave(); }
       };
       $("objectRotation").oninput = (e) => {
+        window.setSpliceEditTarget?.("content", false);
         const targets = mutateSelectedVisualTransforms(
           (object) => { object.rotation = Number(e.target.value); },
         );
@@ -24701,6 +24846,7 @@ function scaleTimelineClipGeometry(ratio) {
         updatePreviewTransformOnly();
       };
       $("objectOpacity").oninput = (e) => {
+        window.setSpliceEditTarget?.("content", false);
         const targets = mutateSelectedVisualTransforms(
           (object) => { object.opacity = Number(e.target.value) / 100; },
         );
@@ -24709,6 +24855,7 @@ function scaleTimelineClipGeometry(ratio) {
         updatePreviewTransformOnly();
       };
       $("objectBlendMode").onchange = (e) => {
+        window.setSpliceEditTarget?.("content", false);
         const targets = mutateSelectedVisualTransforms(
           (object) => { object.blendMode = e.target.value; },
         );
@@ -29307,20 +29454,32 @@ generateAutoCaptions=(...args)=>runExclusiveCaptionAnalysis(()=>originalGenerate
       : null;
     if (!range || range.disabled) return;
 
-    const delta = Number(event.deltaX || event.deltaY || 0);
-    if (!delta) return;
+    if (!Number(event.deltaX || event.deltaY || 0)) return;
     event.preventDefault();
     event.stopPropagation();
+  }, { capture: true, passive: false });
 
+  // Native range inputs jump to the clicked position. For precision controls,
+  // only start a drag when the pointer is on the thumb; accidental clicks on
+  // the track should not change a property.
+  document.addEventListener("pointerdown", (event) => {
+    const range = event.target instanceof Element
+      ? event.target.closest('input[type="range"]')
+      : null;
+    if (!range || range.disabled || event.button !== 0) return;
+    const rect = range.getBoundingClientRect();
+    if (!rect.width) return;
     const min = Number.isFinite(Number(range.min)) ? Number(range.min) : 0;
     const max = Number.isFinite(Number(range.max)) ? Number(range.max) : 100;
-    const step = range.step === "any" ? Math.max((max - min) / 100, 0.01) : Number(range.step || 1);
-    const next = Math.max(min, Math.min(max, Number(range.value) - Math.sign(delta) * step));
-    if (next === Number(range.value)) return;
-    range.value = String(next);
-    range.dispatchEvent(new Event("input", { bubbles: true }));
-    range.dispatchEvent(new Event("change", { bubbles: true }));
-  }, { capture: true, passive: false });
+    const value = Number(range.value);
+    const ratio = max > min ? Math.max(0, Math.min(1, (value - min) / (max - min))) : 0.5;
+    const thumbWidth = 12;
+    const thumbCenter = rect.left + thumbWidth / 2 + ratio * Math.max(0, rect.width - thumbWidth);
+    if (Math.abs(event.clientX - thumbCenter) > thumbWidth * 0.72) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, { capture: true });
 })();
 (() => {
   const PLAYBACK_LABELS = {
@@ -29332,6 +29491,16 @@ generateAutoCaptions=(...args)=>runExclusiveCaptionAnalysis(()=>originalGenerate
   const DEFAULT_LAYOUT = "free";
   let freezeDecoder = null;
   let freezeRequest = "";
+  // A PIP has two separately editable targets: its layout frame and its media.
+  // Layout-tab controls/handles edit the frame; the Basic inspector edits media.
+  let pipEditTarget = "content";
+
+  function setPipEditTarget(target, refresh = true) {
+    pipEditTarget = target === "frame" ? "frame" : "content";
+    const box = $("selectionBox");
+    if (box) box.dataset.spliceTarget = pipEditTarget;
+    if (refresh) window.updateSelectionBox?.();
+  }
 
   function spliceLayoutRegions(layout = state.spliceLayout || DEFAULT_LAYOUT) {
     const ratio = clamp(Number(state.spliceRatio || 0.5), 0.2, 0.8);
@@ -29686,12 +29855,21 @@ generateAutoCaptions=(...args)=>runExclusiveCaptionAnalysis(()=>originalGenerate
 
   function spliceSelectionBounds(target) {
     const selectedPip = spliceRegions().find((item) => item.id === state.spliceSelectedRegionId && item.kind === "pip");
-    const region = selectedPip || (target ? autoSpliceRegion(target) : null);
+    if (!selectedPip || pipEditTarget !== "frame") return null;
+    const region = selectedPip;
     if (!region) return null;
     const points = geometryPoints(region);
     const xs = points.map(([x]) => x), ys = points.map(([, y]) => y);
     const left = Math.min(...xs), top = Math.min(...ys);
     return { x: left, y: top, w: Math.max(.001, Math.max(...xs) - left), h: Math.max(.001, Math.max(...ys) - top) };
+  }
+
+  function spliceSelectionMode(target) {
+    const selectedRegion = spliceRegions().find((item) => item.id === state.spliceSelectedRegionId && item.kind === "pip");
+    if (!selectedRegion) return "";
+    const targetRegion = target ? autoSpliceRegion(target) : null;
+    if (pipEditTarget === "frame") return "frame";
+    return targetRegion?.id === selectedRegion.id ? "content" : "";
   }
 
   function spliceRegionBounds(region) {
@@ -29805,6 +29983,8 @@ generateAutoCaptions=(...args)=>runExclusiveCaptionAnalysis(()=>originalGenerate
       if (regionSelect.value !== state.spliceSelectedRegionId && state.spliceSelectedRegionId) regionSelect.value = state.spliceSelectedRegionId;
     } else videoRegion.value = "auto";
     const selectedRegion = regions.find((region) => region.id === state.spliceSelectedRegionId);
+    const frameHint = $("splicePipFrameHint");
+    if (frameHint) frameHint.hidden = selectedRegion?.kind !== "pip";
     if (selectedRegion) {
       $("spliceRegionName").value = selectedRegion.name || "";
       $("spliceShape").value = selectedRegion.shape || "rect";
@@ -29982,47 +30162,28 @@ generateAutoCaptions=(...args)=>runExclusiveCaptionAnalysis(()=>originalGenerate
     let draggedDivider = null;
     let resizedPip = null;
     const activeVisualInRegion = (regionId) => {
-      const time = Number(state.currentTime || 0), candidates = [];
+      const scene = window.timelinePreviewSceneAt?.(state.currentTime);
+      if (!scene) return null;
+      const candidates = [];
       let paintOrder = 0;
-      const main = activeMainVideoClip?.();
-      if (main && state.video && state.trackVisibility?.[state.mainVideoTrackMap?.[main.id] || "video"] !== false) {
+      const main = scene.activeMainClip;
+      if (main && state.video && !scene.duplicateMainHidden && state.trackVisibility?.[scene.activeMainTrack] !== false) {
         const settings = mainVideoSettings(main);
         const target = { type: "main", clip: main, settings, media: state.video };
         if (autoSpliceRegion(target)?.id === regionId)
-          candidates.push({ type: "video", id: main.id, target, z: visualZ(state.mainVideoTrackMap?.[main.id] || "video"), order: paintOrder++ });
+          candidates.push({ type: "video", id: main.id, target, z: visualZ(scene.activeMainTrack), order: paintOrder++ });
       }
-      for (const clip of state.videoLayers || []) {
-        if (time < Number(clip.start || 0) || time >= Number(clip.end || 0) || state.trackVisibility?.[clip.trackId] === false) continue;
+      for (const clip of scene.visibleVideoLayers) {
         const target = { type: "layer", clip, settings: clip, media: clip };
         if (autoSpliceRegion(target)?.id === regionId)
           candidates.push({ type: "videolayer", id: clip.id, target, z: visualZ(clip.trackId), order: paintOrder++ });
       }
-      for (const clip of state.images || []) {
-        if (time < Number(clip.start || 0) || time >= Number(clip.end || 0) || state.trackVisibility?.[clip.trackId] === false) continue;
+      for (const clip of scene.activeImages) {
         const target = { type: "layer", clip, settings: clip, media: clip };
         if (autoSpliceRegion(target)?.id === regionId)
           candidates.push({ type: "image", id: clip.id, target, z: visualZ(clip.trackId), order: paintOrder++ });
       }
       return candidates.sort((left, right) => right.z - left.z || right.order - left.order)[0] || null;
-    };
-    const edgeDistance = (region, clientX, clientY, bounds) => {
-      const points = geometryPoints(region).map(([x, y]) => [bounds.left + x * bounds.width, bounds.top + y * bounds.height]);
-      let shortest = Infinity;
-      for (let index = 0; index < points.length; index += 1) {
-        const [ax, ay] = points[index], [bx, by] = points[(index + 1) % points.length];
-        const dx = bx - ax, dy = by - ay, length2 = dx * dx + dy * dy;
-        const ratio = length2 ? clamp(((clientX - ax) * dx + (clientY - ay) * dy) / length2, 0, 1) : 0;
-        shortest = Math.min(shortest, Math.hypot(clientX - (ax + dx * ratio), clientY - (ay + dy * ratio)));
-      }
-      return shortest;
-    };
-    const pipFrameMoveHitDistance = (region, bounds) => {
-      const frame = spliceRegionBounds(region);
-      if (!frame) return 0;
-      const renderedSize = Math.min(frame.w * bounds.width, frame.h * bounds.height);
-      // Keep a usable border target on large frames without swallowing the
-      // media's interior on small PIP frames.
-      return Math.min(8, Math.max(2, renderedSize * .18));
     };
     const refreshSplicePreview = () => {
       updatePreviewTransformOnly(false);
@@ -30039,6 +30200,7 @@ generateAutoCaptions=(...args)=>runExclusiveCaptionAnalysis(()=>originalGenerate
       updateSelectionBox();
     };
     const updatePipScale = (rawValue) => {
+      setPipEditTarget("frame", false);
       const region = state.spliceRegions?.find((item) => item.id === state.spliceSelectedRegionId && item.kind === "pip");
       if (!region) return;
       const bounds = spliceRegionBounds(region);
@@ -30060,6 +30222,7 @@ generateAutoCaptions=(...args)=>runExclusiveCaptionAnalysis(()=>originalGenerate
       queueAutosave();
     };
     const updatePipPosition = (axis, rawValue) => {
+      setPipEditTarget("frame", false);
       const region = state.spliceRegions?.find((item) => item.id === state.spliceSelectedRegionId && item.kind === "pip");
       if (!region) return;
       const bounds = spliceRegionBounds(region);
@@ -30132,7 +30295,7 @@ generateAutoCaptions=(...args)=>runExclusiveCaptionAnalysis(()=>originalGenerate
       const handle = event.target.closest?.("[data-handle]");
       if (!handle) return;
       const region = state.spliceRegions?.find((item) => item.id === state.spliceSelectedRegionId && item.kind === "pip");
-      if (!region) return;
+      if (!region || pipEditTarget !== "frame") return;
       const bounds = spliceRegionBounds(region);
       if (!bounds) return;
       snapshot();
@@ -30171,12 +30334,14 @@ generateAutoCaptions=(...args)=>runExclusiveCaptionAnalysis(()=>originalGenerate
       state.spliceSelectedRegionId = region.id;
       const frameBounds = $("frame").getBoundingClientRect();
       const content = activeVisualInRegion(region.id);
+      // The active panel determines the object: Layout moves/resizes the
+      // frame; Basic edits the media inside it. The pointer edge position
+      // never changes the target implicitly.
+      const moveFrame = pipEditTarget === "frame" || !content;
+      setPipEditTarget(moveFrame || !content ? "frame" : "content", false);
       if (content) {
         window.syncPreviewTimelineSelection?.(content.type, content.id, true);
         const settings = content.target.settings;
-          const edge = edgeDistance(region, event.clientX, event.clientY, frameBounds);
-          const hitDistance = pipFrameMoveHitDistance(region, frameBounds);
-          const moveFrame = edge <= hitDistance;
         snapshot();
         if (moveFrame) draggedPip = { pointerId: event.pointerId, region, startX: event.clientX, startY: event.clientY, x: Number(region.x || 0), y: Number(region.y || 0) };
         else draggedContent = { pointerId: event.pointerId, settings, startX: event.clientX, startY: event.clientY, x: Number(settings.x || 0), y: Number(settings.y || 0), type: content.type };
@@ -30263,10 +30428,11 @@ generateAutoCaptions=(...args)=>runExclusiveCaptionAnalysis(()=>originalGenerate
       $("spliceAngle").value = event.target.value;
       updateSpliceAngle(event);
     });
-    $("spliceRegionSelect")?.addEventListener("change", (event) => { state.spliceSelectedRegionId = event.target.value; syncSplicePanel(); renderSpliceGuide(); updateSelectionBox(); });
+    $("spliceRegionSelect")?.addEventListener("change", (event) => { state.spliceSelectedRegionId = event.target.value; setPipEditTarget("frame", false); syncSplicePanel(); renderSpliceGuide(); updateSelectionBox(); });
     $("spliceRegionName")?.addEventListener("change", (event) => { persistSpliceRegions(); const region = state.spliceRegions.find((item) => item.id === state.spliceSelectedRegionId); if (region) { region.name = event.target.value.trim() || region.name; persistSpliceRegions(); renderAll(); } });
-    $("spliceShape")?.addEventListener("change", (event) => { persistSpliceRegions(); const region = state.spliceRegions.find((item) => item.id === state.spliceSelectedRegionId); if (region) { region.shape = event.target.value; persistSpliceRegions(); renderSpliceGuide(); renderPreviewObjects(); queueAutosave(); } });
+    $("spliceShape")?.addEventListener("change", (event) => { setPipEditTarget("frame", false); persistSpliceRegions(); const region = state.spliceRegions.find((item) => item.id === state.spliceSelectedRegionId); if (region) { region.shape = event.target.value; persistSpliceRegions(); renderSpliceGuide(); renderPreviewObjects(); queueAutosave(); } });
     $("spliceBorderColor")?.addEventListener("input", (event) => {
+      setPipEditTarget("frame", false);
       persistSpliceRegions();
       const region = state.spliceRegions.find((item) => item.id === state.spliceSelectedRegionId);
       if (!region || region.kind !== "pip") return;
@@ -30280,6 +30446,7 @@ generateAutoCaptions=(...args)=>runExclusiveCaptionAnalysis(()=>originalGenerate
       queueAutosave();
     });
     const updateSpliceBorderWidth = (value) => {
+      setPipEditTarget("frame", false);
       persistSpliceRegions();
       const region = state.spliceRegions.find((item) => item.id === state.spliceSelectedRegionId);
       if (!region) return;
@@ -30298,6 +30465,9 @@ generateAutoCaptions=(...args)=>runExclusiveCaptionAnalysis(()=>originalGenerate
     $("splicePipScaleRange")?.addEventListener("pointerdown", () => snapshot());
     $("splicePipXRange")?.addEventListener("pointerdown", () => snapshot());
     $("splicePipYRange")?.addEventListener("pointerdown", () => snapshot());
+    $("splicePipScaleRange")?.addEventListener("pointerdown", () => setPipEditTarget("frame"));
+    $("splicePipXRange")?.addEventListener("pointerdown", () => setPipEditTarget("frame"));
+    $("splicePipYRange")?.addEventListener("pointerdown", () => setPipEditTarget("frame"));
     $("splicePipScaleRange")?.addEventListener("input", (event) => updatePipScale(event.target.value));
     $("splicePipXRange")?.addEventListener("input", (event) => updatePipPosition("x", event.target.value));
     $("splicePipYRange")?.addEventListener("input", (event) => updatePipPosition("y", event.target.value));
@@ -30370,7 +30540,18 @@ generateAutoCaptions=(...args)=>runExclusiveCaptionAnalysis(()=>originalGenerate
       $("spliceFreezeFrame").value = source.toFixed(3);
       updateSelectedSpliceTarget({ spliceFreezeFrame: source });
     });
-    document.querySelectorAll(".tab[data-inspect]").forEach((button) => button.addEventListener("click", () => setTimeout(syncSplicePanel, 0)));
+    document.querySelectorAll(".tab[data-inspect]").forEach((button) => button.addEventListener("click", () => setTimeout(() => {
+      if (button.dataset.inspect === "splice") setPipEditTarget("frame");
+      else if (button.dataset.inspect === "basic") setPipEditTarget("content");
+      syncSplicePanel();
+      updateSelectionBox();
+    }, 0)));
+    document.addEventListener("pointerdown", (event) => {
+      const target = event.target.closest?.("#objectScale,#objectX,#objectY,#objectXRange,#objectYRange,#objectRotation,#objectOpacity,#objectBlendMode,#cropTop,#cropBottom,#cropLeft,#cropRight,#manualCropBtn,#previewZoomRange");
+      if (target) setPipEditTarget("content");
+      const frameControl = event.target.closest?.("#splicePipScaleRange,#splicePipXRange,#splicePipYRange,#spliceShape,#spliceBorderColor,#spliceBorderWidth,#spliceBorderWidthRange");
+      if (frameControl) setPipEditTarget("frame");
+    }, true);
     document.addEventListener("click", (event) => {
       const video = event.target.closest?.('.videoobject[data-type="video"],.layer-video-decoder[data-type="videolayer"]');
       if (!video) return;
@@ -30392,6 +30573,8 @@ generateAutoCaptions=(...args)=>runExclusiveCaptionAnalysis(()=>originalGenerate
   window.spliceRegionAtPoint = spliceRegionAtPoint;
   window.spliceRegionName = (id) => spliceRegions().find((region) => region.id === id)?.name || "分区";
   window.spliceSelectionBounds = spliceSelectionBounds;
+  window.spliceSelectionMode = spliceSelectionMode;
+  window.setSpliceEditTarget = setPipEditTarget;
   window.spliceRegionForExport = (target) => {
     const region = autoSpliceRegion(target);
     return region ? { ...region, points: Array.isArray(region.points) ? region.points.map((point) => [...point]) : null } : null;

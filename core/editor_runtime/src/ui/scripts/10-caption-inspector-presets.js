@@ -481,9 +481,21 @@ function renderIssues() {
         const selectedVisualCount = (state.selectedItems || []).filter((item) =>
           ["video", "videolayer", "image"].includes(item.type),
         ).length;
+        let selectedSpliceTarget = null;
+        if (state.selected.type === "video") {
+          const clip = activeMainVideoClip?.();
+          if (clip) selectedSpliceTarget = { type: "main", clip, settings: obj, media: state.video };
+        } else if (["videolayer", "image"].includes(state.selected.type)) {
+          selectedSpliceTarget = { type: "layer", clip: obj, settings: obj, media: obj };
+        }
+        const pipContentSelected = selectedVisualCount <= 1 &&
+          window.spliceRegionForExport?.(selectedSpliceTarget)?.kind === "pip";
         $("selectionTitle").textContent = selectedVisualCount > 1
           ? `已选 ${selectedVisualCount} 个画面片段`
+          : pipContentSelected ? "画中画框内素材属性"
           : labels[state.selected.type] || "素材属性";
+        const pipHint = $("pipContentPropertyHint");
+        if (pipHint) pipHint.hidden = !pipContentSelected;
         if ($("multiTransformHint"))
           $("multiTransformHint").style.display = selectedVisualCount > 1 ? "block" : "none";
         $("objectScale").value = Math.round((obj.scale || 1) * 100);

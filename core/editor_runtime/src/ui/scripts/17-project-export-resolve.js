@@ -1551,36 +1551,56 @@ function persistedMediaItem(item, preserveWaveform = false) {
         event.preventDefault();
       });
       let trackHeightDrag = null;
-      $("trackLabels").addEventListener("pointerdown", (event) => {
-        const grip = event.target.closest("[data-resize-track]");
-        if (!grip) return;
-        const key = grip.dataset.resizeTrack,
-          label = grip.closest(".tracklabel"),
-          current = Math.max(68, Number(state.trackHeights?.[key] || label?.offsetHeight || 68));
+      function startTrackHeightDrag(event, key, label, row, grip) {
+        if (event.button !== 0) return;
+        const current = Math.max(56, Number(state.trackHeights?.[key] || row?.offsetHeight || label?.offsetHeight || 68));
         beginTimelineGesture();
         trackHeightDrag = {
           pointer: event.pointerId,
           key,
           label,
+          row,
+          grip,
           startY: event.clientY,
           startHeight: current,
         };
         label?.classList.add("resizing");
-        grip.setPointerCapture?.(event.pointerId);
+        row?.classList.add("resizing-track");
+        grip?.setPointerCapture?.(event.pointerId);
         event.preventDefault();
         event.stopPropagation();
+      }
+      $("trackLabels").addEventListener("pointerdown", (event) => {
+        const grip = event.target.closest("[data-resize-track]");
+        if (!grip) return;
+        const key = grip.dataset.resizeTrack;
+        startTrackHeightDrag(event, key, grip.closest(".tracklabel"), $("timelineContent")?.querySelector(`.trackrow[data-track-key="${CSS.escape(key)}"]`), grip);
+      });
+      $("timelineContent").addEventListener("pointerdown", (event) => {
+        const row = event.target.closest(".trackrow[data-track-key]");
+        if (!row || event.target.closest(".clip")) return;
+        const rect = row.getBoundingClientRect();
+        if (event.clientY < rect.bottom - 7) return;
+        const key = row.dataset.trackKey;
+        startTrackHeightDrag(
+          event,
+          key,
+          $("trackLabels")?.querySelector(`.tracklabel[data-track-key="${CSS.escape(key)}"]`),
+          row,
+          row,
+        );
       });
       document.addEventListener("pointermove", (event) => {
         if (!trackHeightDrag || trackHeightDrag.pointer !== event.pointerId) return;
         const height = Math.round(clamp(
           trackHeightDrag.startHeight + event.clientY - trackHeightDrag.startY,
-          40,
+          56,
           220,
         ));
         state.trackHeights ||= {};
         state.trackHeights[trackHeightDrag.key] = height;
         if (trackHeightDrag.label) trackHeightDrag.label.style.height = `${height}px`;
-        const row = $("timelineContent").querySelector(
+        const row = trackHeightDrag.row || $("timelineContent").querySelector(
           `.trackrow[data-track-key="${trackHeightDrag.key}"]`,
         );
         if (row) {
@@ -1595,6 +1615,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
       document.addEventListener("pointerup", (event) => {
         if (!trackHeightDrag || trackHeightDrag.pointer !== event.pointerId) return;
         trackHeightDrag.label?.classList.remove("resizing");
+        trackHeightDrag.row?.classList.remove("resizing-track");
         trackHeightDrag = null;
         applyLayout();
         renderTimeline();

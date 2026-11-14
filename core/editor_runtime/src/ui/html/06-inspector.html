@@ -10,6 +10,7 @@
             <div class="sidepage active" id="inspect-basic">
               <div class="inspectsection">
                 <h3 id="selectionTitle">视频属性</h3>
+                <p class="small pip-content-property-hint" id="pipContentPropertyHint" hidden>这些属性只调整画中画框内的视频或图片。外框大小和位置请在“布局”页调整。</p>
                 <div class="field">
                   <div class="fieldhead">
                     <span>等比例缩放</span><output id="scaleOut">100%</output>
@@ -315,6 +316,7 @@
               <label class="field splice-control"><span class="small">画中画外框大小</span><div class="splice-range-row"><input id="splicePipScaleRange" type="range" min="20" max="250" step="1" value="100"><output id="splicePipScaleValue">100%</output></div></label>
               <label class="field splice-control"><span class="small">外框位置 X</span><div class="splice-range-row"><input id="splicePipXRange" type="range" min="0" max="1000" step="1" value="580"><output id="splicePipXValue">58.0%</output></div></label>
               <label class="field splice-control"><span class="small">外框位置 Y</span><div class="splice-range-row"><input id="splicePipYRange" type="range" min="0" max="1000" step="1" value="50"><output id="splicePipYValue">5.0%</output></div></label>
+              <p class="small pip-frame-control-hint" id="splicePipFrameHint" hidden>这里的滑块和黄色选框只调整画中画外框；框内素材请到“属性”页调整。</p>
               <div class="splice-actions"><button class="btn" id="spliceApplyLayout" type="button">应用布局</button><span class="small" id="spliceHint">布局轨道会与现有时间轴、预览和导出同步。</span></div>
               </details>
             </div>
@@ -688,5 +690,3 @@
             
           </div>
         </aside>
-      </section>
-      

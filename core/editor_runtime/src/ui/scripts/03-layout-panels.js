@@ -112,14 +112,6 @@ function updateFrameSize(force = false) {
       function applyLayout() {
         const layout = state.layout || (state.layout = defaultStartupLayout());
         Object.assign(layout, resolveWorkspaceLayout(innerWidth, innerHeight, layout));
-        if (state.editorActive) {
-          const trackHeight = (id) => Math.max(68, Number(state.trackHeights?.[id] || 68));
-          const tracksHeight = (state.trackOrder || []).reduce((sum, id) => sum + trackHeight(id), 0);
-          const required = 52 + 40 + tracksHeight + 10;
-          const available = Math.max(220, innerHeight - 74);
-          const maximum = Math.max(220, available - Math.min(180, available * 0.34));
-          layout.timeline = Math.min(maximum, Math.max(layout.timeline, required));
-        }
         document.documentElement.style.setProperty(
           "--side",
           `${layout.side}px`,
@@ -165,7 +157,9 @@ function updateFrameSize(force = false) {
           value: Number(layout[kind]),
         };
         event.currentTarget.classList.add("dragging");
+        event.currentTarget.setPointerCapture?.(event.pointerId);
         event.preventDefault();
+        event.stopPropagation();
       }
       $("leftPanelResizer").onpointerdown = (event) =>
         beginLayoutResize(event, "side");

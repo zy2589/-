@@ -1685,7 +1685,9 @@
       }
       .timelinecontent { min-height: 100%; height: max-content; background-color: var(--timeline-lane); }
       .tracklabels { background: #1d1e22; }
-      .tracklabel, .trackrow { min-height: 68px; border-bottom: 1px solid #15161a; box-shadow: inset 0 -1px #35363b; }
+      .tracklabel, .trackrow { min-height: 56px; border-bottom: 1px solid #15161a; box-shadow: inset 0 -1px #35363b; }
+      .track-family-start[data-track-kind="video"] { border-top: 2px solid #55575e; }
+      .track-family-start[data-track-kind="audio"] { border-top: 3px solid #090a0b; box-shadow: inset 0 1px #4c4e54, inset 0 -1px #35363b; }
       .tracklabel {
         position: relative;
         display: flex;
@@ -1767,7 +1769,7 @@
         justify-content: center;
         margin-top: 3px;
         flex: 1;
-        min-height: 30px;
+        min-height: 18px;
         overflow: hidden;
       }
       .track-info-body .track-title {
@@ -1789,8 +1791,17 @@
       }
       .tracklabel.audio, .tracklabel.video, .tracklabel.image, .tracklabel.caption, .tracklabel.review { border-left:3px solid #77797e; }
       .tracklabel.audio { border-left-color:#176b3a; }
-      .track-resize-grip { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; z-index: 10; cursor: ns-resize; }
+      .track-resize-grip { position: absolute; left: 0; right: 0; bottom: 0; height: 7px; z-index: 70; cursor: ns-resize; touch-action: none; }
       .track-resize-grip:hover, .tracklabel.resizing .track-resize-grip { background: rgba(82, 169, 221, .85); }
+      .trackrow { position: relative; min-height: 56px; }
+      .trackrow::after { content: ""; position: absolute; left: 0; right: 0; bottom: -3px; height: 8px; cursor: ns-resize; touch-action: none; z-index: 70; }
+      .trackrow:hover::after, .trackrow.resizing-track::after { background: rgba(82,169,221,.28); }
+      .trackrow.resizing-track::after { background: rgba(82,169,221,.85); }
+      .trackrow.drop-target-track { background-color: rgba(64,149,227,.17); box-shadow: inset 0 0 0 2px #55aaff; }
+      .trackrow.drop-invalid-track { background-color: rgba(220,70,70,.1); box-shadow: inset 0 0 0 2px rgba(235,90,90,.7); }
+      .tracklabel.track-family-start[data-track-kind="audio"] { border-top: 3px solid #090a0b; }
+      .tracklabel.track-family-start[data-track-kind="video"] { border-top: 2px solid #55575e; }
+      .clip.track-drag-preview { will-change: translate; }
       .clip { top: 3px; height: calc(var(--timeline-track-h) - 7px); padding: 5px 7px; border-radius: 2px; border: 1px solid #101113; box-shadow: inset 0 0 0 1px rgba(255,255,255,.10); font-size: 11px; }
       .clip.video { background:#477da2; }.clip.audio{background:#123b2d}.clip.image{background:#477a9d}.clip.text{background:#816b3f}.clip.caption{background:#76556f}
       .clip.selected { outline:1px solid #73c9ff;outline-offset:-1px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.35),0 0 0 1px #090a0b; }
@@ -1806,8 +1817,19 @@
       .zoom { accent-color: #8d8f94; }
       @media (max-height: 780px) { :root { --timeline: 310px; --timeline-track-h: 48px; } }
       /* The startup proportions take precedence over legacy fixed-width breakpoints. */
-      .app { grid-template-rows: var(--top) minmax(0, 1fr) var(--timeline) var(--footer); }
-      .workspace { grid-template-columns: var(--side) 5px minmax(0, 1fr) 5px var(--inspector); min-height: 0; }
+      .app { grid-template-rows: var(--top) minmax(0, 1fr) var(--footer); }
+      .workspace {
+        grid-template-columns: var(--side) 5px minmax(0, 1fr) 5px var(--inspector);
+        grid-template-rows: minmax(220px, 1fr) minmax(160px, var(--timeline));
+        min-height: 0;
+      }
+      .sidebar { grid-column: 1; grid-row: 1; }
+      #leftPanelResizer { grid-column: 2; grid-row: 1; }
+      .previewarea { grid-column: 3; grid-row: 1; min-height: 0; }
+      #rightPanelResizer { grid-column: 4; grid-row: 1 / 3; }
+      .inspector { grid-column: 5; grid-row: 1 / 3; min-height: 0; }
+      .timeline { grid-column: 1 / 4; grid-row: 2; min-height: 0; }
+      .appfooter { grid-column: 1 / -1; grid-row: 3; }
     </style>
   </head>
   <body>

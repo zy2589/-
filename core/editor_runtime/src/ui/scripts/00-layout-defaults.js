@@ -32,9 +32,10 @@
           sideMin, Math.max(sideMin, w - inspectorMin - previewMin - 10)));
         const inspector = Math.round(bound(desired("inspector", w * 300 / 1982),
           inspectorMin, Math.max(inspectorMin, w - side - previewMin - 10)));
-        const availableHeight = Math.max(120, h - 50 - 24);
-        const timelineMin = Math.min(220, availableHeight * 0.4);
-        const timelineMax = Math.max(timelineMin, availableHeight - Math.min(300, availableHeight * 0.55));
+        const availableHeight = Math.max(240, h - 50 - 24);
+        const previewHeightMin = Math.min(300, availableHeight * 0.38);
+        const timelineMin = Math.min(180, availableHeight * 0.3);
+        const timelineMax = Math.max(timelineMin, availableHeight - previewHeightMin);
         return {
           side, inspector,
           timeline: Math.round(bound(desired("timeline", availableHeight * 367 / 1082), timelineMin, timelineMax)),

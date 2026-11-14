@@ -11,12 +11,26 @@
         position: absolute;
         left: 0;
         right: 0;
-        top: -4px;
-        height: 8px;
+        top: -6px;
+        height: 12px;
         cursor: row-resize;
         z-index: 45;
+        touch-action: none;
       }
       .timeline-resizer:hover { background: rgba(31, 131, 255, .55); }
+      .timeline-resizer::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 4px;
+        width: 44px;
+        height: 3px;
+        border-radius: 2px;
+        background: #55575e;
+        transform: translateX(-50%);
+        pointer-events: none;
+      }
+      .timeline-resizer:hover::after, .timeline-resizer.dragging::after { background: #58a6ff; }
       .timelinebar {
         display: grid;
         grid-template-columns: var(--track-label-width) 5px minmax(0, 1fr);

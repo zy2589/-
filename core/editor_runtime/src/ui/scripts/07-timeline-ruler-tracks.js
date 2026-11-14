@@ -158,8 +158,9 @@ function rulerTickPlan(zoom) {
           tail = content.querySelector("#timelineMarquee");
         let draggingTrackKey = "";
         labels.innerHTML = state.trackOrder
-          .map((key) => {
+          .map((key, orderIndex) => {
             const meta = trackInfo(key),
+              familyStart = orderIndex === 0 || trackInfo(state.trackOrder[orderIndex - 1]).kind !== meta.kind,
               visible = state.trackVisibility[key] !== false,
               locked = isTrackLocked(key),
               soloed = !!state.trackSolo?.[key],
@@ -178,7 +179,7 @@ function rulerTickPlan(zoom) {
             const labelTitle = key === "review"
               ? "待处理片段：点击试听，Alt+点击替换为识别口播，Ctrl+点击保留，Shift+点击删除"
               : trackName;
-            return `<div class="tracklabel ${escapeHtml(meta.className)}" draggable="true" data-track-key="${escapeHtml(key)}"><div class="track-header-bar"><span class="trackhandle" title="拖动调整轨道顺序">⠿</span><span class="track-badge" title="${escapeHtml(labelTitle)}">${escapeHtml(badge)}</span><div class="track-controls"><button class="tracklock ${locked ? "on" : ""}" data-lock-track="${escapeHtml(key)}" title="${locked ? "解锁轨道" : "锁定轨道"}">${locked ? "■" : "□"}</button><button class="tracksync ${isTrackSyncLocked(key) ? "on" : ""}" data-sync-track="${escapeHtml(key)}" aria-pressed="${isTrackSyncLocked(key)}" title="同步锁：决定其他轨道波纹剪辑时此轨是否同步调整">↔</button><button class="trackauto ${autoSelected ? "on" : ""}" data-auto-track="${escapeHtml(key)}" title="自动轨道选择器：决定选择后方、全选等命令是否作用于此轨">⇥</button>${audioTrack ? `<button class="tracksolo ${soloed ? "on" : ""}" data-solo-track="${escapeHtml(key)}" title="独听此轨">S</button><button class="trackmute ${muted ? "on" : ""}" data-mute-track="${escapeHtml(key)}" title="静音此轨">M</button><span class="audio-channel-tag">2.0</span>` : ""}<button class="visibility ${visible ? "" : "off"}" data-toggle-track="${escapeHtml(key)}" title="${visible ? "关闭轨道" : "显示轨道"}">${symbol}</button>${remove}</div></div><div class="track-info-body"><span class="track-title" title="${escapeHtml(labelTitle)}">${escapeHtml(trackName)}</span><span class="track-clip-count">${clipCount}</span></div><span class="track-resize-grip" data-resize-track="${escapeHtml(key)}" title="按住拖动自由调节轨道高度；双击恢复默认高度"></span></div>`;
+            return `<div class="tracklabel ${escapeHtml(meta.className)}${familyStart ? " track-family-start" : ""}" draggable="true" data-track-key="${escapeHtml(key)}" data-track-kind="${escapeHtml(meta.kind)}"><div class="track-header-bar"><span class="trackhandle" title="拖动调整轨道顺序">⠿</span><span class="track-badge" title="${escapeHtml(labelTitle)}">${escapeHtml(badge)}</span><div class="track-controls"><button class="tracklock ${locked ? "on" : ""}" data-lock-track="${escapeHtml(key)}" title="${locked ? "解锁轨道" : "锁定轨道"}">${locked ? "■" : "□"}</button><button class="tracksync ${isTrackSyncLocked(key) ? "on" : ""}" data-sync-track="${escapeHtml(key)}" aria-pressed="${isTrackSyncLocked(key)}" title="同步锁：决定其他轨道波纹剪辑时此轨是否同步调整">↔</button><button class="trackauto ${autoSelected ? "on" : ""}" data-auto-track="${escapeHtml(key)}" title="自动轨道选择器：决定选择后方、全选等命令是否作用于此轨">⇥</button>${audioTrack ? `<button class="tracksolo ${soloed ? "on" : ""}" data-solo-track="${escapeHtml(key)}" title="独听此轨">S</button><button class="trackmute ${muted ? "on" : ""}" data-mute-track="${escapeHtml(key)}" title="静音此轨">M</button><span class="audio-channel-tag">2.0</span>` : ""}<button class="visibility ${visible ? "" : "off"}" data-toggle-track="${escapeHtml(key)}" title="${visible ? "关闭轨道" : "显示轨道"}">${symbol}</button>${remove}</div></div><div class="track-info-body"><span class="track-title" title="${escapeHtml(labelTitle)}">${escapeHtml(trackName)}</span><span class="track-clip-count">${clipCount}</span></div><span class="track-resize-grip" data-resize-track="${escapeHtml(key)}" title="按住拖动自由调节轨道高度；双击恢复默认高度"></span></div>`;
           })
           .join("");
         content.querySelectorAll(".trackrow[data-track-key]").forEach((row) => {
@@ -200,13 +201,17 @@ function rulerTickPlan(zoom) {
           );
           row.classList.toggle("locked-track", isTrackLocked(key));
           row.classList.toggle("solo-muted", trackInfo(key).kind === "audio" && !isTrackAudible(key));
-          const rowHeight = Math.max(68, Number(state.trackHeights?.[key] || 68));
+          const orderIndex = state.trackOrder.indexOf(key);
+          const familyStart = orderIndex === 0 || trackInfo(state.trackOrder[orderIndex - 1]).kind !== trackInfo(key).kind;
+          row.dataset.trackKind = trackInfo(key).kind;
+          row.classList.toggle("track-family-start", familyStart);
+          const rowHeight = Math.max(56, Number(state.trackHeights?.[key] || 68));
           row.style.height = `${rowHeight}px`;
           if (tail) content.insertBefore(row, tail);
           else content.appendChild(row);
         }
         labels.querySelectorAll("[data-track-key]").forEach((label) => {
-          const rowHeight = Math.max(68, Number(state.trackHeights?.[label.dataset.trackKey] || 68));
+          const rowHeight = Math.max(56, Number(state.trackHeights?.[label.dataset.trackKey] || 68));
           label.style.height = `${rowHeight}px`;
           label.ondragstart = (event) => {
             if (!event.target.closest?.(".trackhandle")) {
@@ -351,7 +356,7 @@ function rulerTickPlan(zoom) {
               })
               .join("");
           }
-          const configuredHeight = Math.max(68, Number(state.trackHeights?.[key] || 68));
+          const configuredHeight = Math.max(56, Number(state.trackHeights?.[key] || 68));
           const laneHeight = `${Math.max(configuredHeight, laneCount > 1 ? 6 + laneCount * 27 : 40)}px`;
           const gapSelection = timelineGapSelection?.trackId === key
             ? `<span class="timeline-gap-selection" data-selected-gap style="left:${timelineGapSelection.start * state.zoom}px;width:${Math.max(2, timelineGapSelection.duration * state.zoom)}px"></span>`
@@ -413,7 +418,7 @@ function rulerTickPlan(zoom) {
             proxy.title = `${group.name || "复合片段"} · 双击编辑内部时间线；拖动边缘裁切或恢复`;
             proxy.style.left = `${Number(group.start || 0) * state.zoom}px`;
             proxy.style.width = `${Math.max(4, (Number(group.end || group.start || 0) - Number(group.start || 0)) * state.zoom)}px`;
-            const configuredHeight = Math.max(68, Number(state.trackHeights?.[entry.clip.dataset.trackId || entry.member.type] || row.clientHeight || 68));
+            const configuredHeight = Math.max(56, Number(state.trackHeights?.[entry.clip.dataset.trackId || entry.member.type] || row.clientHeight || 68));
             proxy.style.top = "3px";
             proxy.style.height = `${Math.max(24, configuredHeight - 7)}px`;
             proxy.innerHTML = `${group.nestedTimeline?'<i class="trim-handle start" data-trim="start"></i>':''}${audioProxy ? `<canvas class="compound-wavecanvas" data-compound-waveform="${escapeHtml(group.id)}"></canvas>` : ""}<span class="compound-name">${escapeHtml(group.name || "复合片段")}</span>${group.nestedTimeline?'<i class="trim-handle end" data-trim="end"></i>':''}`;

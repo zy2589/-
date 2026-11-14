@@ -8,6 +8,16 @@
   const DEFAULT_LAYOUT = "free";
   let freezeDecoder = null;
   let freezeRequest = "";
+  // A PIP has two separately editable targets: its layout frame and its media.
+  // Layout-tab controls/handles edit the frame; the Basic inspector edits media.
+  let pipEditTarget = "content";
+
+  function setPipEditTarget(target, refresh = true) {
+    pipEditTarget = target === "frame" ? "frame" : "content";
+    const box = $("selectionBox");
+    if (box) box.dataset.spliceTarget = pipEditTarget;
+    if (refresh) window.updateSelectionBox?.();
+  }
 
   function spliceLayoutRegions(layout = state.spliceLayout || DEFAULT_LAYOUT) {
     const ratio = clamp(Number(state.spliceRatio || 0.5), 0.2, 0.8);
@@ -362,12 +372,21 @@
 
   function spliceSelectionBounds(target) {
     const selectedPip = spliceRegions().find((item) => item.id === state.spliceSelectedRegionId && item.kind === "pip");
-    const region = selectedPip || (target ? autoSpliceRegion(target) : null);
+    if (!selectedPip || pipEditTarget !== "frame") return null;
+    const region = selectedPip;
     if (!region) return null;
     const points = geometryPoints(region);
     const xs = points.map(([x]) => x), ys = points.map(([, y]) => y);
     const left = Math.min(...xs), top = Math.min(...ys);
     return { x: left, y: top, w: Math.max(.001, Math.max(...xs) - left), h: Math.max(.001, Math.max(...ys) - top) };
+  }
+
+  function spliceSelectionMode(target) {
+    const selectedRegion = spliceRegions().find((item) => item.id === state.spliceSelectedRegionId && item.kind === "pip");
+    if (!selectedRegion) return "";
+    const targetRegion = target ? autoSpliceRegion(target) : null;
+    if (pipEditTarget === "frame") return "frame";
+    return targetRegion?.id === selectedRegion.id ? "content" : "";
   }
 
   function spliceRegionBounds(region) {
@@ -481,6 +500,8 @@
       if (regionSelect.value !== state.spliceSelectedRegionId && state.spliceSelectedRegionId) regionSelect.value = state.spliceSelectedRegionId;
     } else videoRegion.value = "auto";
     const selectedRegion = regions.find((region) => region.id === state.spliceSelectedRegionId);
+    const frameHint = $("splicePipFrameHint");
+    if (frameHint) frameHint.hidden = selectedRegion?.kind !== "pip";
     if (selectedRegion) {
       $("spliceRegionName").value = selectedRegion.name || "";
       $("spliceShape").value = selectedRegion.shape || "rect";
@@ -658,47 +679,28 @@
     let draggedDivider = null;
     let resizedPip = null;
     const activeVisualInRegion = (regionId) => {
-      const time = Number(state.currentTime || 0), candidates = [];
+      const scene = window.timelinePreviewSceneAt?.(state.currentTime);
+      if (!scene) return null;
+      const candidates = [];
       let paintOrder = 0;
-      const main = activeMainVideoClip?.();
-      if (main && state.video && state.trackVisibility?.[state.mainVideoTrackMap?.[main.id] || "video"] !== false) {
+      const main = scene.activeMainClip;
+      if (main && state.video && !scene.duplicateMainHidden && state.trackVisibility?.[scene.activeMainTrack] !== false) {
         const settings = mainVideoSettings(main);
         const target = { type: "main", clip: main, settings, media: state.video };
         if (autoSpliceRegion(target)?.id === regionId)
-          candidates.push({ type: "video", id: main.id, target, z: visualZ(state.mainVideoTrackMap?.[main.id] || "video"), order: paintOrder++ });
+          candidates.push({ type: "video", id: main.id, target, z: visualZ(scene.activeMainTrack), order: paintOrder++ });
       }
-      for (const clip of state.videoLayers || []) {
-        if (time < Number(clip.start || 0) || time >= Number(clip.end || 0) || state.trackVisibility?.[clip.trackId] === false) continue;
+      for (const clip of scene.visibleVideoLayers) {
         const target = { type: "layer", clip, settings: clip, media: clip };
         if (autoSpliceRegion(target)?.id === regionId)
           candidates.push({ type: "videolayer", id: clip.id, target, z: visualZ(clip.trackId), order: paintOrder++ });
       }
-      for (const clip of state.images || []) {
-        if (time < Number(clip.start || 0) || time >= Number(clip.end || 0) || state.trackVisibility?.[clip.trackId] === false) continue;
+      for (const clip of scene.activeImages) {
         const target = { type: "layer", clip, settings: clip, media: clip };
         if (autoSpliceRegion(target)?.id === regionId)
           candidates.push({ type: "image", id: clip.id, target, z: visualZ(clip.trackId), order: paintOrder++ });
       }
       return candidates.sort((left, right) => right.z - left.z || right.order - left.order)[0] || null;
-    };
-    const edgeDistance = (region, clientX, clientY, bounds) => {
-      const points = geometryPoints(region).map(([x, y]) => [bounds.left + x * bounds.width, bounds.top + y * bounds.height]);
-      let shortest = Infinity;
-      for (let index = 0; index < points.length; index += 1) {
-        const [ax, ay] = points[index], [bx, by] = points[(index + 1) % points.length];
-        const dx = bx - ax, dy = by - ay, length2 = dx * dx + dy * dy;
-        const ratio = length2 ? clamp(((clientX - ax) * dx + (clientY - ay) * dy) / length2, 0, 1) : 0;
-        shortest = Math.min(shortest, Math.hypot(clientX - (ax + dx * ratio), clientY - (ay + dy * ratio)));
-      }
-      return shortest;
-    };
-    const pipFrameMoveHitDistance = (region, bounds) => {
-      const frame = spliceRegionBounds(region);
-      if (!frame) return 0;
-      const renderedSize = Math.min(frame.w * bounds.width, frame.h * bounds.height);
-      // Keep a usable border target on large frames without swallowing the
-      // media's interior on small PIP frames.
-      return Math.min(8, Math.max(2, renderedSize * .18));
     };
     const refreshSplicePreview = () => {
       updatePreviewTransformOnly(false);
@@ -715,6 +717,7 @@
       updateSelectionBox();
     };
     const updatePipScale = (rawValue) => {
+      setPipEditTarget("frame", false);
       const region = state.spliceRegions?.find((item) => item.id === state.spliceSelectedRegionId && item.kind === "pip");
       if (!region) return;
       const bounds = spliceRegionBounds(region);
@@ -736,6 +739,7 @@
       queueAutosave();
     };
     const updatePipPosition = (axis, rawValue) => {
+      setPipEditTarget("frame", false);
       const region = state.spliceRegions?.find((item) => item.id === state.spliceSelectedRegionId && item.kind === "pip");
       if (!region) return;
       const bounds = spliceRegionBounds(region);
@@ -808,7 +812,7 @@
       const handle = event.target.closest?.("[data-handle]");
       if (!handle) return;
       const region = state.spliceRegions?.find((item) => item.id === state.spliceSelectedRegionId && item.kind === "pip");
-      if (!region) return;
+      if (!region || pipEditTarget !== "frame") return;
       const bounds = spliceRegionBounds(region);
       if (!bounds) return;
       snapshot();
@@ -847,12 +851,14 @@
       state.spliceSelectedRegionId = region.id;
       const frameBounds = $("frame").getBoundingClientRect();
       const content = activeVisualInRegion(region.id);
+      // The active panel determines the object: Layout moves/resizes the
+      // frame; Basic edits the media inside it. The pointer edge position
+      // never changes the target implicitly.
+      const moveFrame = pipEditTarget === "frame" || !content;
+      setPipEditTarget(moveFrame || !content ? "frame" : "content", false);
       if (content) {
         window.syncPreviewTimelineSelection?.(content.type, content.id, true);
         const settings = content.target.settings;
-          const edge = edgeDistance(region, event.clientX, event.clientY, frameBounds);
-          const hitDistance = pipFrameMoveHitDistance(region, frameBounds);
-          const moveFrame = edge <= hitDistance;
         snapshot();
         if (moveFrame) draggedPip = { pointerId: event.pointerId, region, startX: event.clientX, startY: event.clientY, x: Number(region.x || 0), y: Number(region.y || 0) };
         else draggedContent = { pointerId: event.pointerId, settings, startX: event.clientX, startY: event.clientY, x: Number(settings.x || 0), y: Number(settings.y || 0), type: content.type };
@@ -939,10 +945,11 @@
       $("spliceAngle").value = event.target.value;
       updateSpliceAngle(event);
     });
-    $("spliceRegionSelect")?.addEventListener("change", (event) => { state.spliceSelectedRegionId = event.target.value; syncSplicePanel(); renderSpliceGuide(); updateSelectionBox(); });
+    $("spliceRegionSelect")?.addEventListener("change", (event) => { state.spliceSelectedRegionId = event.target.value; setPipEditTarget("frame", false); syncSplicePanel(); renderSpliceGuide(); updateSelectionBox(); });
     $("spliceRegionName")?.addEventListener("change", (event) => { persistSpliceRegions(); const region = state.spliceRegions.find((item) => item.id === state.spliceSelectedRegionId); if (region) { region.name = event.target.value.trim() || region.name; persistSpliceRegions(); renderAll(); } });
-    $("spliceShape")?.addEventListener("change", (event) => { persistSpliceRegions(); const region = state.spliceRegions.find((item) => item.id === state.spliceSelectedRegionId); if (region) { region.shape = event.target.value; persistSpliceRegions(); renderSpliceGuide(); renderPreviewObjects(); queueAutosave(); } });
+    $("spliceShape")?.addEventListener("change", (event) => { setPipEditTarget("frame", false); persistSpliceRegions(); const region = state.spliceRegions.find((item) => item.id === state.spliceSelectedRegionId); if (region) { region.shape = event.target.value; persistSpliceRegions(); renderSpliceGuide(); renderPreviewObjects(); queueAutosave(); } });
     $("spliceBorderColor")?.addEventListener("input", (event) => {
+      setPipEditTarget("frame", false);
       persistSpliceRegions();
       const region = state.spliceRegions.find((item) => item.id === state.spliceSelectedRegionId);
       if (!region || region.kind !== "pip") return;
@@ -956,6 +963,7 @@
       queueAutosave();
     });
     const updateSpliceBorderWidth = (value) => {
+      setPipEditTarget("frame", false);
       persistSpliceRegions();
       const region = state.spliceRegions.find((item) => item.id === state.spliceSelectedRegionId);
       if (!region) return;
@@ -974,6 +982,9 @@
     $("splicePipScaleRange")?.addEventListener("pointerdown", () => snapshot());
     $("splicePipXRange")?.addEventListener("pointerdown", () => snapshot());
     $("splicePipYRange")?.addEventListener("pointerdown", () => snapshot());
+    $("splicePipScaleRange")?.addEventListener("pointerdown", () => setPipEditTarget("frame"));
+    $("splicePipXRange")?.addEventListener("pointerdown", () => setPipEditTarget("frame"));
+    $("splicePipYRange")?.addEventListener("pointerdown", () => setPipEditTarget("frame"));
     $("splicePipScaleRange")?.addEventListener("input", (event) => updatePipScale(event.target.value));
     $("splicePipXRange")?.addEventListener("input", (event) => updatePipPosition("x", event.target.value));
     $("splicePipYRange")?.addEventListener("input", (event) => updatePipPosition("y", event.target.value));
@@ -1046,7 +1057,18 @@
       $("spliceFreezeFrame").value = source.toFixed(3);
       updateSelectedSpliceTarget({ spliceFreezeFrame: source });
     });
-    document.querySelectorAll(".tab[data-inspect]").forEach((button) => button.addEventListener("click", () => setTimeout(syncSplicePanel, 0)));
+    document.querySelectorAll(".tab[data-inspect]").forEach((button) => button.addEventListener("click", () => setTimeout(() => {
+      if (button.dataset.inspect === "splice") setPipEditTarget("frame");
+      else if (button.dataset.inspect === "basic") setPipEditTarget("content");
+      syncSplicePanel();
+      updateSelectionBox();
+    }, 0)));
+    document.addEventListener("pointerdown", (event) => {
+      const target = event.target.closest?.("#objectScale,#objectX,#objectY,#objectXRange,#objectYRange,#objectRotation,#objectOpacity,#objectBlendMode,#cropTop,#cropBottom,#cropLeft,#cropRight,#manualCropBtn,#previewZoomRange");
+      if (target) setPipEditTarget("content");
+      const frameControl = event.target.closest?.("#splicePipScaleRange,#splicePipXRange,#splicePipYRange,#spliceShape,#spliceBorderColor,#spliceBorderWidth,#spliceBorderWidthRange");
+      if (frameControl) setPipEditTarget("frame");
+    }, true);
     document.addEventListener("click", (event) => {
       const video = event.target.closest?.('.videoobject[data-type="video"],.layer-video-decoder[data-type="videolayer"]');
       if (!video) return;
@@ -1068,6 +1090,8 @@
   window.spliceRegionAtPoint = spliceRegionAtPoint;
   window.spliceRegionName = (id) => spliceRegions().find((region) => region.id === id)?.name || "分区";
   window.spliceSelectionBounds = spliceSelectionBounds;
+  window.spliceSelectionMode = spliceSelectionMode;
+  window.setSpliceEditTarget = setPipEditTarget;
   window.spliceRegionForExport = (target) => {
     const region = autoSpliceRegion(target);
     return region ? { ...region, points: Array.isArray(region.points) ? region.points.map((point) => [...point]) : null } : null;

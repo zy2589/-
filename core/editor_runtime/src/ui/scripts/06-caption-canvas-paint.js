@@ -506,7 +506,8 @@ function captionTextLayout() {
           if (clip && window.spliceRegionForExport?.({ type: "layer", clip, settings: clip, media: clip }))
             spliceTarget = { type: "layer", clip, settings: clip, media: clip };
         }
-        const spliceBounds = spliceTarget && window.spliceSelectionBounds?.(spliceTarget);
+        const spliceMode = spliceTarget && window.spliceSelectionMode?.(spliceTarget);
+        const spliceBounds = spliceMode === "frame" && spliceTarget && window.spliceSelectionBounds?.(spliceTarget);
         if (spliceBounds) {
           const frameWidth = frame.clientWidth || 1, frameHeight = frame.clientHeight || 1;
           box.style.left = `${spliceBounds.x * frameWidth}px`;
@@ -515,11 +516,29 @@ function captionTextLayout() {
           box.style.height = `${spliceBounds.h * frameHeight}px`;
           box.style.transform = "none";
           box.style.transformOrigin = "center center";
+          box.dataset.spliceTarget = "frame";
           box.classList.remove("text-width");
           box.classList.add("on");
           syncCropHandles();
           return;
         }
+        if (spliceMode === "content") {
+          const frameRect = frame.getBoundingClientRect(), elementRect = element.getBoundingClientRect();
+          const scaleX = frameRect.width / Math.max(1, frame.clientWidth);
+          const scaleY = frameRect.height / Math.max(1, frame.clientHeight);
+          box.style.left = `${(elementRect.left - frameRect.left) / Math.max(.001, scaleX)}px`;
+          box.style.top = `${(elementRect.top - frameRect.top) / Math.max(.001, scaleY)}px`;
+          box.style.width = `${elementRect.width / Math.max(.001, scaleX)}px`;
+          box.style.height = `${elementRect.height / Math.max(.001, scaleY)}px`;
+          box.style.transform = "none";
+          box.style.transformOrigin = "center center";
+          box.dataset.spliceTarget = "content";
+          box.classList.remove("text-width");
+          box.classList.add("on");
+          syncCropHandles();
+          return;
+        }
+        delete box.dataset.spliceTarget;
         box.style.left = `${element.offsetLeft}px`;
         box.style.top = `${element.offsetTop}px`;
         box.style.width = `${element.offsetWidth}px`;
@@ -533,6 +552,7 @@ function captionTextLayout() {
         box.classList.add("on");
         syncCropHandles();
       }
+      window.updateSelectionBox = updateSelectionBox;
       function captionRasterOverlayOffset(frameW, frameH, x, y, w, h) {
         return {
           x: Number(x || 0) - (Number(frameW || 0) - Number(w || 0)) / 2,

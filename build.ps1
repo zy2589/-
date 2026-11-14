@@ -214,7 +214,12 @@ try {
         'data-handle="e"',
         'data-handle="s"',
         'data-handle="w"',
-        'pipFrameMoveHitDistance',
+        'pipEditTarget === "frame"',
+        'window.setSpliceEditTarget = setPipEditTarget',
+        'function timelinePreviewSceneAt(time = state.currentTime)',
+        'window.timelinePreviewSceneAt = timelinePreviewSceneAt',
+        'preparedVideoLayers',
+        'timelineVideoLayers',
         'splicePipScaleRange',
         'splicePipXRange',
         'splicePipYRange'
