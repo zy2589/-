@@ -225,17 +225,39 @@ try {
         'timelineVideoLayers',
         'splicePipScaleRange',
         'splicePipXRange',
-        'splicePipYRange'
+        'splicePipYRange',
+        'function setTrackLabelDensity',
+        '.tracklabel.track-compact',
+        'setTrackLabelDensity(trackHeightDrag.label, height)'
     )) {
         if (!$GeneratedUiText.Contains($RequiredUiToken)) {
             throw "生成后的剪辑页面缺少必要功能：$RequiredUiToken"
         }
     }
 $UiHostSourceText = [IO.File]::ReadAllText((Join-Path $Root 'core\ui.py'))
-foreach ($RequiredPagePaintToken in @('_redraw_page_now', 'RDW_ALLCHILDREN', 'RDW_UPDATENOW')) {
-    if (!$UiHostSourceText.Contains($RequiredPagePaintToken)) {
-        throw "区域切换重绘修复缺失，已中止打包：$RequiredPagePaintToken"
+$CutoutPageLoops = [regex]::Matches($UiHostSourceText, 'range\(CUTOUT_PAGE_COUNT\)').Count
+if (!$UiHostSourceText.Contains('CUTOUT_PAGE_COUNT = 2') -or $CutoutPageLoops -ne 2) {
+    throw "抠图页数量不是 2，已中止打包（页面循环数：$CutoutPageLoops）。"
+}
+$PageSwitchStart = $UiHostSourceText.IndexOf('    def _show_page(self, name: str, nav) -> None:')
+$PageSwitchEnd = $UiHostSourceText.IndexOf('    def _card(', $PageSwitchStart)
+if ($PageSwitchStart -lt 0 -or $PageSwitchEnd -le $PageSwitchStart) {
+    throw '区域切换代码段缺失，已中止打包。'
+}
+$PageSwitchSourceText = $UiHostSourceText.Substring($PageSwitchStart, $PageSwitchEnd - $PageSwitchStart)
+foreach ($RequiredPageSwitchToken in @('target.tkraise()', 'self.page_body = target', 'set_view_active')) {
+    if (!$PageSwitchSourceText.Contains($RequiredPageSwitchToken)) {
+        throw "区域常驻切换缺少必要逻辑，已中止打包：$RequiredPageSwitchToken"
     }
+}
+foreach ($RemovedPageSwitchToken in @('grid_remove()', 'RedrawWindow', 'embedded_editor.hide()')) {
+    if ($PageSwitchSourceText.Contains($RemovedPageSwitchToken)) {
+        throw "区域切换仍会卸载或强制重绘页面，已中止打包：$RemovedPageSwitchToken"
+    }
+}
+if (!$UiHostSourceText.Contains('for frame in self.page_frames.values():') -or
+    !$UiHostSourceText.Contains('frame.grid(row=0, column=0, sticky="nsew")')) {
+    throw '区域页面未在初始化时常驻映射，已中止打包。'
 }
     $RenderSourceText = [IO.File]::ReadAllText((Join-Path $EngineEditorSource 'media\render.mjs'))
     if (!$RenderSourceText.Contains('const hasMainAudio = !config.noMainVideoSource')) {

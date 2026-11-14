@@ -4160,6 +4160,7 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
         background: #1f2024;
         overflow: hidden;
         box-sizing: border-box;
+        min-width: 0;
       }
       .track-header-bar {
         display: flex;
@@ -4169,6 +4170,7 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
         min-height: 24px;
         flex-shrink: 0;
         width: 100%;
+        min-width: 0;
       }
       .tracklabel .trackhandle {
         color: #62646a;
@@ -4230,14 +4232,18 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
         flex-direction: column;
         justify-content: center;
         margin-top: 3px;
-        flex: 1;
-        min-height: 18px;
+        flex: 1 1 auto;
+        width: 100%;
+        min-width: 0;
+        min-height: 0;
         overflow: hidden;
       }
       .track-info-body .track-title {
         font-size: 12px;
         font-weight: 600;
         color: #cfd0d4;
+        min-width: 0;
+        max-width: 100%;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -4246,11 +4252,25 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
       .track-info-body .track-clip-count {
         font-size: 11px;
         color: #71737a;
+        min-width: 0;
+        max-width: 100%;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         line-height: 1.2;
       }
+      .tracklabel.track-compact { padding-top: 2px; padding-bottom: 5px; }
+      .tracklabel.track-compact .track-header-bar { height: 20px; min-height: 20px; gap: 4px; }
+      .tracklabel.track-compact .track-info-body { justify-content: flex-start; margin-top: 0; }
+      .tracklabel.track-compact .track-title { font-size: 10px; line-height: 12px; }
+      .tracklabel.track-compact .track-clip-count { display: none; }
+      .tracklabel.track-roomy { padding-top: 5px; padding-bottom: 5px; }
+      .tracklabel.track-roomy .track-header-bar { height: 26px; min-height: 26px; }
+      .tracklabel.track-roomy .track-badge,
+      .tracklabel.track-roomy .track-controls button { height: 22px; }
+      .tracklabel.track-roomy .track-info-body { margin-top: 4px; }
+      .tracklabel.track-roomy .track-title { font-size: 13px; }
+      .tracklabel.track-roomy .track-clip-count { font-size: 12px; }
       .tracklabel.audio, .tracklabel.video, .tracklabel.image, .tracklabel.caption, .tracklabel.review { border-left:3px solid #77797e; }
       .tracklabel.audio { border-left-color:#176b3a; }
       .track-resize-grip { position: absolute; left: 0; right: 0; bottom: 0; height: 7px; z-index: 70; cursor: ns-resize; touch-action: none; }
@@ -14098,6 +14118,12 @@ function rulerTickPlan(zoom) {
         else count = (trackItems(key) || []).length;
         return `${count} 个片段`;
       }
+      function setTrackLabelDensity(label, height) {
+        if (!label) return;
+        const rowHeight = Math.max(56, Number(height) || 68);
+        label.classList.toggle("track-compact", rowHeight < 68);
+        label.classList.toggle("track-roomy", rowHeight >= 108);
+      }
       function renderTrackOrder() {
         const labels = $("trackLabels"),
           content = $("timelineContent"),
@@ -14159,6 +14185,7 @@ function rulerTickPlan(zoom) {
         labels.querySelectorAll("[data-track-key]").forEach((label) => {
           const rowHeight = Math.max(56, Number(state.trackHeights?.[label.dataset.trackKey] || 68));
           label.style.height = `${rowHeight}px`;
+          setTrackLabelDensity(label, rowHeight);
           label.ondragstart = (event) => {
             if (!event.target.closest?.(".trackhandle")) {
               event.preventDefault();
@@ -22685,7 +22712,10 @@ function persistedMediaItem(item, preserveWaveform = false) {
         ));
         state.trackHeights ||= {};
         state.trackHeights[trackHeightDrag.key] = height;
-        if (trackHeightDrag.label) trackHeightDrag.label.style.height = `${height}px`;
+        if (trackHeightDrag.label) {
+          trackHeightDrag.label.style.height = `${height}px`;
+          setTrackLabelDensity(trackHeightDrag.label, height);
+        }
         const row = trackHeightDrag.row || $("timelineContent").querySelector(
           `.trackrow[data-track-key="${trackHeightDrag.key}"]`,
         );

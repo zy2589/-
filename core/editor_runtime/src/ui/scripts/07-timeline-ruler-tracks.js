@@ -152,6 +152,12 @@ function rulerTickPlan(zoom) {
         else count = (trackItems(key) || []).length;
         return `${count} 个片段`;
       }
+      function setTrackLabelDensity(label, height) {
+        if (!label) return;
+        const rowHeight = Math.max(56, Number(height) || 68);
+        label.classList.toggle("track-compact", rowHeight < 68);
+        label.classList.toggle("track-roomy", rowHeight >= 108);
+      }
       function renderTrackOrder() {
         const labels = $("trackLabels"),
           content = $("timelineContent"),
@@ -213,6 +219,7 @@ function rulerTickPlan(zoom) {
         labels.querySelectorAll("[data-track-key]").forEach((label) => {
           const rowHeight = Math.max(56, Number(state.trackHeights?.[label.dataset.trackKey] || 68));
           label.style.height = `${rowHeight}px`;
+          setTrackLabelDensity(label, rowHeight);
           label.ondragstart = (event) => {
             if (!event.target.closest?.(".trackhandle")) {
               event.preventDefault();

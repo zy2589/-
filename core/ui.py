@@ -40,6 +40,7 @@ COLORS = {
     "warning": "#C8A86E",
     "error": "#C66F73",
 }
+CUTOUT_PAGE_COUNT = 2
 
 
 def resource_root() -> Path:
@@ -392,32 +393,19 @@ class ClipAssistant:
             child.destroy()
 
     def _show_page(self, name: str, nav) -> None:
-        leaving_editor = name != "projects" and self.embedded_editor
         target = self.page_frames[name]
-        # Prepare and paint the destination page while the current page is
-        # still present, so hiding the embedded editor cannot reveal an empty
-        # black surface during the handoff.
-        target.grid(row=0, column=0, sticky="nsew")
+        # All area frames stay mapped for the lifetime of the shell. Switching
+        # only changes their stacking order, so returning to a page reuses its
+        # existing widgets and media/WebView state instead of remapping and
+        # repainting the full surface.
         target.tkraise()
-        try:
-            target.update_idletasks()
-        except tk.TclError:
-            pass
-        # Hide the native WebView child before unmapping its Tk parent. Doing
-        # this in the opposite order can leave a stale child surface above the
-        # newly selected page until Windows finishes a second composition pass.
-        if leaving_editor:
-            self.embedded_editor.hide()
-        # Keep the native editor host mapped for its lifetime. Windows child
-        # HWNDs do not always remap reliably when their Tk ancestor is removed
-        # and recreated in the grid (the editor's second visit became blank).
-        # The editor HWND is hidden synchronously when leaving this page; only
-        # the lightweight editor host remains mapped beneath the active page.
-        for page_name, frame in self.page_frames.items():
-            if page_name == name or page_name == "projects":
-                frame.grid(row=0, column=0, sticky="nsew")
-            else:
-                frame.grid_remove()
+        if name != "projects" and self.embedded_editor and self.embedded_editor.is_running():
+            # Release editor keyboard focus while its native child stays alive
+            # behind the selected page.
+            try:
+                nav.focus_set()
+            except tk.TclError:
+                pass
         self.page_body = target
         self.current_page = name
         self._activate_nav(nav)
@@ -429,42 +417,6 @@ class ClipAssistant:
             editor = item.get("editor")
             if editor is not None:
                 editor.set_background_active(name == "cutout" and index == self.current_cutout_page)
-        # All area frames and their editors are kept alive. Map and raise the
-        # destination before unmapping the previous page, then flush Tk and
-        # Windows paint queues without erasing the client area (which caused
-        # the black flash during page switches).
-        try:
-            self.page_body.update_idletasks()
-        except tk.TclError:
-            pass
-        self._redraw_page_now(self.page_body)
-        self.root.after_idle(lambda page=name: self._redraw_current_page(page))
-
-    def _redraw_current_page(self, expected_page: str) -> None:
-        if self.current_page != expected_page:
-            return
-        self._redraw_page_now(self.page_body)
-
-    @staticmethod
-    def _redraw_page_now(frame) -> None:
-        """Flush native child-window paints after switching Tk page frames."""
-        if sys.platform != "win32":
-            return
-        try:
-            import ctypes
-            from ctypes import wintypes
-
-            user32 = ctypes.WinDLL("user32", use_last_error=True)
-            user32.RedrawWindow.argtypes = (
-                wintypes.HWND, ctypes.c_void_p, wintypes.HRGN, wintypes.UINT,
-            )
-            user32.RedrawWindow.restype = wintypes.BOOL
-            # RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW. Intentionally
-            # omit RDW_ERASE so Windows paints the destination directly.
-            flags = 0x0001 | 0x0080 | 0x0100
-            user32.RedrawWindow(wintypes.HWND(frame.winfo_id()), None, None, flags)
-        except (OSError, AttributeError, tk.TclError):
-            pass
 
     def _card(self, parent, **kwargs):
         return tk.Frame(
@@ -793,7 +745,13 @@ class ClipAssistant:
                 self.editor_engine_dir / "runtime" / "node" / "node.exe", self._editor_embed_failed,
             )
         self.embedded_editor.set_workspace_mode(mode)
-        self.root.after_idle(self._show_editor_when_mapped)
+        if self.embedded_editor.is_running():
+            # Keep the native child window alive under the stacked pages.
+            # Returning only raises its existing parent; avoid hide/show which
+            # makes WebView2 flash black while it composes the surface again.
+            self.embedded_editor.resize()
+        else:
+            self.root.after_idle(self._show_editor_when_mapped)
 
     def _show_editor_when_mapped(self):
         """Wait until Tk has mapped the page before showing its native child HWND."""
@@ -839,7 +797,7 @@ class ClipAssistant:
         toolbar.pack(fill="x", pady=(0, 4))
         self._label(toolbar, "抠图页", size=11, bold=True).pack(side="left", padx=(4, 12))
         self.cutout_tabs = []
-        for index in range(5):
+        for index in range(CUTOUT_PAGE_COUNT):
             button = ttk.Button(toolbar, text=str(index + 1), width=3,
                                 style="Cutout.TButton", cursor="hand2",
                                 command=lambda i=index: self._select_cutout_page(i))
@@ -855,11 +813,9 @@ class ClipAssistant:
         self.cutout_editor_stack.grid_rowconfigure(0, weight=1)
         self.cutout_editor_stack.grid_columnconfigure(0, weight=1)
         self.cutout_pages = []
-        for index in range(5):
+        for index in range(CUTOUT_PAGE_COUNT):
             host = tk.Frame(self.cutout_editor_stack, bg=COLORS["bg"])
             host.grid(row=0, column=0, sticky="nsew")
-            if index:
-                host.grid_remove()
             placeholder = tk.Label(host, text="本页尚未导入视频", bg=COLORS["bg"],
                                    fg=COLORS["muted"], font=("Microsoft YaHei UI", 11))
             placeholder.place(relx=0.5, rely=0.5, anchor="center")
@@ -871,7 +827,7 @@ class ClipAssistant:
     def _select_cutout_page(self, index):
         if not self.cutout_page_built:
             return
-        self.current_cutout_page = max(0, min(4, int(index)))
+        self.current_cutout_page = max(0, min(CUTOUT_PAGE_COUNT - 1, int(index)))
         page = self.cutout_pages[self.current_cutout_page]
         for page_index, item in enumerate(self.cutout_pages):
             editor = item.get("editor")
@@ -879,11 +835,6 @@ class ClipAssistant:
                 editor.set_background_active(
                     self.current_page == "cutout" and page_index == self.current_cutout_page
                 )
-            if page_index == self.current_cutout_page:
-                if item["host"].winfo_manager() != "grid":
-                    item["host"].grid(row=0, column=0, sticky="nsew")
-            elif item["host"].winfo_manager() == "grid":
-                item["host"].grid_remove()
         page["host"].tkraise()
         self.matting_window = page["editor"]
         self._refresh_cutout_tabs()

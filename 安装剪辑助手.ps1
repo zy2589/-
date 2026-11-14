@@ -33,6 +33,16 @@ foreach ($PlaybackMode in @('normal-audio', 'normal-muted', 'freeze-resume', 'fr
         throw "安装包缺少拼接播放模式，未更改当前安装：$PlaybackMode"
     }
 }
+foreach ($TrackLabelFeature in @(
+    'function setTrackLabelDensity',
+    '.tracklabel.track-compact',
+    '.tracklabel.track-roomy',
+    'setTrackLabelDensity(trackHeightDrag.label, height)'
+)) {
+    if (!$UiHtml.Contains($TrackLabelFeature)) {
+        throw "安装包缺少轨道自适应文案，未更改当前安装：$TrackLabelFeature"
+    }
+}
 foreach ($SpliceFeature in @(
     '截取片段首帧并填入前方空档',
     'findTimelineGap(timelineGapItems(trackId)',

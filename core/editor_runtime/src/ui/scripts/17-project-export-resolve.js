@@ -1611,7 +1611,10 @@ function persistedMediaItem(item, preserveWaveform = false) {
         ));
         state.trackHeights ||= {};
         state.trackHeights[trackHeightDrag.key] = height;
-        if (trackHeightDrag.label) trackHeightDrag.label.style.height = `${height}px`;
+        if (trackHeightDrag.label) {
+          trackHeightDrag.label.style.height = `${height}px`;
+          setTrackLabelDensity(trackHeightDrag.label, height);
+        }
         const row = trackHeightDrag.row || $("timelineContent").querySelector(
           `.trackrow[data-track-key="${trackHeightDrag.key}"]`,
         );
