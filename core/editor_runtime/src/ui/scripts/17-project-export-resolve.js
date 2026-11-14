@@ -1593,6 +1593,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
         if (!row || event.target.closest(".clip")) return;
         const rect = row.getBoundingClientRect();
         if (event.clientY < rect.bottom - 7) return;
+        if (row.classList.contains("track-section-start")) return;
         const key = row.dataset.trackKey;
         startTrackHeightDrag(
           event,

@@ -167,6 +167,8 @@ function rulerTickPlan(zoom) {
           .map((key, orderIndex) => {
             const meta = trackInfo(key),
               familyStart = orderIndex === 0 || trackInfo(state.trackOrder[orderIndex - 1]).kind !== meta.kind,
+              reviewCaptionGroupStart = key === "review" && state.trackOrder[orderIndex + 1] === "caption",
+              reviewCaptionGroupEnd = key === "caption" && state.trackOrder[orderIndex - 1] === "review",
               visible = state.trackVisibility[key] !== false,
               locked = isTrackLocked(key),
               soloed = !!state.trackSolo?.[key],
@@ -185,7 +187,7 @@ function rulerTickPlan(zoom) {
             const labelTitle = key === "review"
               ? "待处理片段：点击试听，Alt+点击替换为识别口播，Ctrl+点击保留，Shift+点击删除"
               : trackName;
-            return `<div class="tracklabel ${escapeHtml(meta.className)}${familyStart ? " track-family-start" : ""}" draggable="true" data-track-key="${escapeHtml(key)}" data-track-kind="${escapeHtml(meta.kind)}"><div class="track-header-bar"><span class="trackhandle" title="拖动调整轨道顺序">⠿</span><span class="track-badge" title="${escapeHtml(labelTitle)}">${escapeHtml(badge)}</span><div class="track-controls"><button class="tracklock ${locked ? "on" : ""}" data-lock-track="${escapeHtml(key)}" title="${locked ? "解锁轨道" : "锁定轨道"}">${locked ? "■" : "□"}</button><button class="tracksync ${isTrackSyncLocked(key) ? "on" : ""}" data-sync-track="${escapeHtml(key)}" aria-pressed="${isTrackSyncLocked(key)}" title="同步锁：决定其他轨道波纹剪辑时此轨是否同步调整">↔</button><button class="trackauto ${autoSelected ? "on" : ""}" data-auto-track="${escapeHtml(key)}" title="自动轨道选择器：决定选择后方、全选等命令是否作用于此轨">⇥</button>${audioTrack ? `<button class="tracksolo ${soloed ? "on" : ""}" data-solo-track="${escapeHtml(key)}" title="独听此轨">S</button><button class="trackmute ${muted ? "on" : ""}" data-mute-track="${escapeHtml(key)}" title="静音此轨">M</button><span class="audio-channel-tag">2.0</span>` : ""}<button class="visibility ${visible ? "" : "off"}" data-toggle-track="${escapeHtml(key)}" title="${visible ? "关闭轨道" : "显示轨道"}">${symbol}</button>${remove}</div></div><div class="track-info-body"><span class="track-title" title="${escapeHtml(labelTitle)}">${escapeHtml(trackName)}</span><span class="track-clip-count">${clipCount}</span></div><span class="track-resize-grip" data-resize-track="${escapeHtml(key)}" title="按住拖动自由调节轨道高度；双击恢复默认高度"></span></div>`;
+            return `<div class="tracklabel ${escapeHtml(meta.className)}${familyStart ? " track-family-start" : ""}${reviewCaptionGroupStart ? " track-section-start" : ""}${reviewCaptionGroupEnd ? " track-section-end" : ""}" draggable="true" data-track-key="${escapeHtml(key)}" data-track-kind="${escapeHtml(meta.kind)}"><div class="track-header-bar"><span class="trackhandle" title="拖动调整轨道顺序">⠿</span><span class="track-badge" title="${escapeHtml(labelTitle)}">${escapeHtml(badge)}</span><div class="track-controls"><button class="tracklock ${locked ? "on" : ""}" data-lock-track="${escapeHtml(key)}" title="${locked ? "解锁轨道" : "锁定轨道"}">${locked ? "■" : "□"}</button><button class="tracksync ${isTrackSyncLocked(key) ? "on" : ""}" data-sync-track="${escapeHtml(key)}" aria-pressed="${isTrackSyncLocked(key)}" title="同步锁：决定其他轨道波纹剪辑时此轨是否同步调整">↔</button><button class="trackauto ${autoSelected ? "on" : ""}" data-auto-track="${escapeHtml(key)}" title="自动轨道选择器：决定选择后方、全选等命令是否作用于此轨">⇥</button>${audioTrack ? `<button class="tracksolo ${soloed ? "on" : ""}" data-solo-track="${escapeHtml(key)}" title="独听此轨">S</button><button class="trackmute ${muted ? "on" : ""}" data-mute-track="${escapeHtml(key)}" title="静音此轨">M</button><span class="audio-channel-tag">2.0</span>` : ""}<button class="visibility ${visible ? "" : "off"}" data-toggle-track="${escapeHtml(key)}" title="${visible ? "关闭轨道" : "显示轨道"}">${symbol}</button>${remove}</div></div><div class="track-info-body"><span class="track-title" title="${escapeHtml(labelTitle)}">${escapeHtml(trackName)}</span><span class="track-clip-count">${clipCount}</span></div><span class="track-resize-grip" data-resize-track="${escapeHtml(key)}" title="按住拖动自由调节轨道高度；双击恢复默认高度"></span></div>`;
           })
           .join("");
         content.querySelectorAll(".trackrow[data-track-key]").forEach((row) => {
@@ -211,6 +213,8 @@ function rulerTickPlan(zoom) {
           const familyStart = orderIndex === 0 || trackInfo(state.trackOrder[orderIndex - 1]).kind !== trackInfo(key).kind;
           row.dataset.trackKind = trackInfo(key).kind;
           row.classList.toggle("track-family-start", familyStart);
+          row.classList.toggle("track-section-start", key === "review" && state.trackOrder[orderIndex + 1] === "caption");
+          row.classList.toggle("track-section-end", key === "caption" && state.trackOrder[orderIndex - 1] === "review");
           const rowHeight = Math.max(56, Number(state.trackHeights?.[key] || 68));
           row.style.height = `${rowHeight}px`;
           if (tail) content.insertBefore(row, tail);

@@ -11,26 +11,28 @@
         position: absolute;
         left: 0;
         right: 0;
-        top: -6px;
-        height: 12px;
+        top: -5px;
+        height: 10px;
         cursor: row-resize;
         z-index: 45;
         touch-action: none;
       }
-      .timeline-resizer:hover { background: rgba(31, 131, 255, .55); }
+      .timeline-resizer:hover { background: transparent; }
       .timeline-resizer::after {
         content: "";
         position: absolute;
         left: 50%;
         top: 4px;
-        width: 44px;
-        height: 3px;
-        border-radius: 2px;
+        width: 32px;
+        height: 2px;
+        border-radius: 1px;
         background: #55575e;
         transform: translateX(-50%);
         pointer-events: none;
+        transition: background-color 100ms ease, width 100ms ease;
       }
-      .timeline-resizer:hover::after, .timeline-resizer.dragging::after { background: #58a6ff; }
+      .timeline-resizer:hover::after { background: #8a9099; }
+      .timeline-resizer.dragging::after { background: #aeb7c2; }
       .timelinebar {
         display: grid;
         grid-template-columns: var(--track-label-width) 5px minmax(0, 1fr);
@@ -128,11 +130,23 @@
       }
       .track-resizer {
         cursor: col-resize;
-        background: var(--line);
+        background: transparent;
         position: relative;
         z-index: 12;
       }
-      .track-resizer:hover { background: var(--blue); }
+      .track-resizer::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 50%;
+        width: 1px;
+        background: var(--line);
+        transform: translateX(-50%);
+        pointer-events: none;
+        transition: background-color 100ms ease, width 100ms ease;
+      }
+      .track-resizer:hover::after { width: 2px; background: #818892; }
       .tracklabels-col {
         display: flex;
         flex-direction: column;
