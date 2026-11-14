@@ -71,7 +71,6 @@ class ClipAssistant:
         self.root.withdraw()
         self._startup_window_revealed = False
         self._startup_window_started_at = time.monotonic()
-        self._page_transition_generation = 0
         self.root.title("剪辑助手")
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
@@ -83,14 +82,6 @@ class ClipAssistant:
         initial_height = round(initial_width / self.window_ratio)
         self.root.geometry(f"{initial_width}x{initial_height}")
         self.root.minsize(820, round(820 / self.window_ratio))
-        # The download workspace is the app's landing page and stays above
-        # other windows while active. Other workspaces clear this flag in
-        # _show_page so the editor/cutout do not unexpectedly pin the app.
-        try:
-            self.root.attributes("-topmost", True)
-        except tk.TclError:
-            pass
-        self._download_topmost_active = True
         # Keep the preferred ratio only for the initial window size. A hard
         # WM aspect/max-size constraint prevents Windows from maximizing to
         # the full monitor work area and leaves visible strips around the app.
@@ -458,29 +449,9 @@ class ClipAssistant:
         # frame; this avoids painting an intermediate, partially updated page.
         if page_changed:
             target.tkraise()
-            # Let Tk coalesce its normal paint work. Forcing update_idletasks()
-            # here synchronously repaints the whole widget tree between the
-            # Tk page restack and the native WebView2 child surface, exposing
-            # an intermediate frame as a visible flash.
-            self._queue_download_topmost(name == "download")
-
-    def _queue_download_topmost(self, active: bool) -> None:
-        """Apply the download-only z-order after the current page paint settles."""
-        self._page_transition_generation += 1
-        generation = self._page_transition_generation
-
-        def apply_if_current():
-            if generation != self._page_transition_generation:
-                return
-            try:
-                self._set_download_topmost(active)
-            except (OSError, AttributeError, tk.TclError):
-                pass
-
-        try:
-            self.root.after_idle(apply_if_current)
-        except tk.TclError:
-            pass
+            # Let Tk coalesce normal paint work after raising the destination.
+            # Do not synchronously flush the widget tree or change top-level
+            # Z order during workspace navigation.
 
     def _reveal_startup_window_when_ready(self):
         """Show one fully built landing page instead of exposing row-by-row setup."""
@@ -498,43 +469,6 @@ class ClipAssistant:
             self.root.deiconify()
         except tk.TclError:
             return
-
-    def _set_download_topmost(self, active: bool) -> None:
-        """Change only the window z-order, without forcing a Tk/WebView repaint."""
-        active = bool(active)
-        if getattr(self, "_download_topmost_active", None) == active:
-            return
-        if os.name == "nt":
-            from ctypes import wintypes
-
-            user32 = ctypes.WinDLL("user32", use_last_error=True)
-            get_ancestor = user32.GetAncestor
-            get_ancestor.argtypes = (wintypes.HWND, wintypes.UINT)
-            get_ancestor.restype = wintypes.HWND
-            set_window_pos = user32.SetWindowPos
-            set_window_pos.argtypes = (
-                wintypes.HWND, wintypes.HWND,
-                ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
-                wintypes.UINT,
-            )
-            set_window_pos.restype = wintypes.BOOL
-            widget_hwnd = wintypes.HWND(self.root.winfo_id())
-            # Tk's winfo_id can be the client HWND. Topmost belongs to the
-            # real top-level window; changing the client HWND only restacks
-            # the page surface and leaves the whole app pinned on top.
-            hwnd = get_ancestor(widget_hwnd, 2)  # GA_ROOT
-            if not hwnd:
-                raise ctypes.WinError(ctypes.get_last_error())
-            insert_after = ctypes.c_void_p(-1 if active else -2)  # HWND_TOPMOST / HWND_NOTOPMOST
-            # This operation only changes Z order. The client pixels are
-            # already current after tkraise(); asking Windows to repaint the
-            # entire parent here creates the visible flash during navigation.
-            flags = 0x0001 | 0x0002 | 0x0008 | 0x0010 | 0x0200  # NOSIZE | NOMOVE | NOREDRAW | NOACTIVATE | NOOWNERZORDER
-            if not set_window_pos(hwnd, insert_after, 0, 0, 0, 0, flags):
-                raise ctypes.WinError(ctypes.get_last_error())
-        else:
-            self.root.attributes("-topmost", active)
-        self._download_topmost_active = active
 
     def _card(self, parent, **kwargs):
         return tk.Frame(
