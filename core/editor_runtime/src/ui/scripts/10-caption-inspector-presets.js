@@ -474,12 +474,13 @@ function renderIssues() {
             audio: "主音频属性",
             audioasset: "音频素材属性",
             image: "图片属性",
+            compound: "复合片段属性",
             text: "标题文字",
             caption: "字幕属性",
             review: "差异复核",
           };
         const selectedVisualCount = (state.selectedItems || []).filter((item) =>
-          ["video", "videolayer", "image"].includes(item.type),
+          ["video", "videolayer", "image", "compound"].includes(item.type),
         ).length;
         let selectedSpliceTarget = null;
         if (state.selected.type === "video") {
@@ -502,7 +503,7 @@ function renderIssues() {
         $("scaleOut").textContent = `${$("objectScale").value}%`;
         window.syncPositionControlValue?.("X", obj.x);
         window.syncPositionControlValue?.("Y", obj.y);
-        const visual = ["video", "videolayer", "image", "text"].includes(state.selected.type);
+        const visual = ["video", "videolayer", "image", "text", "compound"].includes(state.selected.type);
         $("visualProperties").style.display = visual ? "block" : "none";
         $("objectRotation").value = Math.round(Number(obj.rotation || 0));
         $("rotationOut").textContent = `${$("objectRotation").value}°`;

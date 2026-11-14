@@ -123,6 +123,14 @@ function materializeMainSegment(type, id) {
 var cropEditing = false, cropPointer = null, previewToolMode = "transform";
 function selectedPreviewVisualActive() {
   const selected = state.selected || {};
+  if (selected.type === "compound") {
+    const group = (state.compoundClips || []).find((item) => item.id === selected.id);
+    return !!group && (group.members || []).some((member) => {
+      if (!["videolayer", "image", "text", "caption"].includes(member.type)) return false;
+      const item = timelineObjectFor(member.type, member.id);
+      return !!item && state.currentTime >= Number(item.start || 0) && state.currentTime < Number(item.end || 0);
+    });
+  }
   if (selected.type === "video") {
     const clip = activeMainVideoClip();
     return !!clip && (selected.id === "main" || selected.id === clip.id);
@@ -133,7 +141,7 @@ function selectedPreviewVisualActive() {
 }
 function syncPreviewToolUi() {
   const object = currentObject();
-  const supported = ["video", "videolayer", "image"].includes(state.selected?.type) && !!object && selectedPreviewVisualActive();
+  const supported = ["video", "videolayer", "image", "compound"].includes(state.selected?.type) && !!object && selectedPreviewVisualActive();
   const menu = $("previewToolMenu");
   const modeButton = $("previewToolButton");
   const modeLabel = $("previewToolLabel");
@@ -172,7 +180,7 @@ function setPreviewToolMode(mode) {
   const next = mode === "crop" ? "crop" : "transform";
   if (next === "crop") {
     if (!guardUnlocked()) return false;
-    if (!["video", "videolayer", "image"].includes(state.selected?.type) || !currentObject() || !selectedPreviewVisualActive()) {
+    if (!["video", "videolayer", "image", "compound"].includes(state.selected?.type) || !currentObject() || !selectedPreviewVisualActive()) {
       toast("请先选中一个视频或图片，再使用裁切工具。");
       return false;
     }
@@ -188,6 +196,10 @@ function setPreviewToolMode(mode) {
 window.syncPreviewToolUi = syncPreviewToolUi;
 window.setPreviewToolMode = setPreviewToolMode;
 function cropContentBounds(element, object = {}) {
+  if (state.selected?.type === "compound") {
+    const frame = $("frame");
+    return { width: frame?.clientWidth || 1, height: frame?.clientHeight || 1, left: 0, top: 0 };
+  }
   if (["video", "videolayer", "image"].includes(state.selected?.type)) {
     const box = $("selectionBox");
     const clip = state.selected.type === "video"
@@ -212,12 +224,13 @@ function previewCropMask(object, element) {
   return `inset(${bounds.top+bounds.height*Number(object.cropTop||0)/100}px ${bounds.left+bounds.width*Number(object.cropRight||0)/100}px ${bounds.top+bounds.height*Number(object.cropBottom||0)/100}px ${bounds.left+bounds.width*Number(object.cropLeft||0)/100}px)`;
 }
 function selectedCropElement() {
-  return state.selected.type === "video" ? getActiveVideo()
+  return state.selected.type === "compound" ? $("frame")
+    : state.selected.type === "video" ? getActiveVideo()
     : $("frame").querySelector(`[data-type="${state.selected.type}"][data-id="${state.selected.id}"]`);
 }
 function syncCropHandles() {
   const box = $("selectionBox"), object = currentObject();
-  const enabled = cropEditing && ["video","videolayer","image"].includes(state.selected.type) && object && selectedPreviewVisualActive() && !selectionIsLocked();
+  const enabled = cropEditing && ["video","videolayer","image","compound"].includes(state.selected.type) && object && selectedPreviewVisualActive() && !selectionIsLocked();
   if (cropEditing && !enabled) { cropEditing = false; previewToolMode = "transform"; }
   box.classList.toggle("crop-editing",!!enabled);
   syncPreviewToolUi();

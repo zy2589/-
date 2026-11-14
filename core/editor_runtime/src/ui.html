@@ -6516,6 +6516,8 @@ function projectNestedChildren(group){
  const sourceIn=Number(group.sourceStart||0),sourceOut=Number(group.sourceEnd??group.sourceDuration);
  const rate=(sourceOut-sourceIn)/(group.end-group.start);
  if(!(rate>0))return [];
+ const nestedOrder=group.nestedTimeline?.trackOrder||[];
+ const videoTrackId=group.videoTrackId||"video",audioTrackId=group.audioTrackId||"";
  const output=[];
  for(const entry of group.nestedTimeline?.children||[]){
   const c=entry.object,a=Math.max(sourceIn,c.start),b=Math.min(sourceOut,c.end);if(b<=a+1e-8)continue;
@@ -6530,6 +6532,18 @@ function projectNestedChildren(group){
    clip.words=c.words.filter(w=>w.start<b&&w.end>a).map(w=>({...w,start:group.start+(Math.max(a,w.start)-sourceIn)/rate,end:group.start+(Math.min(b,w.end)-sourceIn)/rate}));
    clip.text=clip.words.map(w=>w.display||w.text||'').join(' ').replace(/\s+([,.!?;:])/g,'$1');
   }
+  // Projected children retain their own transforms. The preview and export
+  // compositors apply the compound's outer transform once to the flattened
+  // stack, matching a native compound clip and keeping the nested edit intact.
+  const isAudio=['audioasset'].includes(entry.type);
+  const sourceTrackId=clip.trackId||entry.type;
+  const sourceRank=nestedOrder.indexOf(sourceTrackId);
+  const stackOrder=sourceRank<0?0:(nestedOrder.length-sourceRank)/(nestedOrder.length+1)*9;
+  clip.compoundSourceTrackId=sourceTrackId;
+  clip.compoundTrackId=isAudio?(audioTrackId||sourceTrackId):videoTrackId;
+  clip.compoundStackOrder=stackOrder;
+  if(entry.type==='videolayer'||entry.type==='image'||entry.type==='text')clip.trackId=videoTrackId;
+  else if(isAudio&&audioTrackId)clip.trackId=audioTrackId;
   clip.compoundId=group.id;
   output.push({type:entry.type,object:clip});
  }
@@ -8732,7 +8746,13 @@ function captionMeaningContext(captions, review) {
         }
         return settings || null;
       }
+      function compoundTransformFor(group) {
+        if (!group) return null;
+        return group.transform ||= { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, cropTop: 0, cropBottom: 0, cropLeft: 0, cropRight: 0 };
+      }
       function currentObject() {
+        if (state.selected.type === "compound")
+          return compoundTransformFor((state.compoundClips || []).find((group) => group.id === state.selected.id));
         if (state.selected.type === "video") {
           if (!state.video) return null;
           const clip = state.selected.id === "main"
@@ -8763,10 +8783,12 @@ function captionMeaningContext(captions, review) {
         const targets = [];
         const seen = new Set();
         for (const item of selected) {
-          if (!item || !["video", "videolayer", "image"].includes(item.type)) continue;
+          if (!item || !["video", "videolayer", "image", "compound"].includes(item.type)) continue;
           if (selectionIsLocked(item.type, item.id)) continue;
           let object = null;
-          if (item.type === "video") {
+          if (item.type === "compound") {
+            object = compoundTransformFor((state.compoundClips || []).find((group) => group.id === item.id));
+          } else if (item.type === "video") {
             const clip = item.id === "main"
               ? activeMainVideoClip()
               : mainClips().find((entry) => entry.id === item.id);
@@ -8788,10 +8810,13 @@ function captionMeaningContext(captions, review) {
         const targets = selectedVisualTransformTargets();
         if (!targets.length || !guardUnlocked()) return [];
         for (const target of targets) mutator(target);
+        if ((state.selectedItems || []).some((item) => item.type === "compound") || state.selected.type === "compound")
+          window.syncCompoundPreviewWrappers?.();
         queueAutosave();
         return targets;
       }
       function selectionTrackId(type = state.selected.type, id = state.selected.id) {
+        if (type === "compound") return (state.compoundClips || []).find((group) => group.id === id)?.videoTrackId || "video";
         if (type === "video") return state.mainVideoTrackMap?.[id] || "video";
         if (type === "audio") return state.mainAudioTrackMap?.[id] || "audio";
         if (type === "caption") return timelineObjectFor(type, id)?.trackId || "caption";
@@ -8904,6 +8929,10 @@ function captionMeaningContext(captions, review) {
           .join(":");
       }
       function selectionIsLocked(type = state.selected.type, id = state.selected.id) {
+        if (type === "compound") {
+          const group = (state.compoundClips || []).find((item) => item.id === id);
+          if (group && (group.members || []).some((member) => selectionIsLocked(member.type, member.id))) return true;
+        }
         return isTrackLocked(selectionTrackId(type, id));
       }
       function guardUnlocked(type = state.selected.type, id = state.selected.id) {
@@ -8945,6 +8974,7 @@ function captionMeaningContext(captions, review) {
       }
       function timelineObjectFor(type, id) {
         const collections = {
+          compound: state.compoundClips,
           videolayer: state.videoLayers,
           audioasset: state.audioAssets,
           image: state.images,
@@ -8974,7 +9004,15 @@ function captionMeaningContext(captions, review) {
         else if (!current.some((item) => selectionKey(item.type, item.id) === key))
           state.selectedItems = [...current, { type, id }];
         state.selectedItems = expandCompoundSelection(state.selectedItems);
-        state.selected = state.selectedItems.at(-1) || { type: "video", id: "main" };
+        const selectedCompound = (state.compoundClips || []).find((group) =>
+          group.nestedTimeline && state.selectedItems.length > 0 && state.selectedItems.every((item) =>
+            (group.members || []).some((member) => member.type === item.type && member.id === item.id),
+          ),
+        );
+        if (selectedCompound) {
+          state.selectedItems = [{ type: "compound", id: selectedCompound.id }];
+          state.selected = state.selectedItems[0];
+        } else state.selected = state.selectedItems.at(-1) || { type: "video", id: "main" };
         if (state.selected.type === "caption") activateCaptionListFor(state.selected.id);
         window.syncSelectedClipColor?.();
         window.applyVideoCss?.();
@@ -9107,11 +9145,16 @@ function captionMeaningContext(captions, review) {
       }
       function decomposeSelectedCompound() {
         const keys = new Set((state.selectedItems || []).map((item) => selectionKey(item.type, item.id)));
+        const groupIds = new Set((state.selectedItems || []).filter((item) => item.type === "compound").map((item) => item.id));
         const before = (state.compoundClips || []).length;
         if (!before) return false;
         snapshot();
+        for (const group of state.compoundClips || []) {
+          const selected = groupIds.has(group.id) || (group.members || []).some((member) => keys.has(selectionKey(member.type, member.id)));
+          if (selected) window.bakeCompoundForDecompose?.(group);
+        }
         state.compoundClips = state.compoundClips.filter((group) =>
-          !(group.members || []).some((member) => keys.has(selectionKey(member.type, member.id))));
+          !groupIds.has(group.id) && !(group.members || []).some((member) => keys.has(selectionKey(member.type, member.id))));
         if (state.compoundClips.length === before) { state.undo.pop(); toast("所选内容不属于复合片段"); return false; }
         renderTimeline();
         queueAutosave();
@@ -12566,6 +12609,7 @@ async function placeLibraryAsset(
               `translate(calc(-50% + ${Number(object.x || 0) * px}px),calc(-50% + ${Number(object.y || 0) * py}px)) rotate(${Number(object.rotation || 0)}deg) scale(${object.scale || 1})`,
             );
         }
+        if (state.selected.type === "compound") syncCompoundPreviewWrappers();
         if (updateBox) updateSelectionBox();
       }
       function animationDefinition(item, type, mode) {
@@ -12660,6 +12704,55 @@ async function placeLibraryAsset(
         }
         element.style.mixBlendMode = item.blendMode || "normal";
       }
+      function syncCompoundPreviewWrappers() {
+        const layer = $("visualLayer"), frame = $("frame");
+        if (!layer || !frame) return new Map();
+        const px = (frame.clientWidth || 1) / Math.max(1, Number(state.width || 1080));
+        const py = (frame.clientHeight || 1) / Math.max(1, Number(state.height || 1920));
+        const wrappers = new Map();
+        for (const group of state.compoundClips || []) {
+          let wrapper = [...layer.children].find((element) => element.dataset.compoundPreview === String(group.id));
+          if (!wrapper) {
+            wrapper = document.createElement("div");
+            wrapper.className = "compound-preview-wrapper";
+            wrapper.dataset.compoundPreview = String(group.id);
+            wrapper.style.position = "absolute";
+            wrapper.style.isolation = "isolate";
+            wrapper.style.pointerEvents = "none";
+            layer.appendChild(wrapper);
+          }
+          const transform = group.transform || {};
+          wrapper.style.left = "50%";
+          wrapper.style.top = "50%";
+          wrapper.style.width = "100%";
+          wrapper.style.height = "100%";
+          wrapper.style.transformOrigin = "center center";
+          wrapper.style.transform = `translate(calc(-50% + ${Number(transform.x || 0) * px}px),calc(-50% + ${Number(transform.y || 0) * py}px)) rotate(${Number(transform.rotation || 0)}deg) scale(${Number(transform.scale || 1)})`;
+          wrapper.style.opacity = String(Math.max(0, Math.min(1, Number(transform.opacity ?? 1))));
+          wrapper.style.mixBlendMode = transform.blendMode || "normal";
+          wrapper.style.zIndex = String(visualZ(group.videoTrackId || "video"));
+          const top = Math.max(0, Math.min(95, Number(transform.cropTop || 0)));
+          const right = Math.max(0, Math.min(95, Number(transform.cropRight || 0)));
+          const bottom = Math.max(0, Math.min(95, Number(transform.cropBottom || 0)));
+          const left = Math.max(0, Math.min(95, Number(transform.cropLeft || 0)));
+          wrapper.style.clipPath = top || right || bottom || left ? `inset(${top}% ${right}% ${bottom}% ${left}%)` : "none";
+          wrappers.set(String(group.id), wrapper);
+        }
+        return wrappers;
+      }
+      function syncCompoundPreviewCaptions(caption, wrappers) {
+        const previewLayer = $("previewClipLayer");
+        if (!previewLayer) return;
+        for (const element of [$("captionPreview"), $("auxCaptionPreview")]) {
+          if (!element) continue;
+          const wrapper = caption?.compoundId ? wrappers.get(String(caption.compoundId)) : null;
+          if (wrapper) {
+            element.style.zIndex = String(Math.max(1, Math.round(100 + Number(caption.compoundStackOrder || 0) * 100)));
+            wrapper.appendChild(element);
+          } else if (element.parentNode !== previewLayer) previewLayer.appendChild(element);
+        }
+      }
+      window.syncCompoundPreviewWrappers = syncCompoundPreviewWrappers;
       function captionAtTime(time = state.currentTime) {
         const t = Number(time || 0);
         const covering = (state.captions || []).filter(
@@ -12764,13 +12857,15 @@ async function placeLibraryAsset(
         } = previewScene;
         const sceneKey = JSON.stringify({
             main: [activeMainClip?.id || "", state.video?.url || state.video?.path || "", !!state.video?.missing, activeMainTrack, state.trackVisibility[activeMainTrack] !== false],
-            videos: activeVideoLayers.map((item) => {
-              const decoder = layer.querySelector(`.layer-video-decoder[data-id="${item.id}"]`);
-              return [item.id, state.currentTime >= item.start && state.currentTime < item.end, !!decoder?.seeking, Number(decoder?.readyState || 0) >= 2];
-            }),
-            images: activeImages.map((item) => item.id),
-            titles: activeTitles.map((item) => item.id),
-            caption: caption?.id || "",
+            // Readiness and `seeking` change while a frame is decoding. They
+            // are transport state, not scene structure: including them here
+            // recreated every visual object during playback and caused visible
+            // stutter. Keep preloaded standby decoders out of the composition
+            // key; the cached path still syncs them for frame-accurate entry.
+            videos: previewScene.visibleVideoLayers.map((item) => [item.id, item.url || item.path || "", item.trackId, item.compoundId, item.compoundStackOrder, item.x, item.y, item.scale, item.rotation, item.opacity, item.cropTop, item.cropBottom, item.cropLeft, item.cropRight]),
+            images: activeImages.map((item) => [item.id, item.trackId, item.compoundId, item.compoundStackOrder, item.x, item.y, item.scale, item.rotation, item.opacity, item.cropTop, item.cropBottom, item.cropLeft, item.cropRight]),
+            titles: activeTitles.map((item) => [item.id, item.trackId, item.compoundId, item.compoundStackOrder, item.x, item.y, item.scale, item.rotation, item.opacity]),
+            caption: [caption?.id || "", caption?.compoundId || "", caption?.compoundStackOrder || 0],
             review: review?.id || "",
             selected: selectionKey(state.selected.type, state.selected.id),
           });
@@ -12779,6 +12874,8 @@ async function placeLibraryAsset(
         // their own timeline start.
         if (!timelineVideoLayers.length && layerSeekHold) layerSeekHold.hidden = true;
         if (!force && sceneKey === previewSceneKey) {
+          const compoundWrappers = syncCompoundPreviewWrappers();
+          syncCompoundPreviewCaptions(caption, compoundWrappers);
           for (const item of activeVideoLayers)
             syncLayerVideoElement(
               layer.querySelector(`.layer-video-decoder[data-id="${item.id}"]`),
@@ -12818,6 +12915,17 @@ async function placeLibraryAsset(
         // Preserve attached decoders across manual slice boundaries.
         for (const child of [...layer.children])
           if (!child.classList.contains("layer-video-decoder") && !child.classList.contains("seek-frame-hold")) child.remove();
+        const compoundWrappers = syncCompoundPreviewWrappers();
+        const appendVisual = (element, item) => {
+          const wrapper = item.compoundId ? compoundWrappers.get(String(item.compoundId)) : null;
+          if (wrapper) {
+            element.style.zIndex = String(Math.max(1, Math.round(100 + Number(item.compoundStackOrder || 0) * 100)));
+            wrapper.appendChild(element);
+          } else {
+            element.style.zIndex = String(visualZ(item.trackId));
+            layer.appendChild(element);
+          }
+        };
         const fw = $("frame").clientWidth || 1,
           fh = $("frame").clientHeight || 1,
           px = fw / state.width,
@@ -12926,10 +13034,12 @@ async function placeLibraryAsset(
               schedulePreviewRender(false);
             }
           };
-          el.style.zIndex = String(visualZ(item.trackId));
+          el.style.zIndex = String(item.compoundId ? Math.max(1, Math.round(100 + Number(item.compoundStackOrder || 0) * 100)) : visualZ(item.trackId));
           syncLayerVideoElement(el, item);
           syncLayerVideoVisibility(el, onTimeline);
-          if (el.parentNode !== layer) layer.appendChild(el);
+          const wrapper = item.compoundId ? compoundWrappers.get(String(item.compoundId)) : null;
+          if (wrapper) wrapper.appendChild(el);
+          else if (el.parentNode !== layer) layer.appendChild(el);
         }
         for (const unused of retainedVideos.values()) {
           const incoming = activeVideoLayers.find(item => item.trackId === unused.dataset.previewTrack && state.currentTime >= item.start && state.currentTime < item.end);
@@ -12983,8 +13093,7 @@ async function placeLibraryAsset(
           el.dataset.id = image.id;
           // Preview composition follows the timeline track order for every
           // image, including captured stills and canvas-dropped overlays.
-          el.style.zIndex = String(visualZ(image.trackId));
-          layer.appendChild(el);
+          appendVisual(el, image);
         }
         for (const title of activeTitles) {
           const el = document.createElement("div");
@@ -13004,8 +13113,7 @@ async function placeLibraryAsset(
           applyTextBoxWidth(el, title.width, px);
           el.dataset.type = "text";
           el.dataset.id = title.id;
-          el.style.zIndex = String(visualZ(title.trackId));
-          layer.appendChild(el);
+          appendVisual(el, title);
         }
         const preview = $("captionPreview");
         renderCaptionWords(preview, caption);
@@ -13016,6 +13124,7 @@ async function placeLibraryAsset(
         preview.style.zIndex = String(visualZ(caption?.trackId || "caption"));
         preview.dataset.id = caption?.id || "track";
         preview.dataset.animation = state.captionStyle.animation || "fade";
+        syncCompoundPreviewCaptions(caption, compoundWrappers);
         if (caption && preview.dataset.captionKey !== caption.id) {
           preview.dataset.captionKey = caption.id;
           preview.classList.remove("anim-enter");
@@ -13527,6 +13636,34 @@ function captionTextLayout() {
       function updateSelectionBox() {
         const box = $("selectionBox"),
           frame = $("frame");
+        if (state.selected.type === "compound") {
+          const group = (state.compoundClips || []).find((item) => item.id === state.selected.id);
+          const frameRect = frame.getBoundingClientRect();
+          const visibleMember = (group?.members || []).some((member) => {
+            if (!["videolayer", "image", "text", "caption"].includes(member.type)) return false;
+            const object = timelineObjectFor(member.type, member.id);
+            return object && state.currentTime >= Number(object.start || 0) && state.currentTime < Number(object.end || 0);
+          });
+          if (!group || !visibleMember || !frameRect.width || !frameRect.height) {
+            box.classList.remove("on");
+            syncCropHandles();
+            return;
+          }
+          box.style.left = "0px";
+          box.style.top = "0px";
+          box.style.width = `${frame.clientWidth}px`;
+          box.style.height = `${frame.clientHeight}px`;
+          const transform = group.transform || {};
+          const px = frame.clientWidth / Math.max(1, Number(state.width || 1080));
+          const py = frame.clientHeight / Math.max(1, Number(state.height || 1920));
+          box.style.transformOrigin = "center center";
+          box.style.transform = `translate(${Number(transform.x || 0) * px}px,${Number(transform.y || 0) * py}px) rotate(${Number(transform.rotation || 0)}deg) scale(${Number(transform.scale || 1)})`;
+          box.dataset.spliceTarget = "compound";
+          box.classList.remove("text-width");
+          box.classList.add("on");
+          syncCropHandles();
+          return;
+        }
         let element = null;
         if (state.selected.type === "video") element = getActiveVideo();
         else if (state.selected.type === "caption")
@@ -13671,6 +13808,8 @@ function captionTextLayout() {
               opacity: 1,
               _clipAssistantCaptionRaster: true,
               trackId: "caption",
+              compoundId: caption.compoundId || "",
+              compoundStackOrder: Number(caption.compoundStackOrder || 0),
             });
           }
         }
@@ -14200,7 +14339,7 @@ function rulerTickPlan(zoom) {
             group.start = Math.min(...liveSpans.map((span) => Number(span.start || 0)));
             group.end = Math.max(...liveSpans.map((span) => Number(span.end || span.start || 0)));
           }
-          const rowMembers = new Map();
+          const outerRows = new Map();
           for (const member of group.members || []) {
             const clip = [...$("timelineContent").querySelectorAll(".clip[data-type][data-id]")]
               .find((element) => element.dataset.type === member.type && element.dataset.id === member.id);
@@ -14211,21 +14350,34 @@ function rulerTickPlan(zoom) {
             const row = clip.closest(".trackrow");
             if (!row) continue;
             clip.style.display = "none";
-            if (!rowMembers.has(row)) rowMembers.set(row, { member, clip });
+            const kind = clip.classList.contains("audio") ? "audio" : "video";
+            const targetTrack = kind === "audio" ? group.audioTrackId : group.videoTrackId;
+            const rowTrack = clip.dataset.trackId || "";
+            const candidate = { member, clip, kind };
+            const current = outerRows.get(kind);
+            if (!current || rowTrack === targetTrack) outerRows.set(kind, candidate);
           }
-          for (const [row, entry] of rowMembers) {
+          for (const entry of outerRows.values()) {
+            const targetTrack = entry.kind === "audio"
+              ? group.audioTrackId || entry.clip.dataset.trackId
+              : group.videoTrackId || entry.clip.dataset.trackId;
+            const row = $("timelineContent").querySelector(`.trackrow[data-track-key="${CSS.escape(String(targetTrack || ""))}"]`) || entry.clip.closest(".trackrow");
+            if (!row) continue;
             const proxy = document.createElement("div");
-            const audioProxy = entry.clip.classList.contains("audio");
-            proxy.className = `clip compound-proxy${audioProxy ? " audio" : ""}${(group.members || []).some((member) => isSelected(member.type, member.id)) ? " selected" : ""}`;
-            // Reuse a real member id/type so all existing selection/move commands expand to the whole compound group.
-            proxy.dataset.type = entry.member.type;
-            proxy.dataset.id = entry.member.id;
+            const audioProxy = entry.kind === "audio";
+            proxy.className = `clip compound-proxy${audioProxy ? " audio" : ""}${state.selected?.type === "compound" && state.selected.id === group.id ? " selected" : ""}`;
+            // The timeline presents one outer video instance and, when present,
+            // one linked audio instance. Child clips stay hidden until the
+            // compound is opened for nested editing.
+            proxy.dataset.type = "compound";
+            proxy.dataset.id = group.id;
             proxy.dataset.compoundId = group.id;
             proxy.dataset.compoundProxy = "true";
+            proxy.dataset.trackId = targetTrack || (audioProxy ? "audio" : "video");
             proxy.title = `${group.name || "复合片段"} · 双击编辑内部时间线；拖动边缘裁切或恢复`;
             proxy.style.left = `${Number(group.start || 0) * state.zoom}px`;
             proxy.style.width = `${Math.max(4, (Number(group.end || group.start || 0) - Number(group.start || 0)) * state.zoom)}px`;
-            const configuredHeight = Math.max(56, Number(state.trackHeights?.[entry.clip.dataset.trackId || entry.member.type] || row.clientHeight || 68));
+            const configuredHeight = Math.max(56, Number(state.trackHeights?.[targetTrack || entry.member.type] || row.clientHeight || 68));
             proxy.style.top = "3px";
             proxy.style.height = `${Math.max(24, configuredHeight - 7)}px`;
             proxy.innerHTML = `${group.nestedTimeline?'<i class="trim-handle start" data-trim="start"></i>':''}${audioProxy ? `<canvas class="compound-wavecanvas" data-compound-waveform="${escapeHtml(group.id)}"></canvas>` : ""}<span class="compound-name">${escapeHtml(group.name || "复合片段")}</span>${group.nestedTimeline?'<i class="trim-handle end" data-trim="end"></i>':''}`;
@@ -15660,12 +15812,13 @@ function renderIssues() {
             audio: "主音频属性",
             audioasset: "音频素材属性",
             image: "图片属性",
+            compound: "复合片段属性",
             text: "标题文字",
             caption: "字幕属性",
             review: "差异复核",
           };
         const selectedVisualCount = (state.selectedItems || []).filter((item) =>
-          ["video", "videolayer", "image"].includes(item.type),
+          ["video", "videolayer", "image", "compound"].includes(item.type),
         ).length;
         let selectedSpliceTarget = null;
         if (state.selected.type === "video") {
@@ -15688,7 +15841,7 @@ function renderIssues() {
         $("scaleOut").textContent = `${$("objectScale").value}%`;
         window.syncPositionControlValue?.("X", obj.x);
         window.syncPositionControlValue?.("Y", obj.y);
-        const visual = ["video", "videolayer", "image", "text"].includes(state.selected.type);
+        const visual = ["video", "videolayer", "image", "text", "compound"].includes(state.selected.type);
         $("visualProperties").style.display = visual ? "block" : "none";
         $("objectRotation").value = Math.round(Number(obj.rotation || 0));
         $("rotationOut").textContent = `${$("objectRotation").value}°`;
@@ -21919,6 +22072,16 @@ function persistedMediaItem(item, preserveWaveform = false) {
                 : null,
               color: state.colorBypass && state.selected?.type === "videolayer" && state.selected.id === x.id ? {} : (x.color || state.color || {}),
               trackId: x.trackId,
+              compoundId: x.compoundId || "",
+              compoundStackOrder: Number(x.compoundStackOrder || 0),
+            })),
+            compoundClips: (state.compoundClips || []).map((group) => ({
+              id: group.id,
+              start: Number(group.start || 0),
+              end: Number(group.end || 0),
+              videoTrackId: group.videoTrackId || "video",
+              audioTrackId: group.audioTrackId || "",
+              transform: { ...(group.transform || {}) },
             })),
             spliceLayout: state.spliceLayout || "free",
             spliceRegions: Array.isArray(state.spliceRegions) ? state.spliceRegions.map((region) => ({ ...region })) : [],
@@ -21978,6 +22141,8 @@ function persistedMediaItem(item, preserveWaveform = false) {
                   : null,
                 spliceCanvasOverlay: !!x.spliceCanvasOverlay,
                 trackId: x.trackId,
+                compoundId: x.compoundId || "",
+                compoundStackOrder: Number(x.compoundStackOrder || 0),
                 enterAnimation: x.enterAnimation || "",
                 exitAnimation: x.exitAnimation || "",
                 enterDuration: x.enterDuration || 0.45,
@@ -23242,6 +23407,13 @@ function scaleTimelineClipGeometry(ratio) {
           const centered = Math.abs(Number(objectDrag.obj.x || 0)) <= snapThreshold;
           if (centered) objectDrag.obj.x = 0;
           $("centerGuide").classList.toggle("on", centered);
+        }
+        if (state.selected.type === "compound") {
+          window.syncCompoundPreviewWrappers?.();
+          updateSelectionBox();
+          window.syncPositionControlValue?.("X", objectDrag.obj.x);
+          window.syncPositionControlValue?.("Y", objectDrag.obj.y);
+          return;
         }
         const selectedElement = state.selected.type === "caption"
           ? $("captionPreview")
@@ -28055,6 +28227,14 @@ function materializeMainSegment(type, id) {
 var cropEditing = false, cropPointer = null, previewToolMode = "transform";
 function selectedPreviewVisualActive() {
   const selected = state.selected || {};
+  if (selected.type === "compound") {
+    const group = (state.compoundClips || []).find((item) => item.id === selected.id);
+    return !!group && (group.members || []).some((member) => {
+      if (!["videolayer", "image", "text", "caption"].includes(member.type)) return false;
+      const item = timelineObjectFor(member.type, member.id);
+      return !!item && state.currentTime >= Number(item.start || 0) && state.currentTime < Number(item.end || 0);
+    });
+  }
   if (selected.type === "video") {
     const clip = activeMainVideoClip();
     return !!clip && (selected.id === "main" || selected.id === clip.id);
@@ -28065,7 +28245,7 @@ function selectedPreviewVisualActive() {
 }
 function syncPreviewToolUi() {
   const object = currentObject();
-  const supported = ["video", "videolayer", "image"].includes(state.selected?.type) && !!object && selectedPreviewVisualActive();
+  const supported = ["video", "videolayer", "image", "compound"].includes(state.selected?.type) && !!object && selectedPreviewVisualActive();
   const menu = $("previewToolMenu");
   const modeButton = $("previewToolButton");
   const modeLabel = $("previewToolLabel");
@@ -28104,7 +28284,7 @@ function setPreviewToolMode(mode) {
   const next = mode === "crop" ? "crop" : "transform";
   if (next === "crop") {
     if (!guardUnlocked()) return false;
-    if (!["video", "videolayer", "image"].includes(state.selected?.type) || !currentObject() || !selectedPreviewVisualActive()) {
+    if (!["video", "videolayer", "image", "compound"].includes(state.selected?.type) || !currentObject() || !selectedPreviewVisualActive()) {
       toast("请先选中一个视频或图片，再使用裁切工具。");
       return false;
     }
@@ -28120,6 +28300,10 @@ function setPreviewToolMode(mode) {
 window.syncPreviewToolUi = syncPreviewToolUi;
 window.setPreviewToolMode = setPreviewToolMode;
 function cropContentBounds(element, object = {}) {
+  if (state.selected?.type === "compound") {
+    const frame = $("frame");
+    return { width: frame?.clientWidth || 1, height: frame?.clientHeight || 1, left: 0, top: 0 };
+  }
   if (["video", "videolayer", "image"].includes(state.selected?.type)) {
     const box = $("selectionBox");
     const clip = state.selected.type === "video"
@@ -28144,12 +28328,13 @@ function previewCropMask(object, element) {
   return `inset(${bounds.top+bounds.height*Number(object.cropTop||0)/100}px ${bounds.left+bounds.width*Number(object.cropRight||0)/100}px ${bounds.top+bounds.height*Number(object.cropBottom||0)/100}px ${bounds.left+bounds.width*Number(object.cropLeft||0)/100}px)`;
 }
 function selectedCropElement() {
-  return state.selected.type === "video" ? getActiveVideo()
+  return state.selected.type === "compound" ? $("frame")
+    : state.selected.type === "video" ? getActiveVideo()
     : $("frame").querySelector(`[data-type="${state.selected.type}"][data-id="${state.selected.id}"]`);
 }
 function syncCropHandles() {
   const box = $("selectionBox"), object = currentObject();
-  const enabled = cropEditing && ["video","videolayer","image"].includes(state.selected.type) && object && selectedPreviewVisualActive() && !selectionIsLocked();
+  const enabled = cropEditing && ["video","videolayer","image","compound"].includes(state.selected.type) && object && selectedPreviewVisualActive() && !selectionIsLocked();
   if (cropEditing && !enabled) { cropEditing = false; previewToolMode = "transform"; }
   box.classList.toggle("crop-editing",!!enabled);
   syncPreviewToolUi();
@@ -28546,6 +28731,22 @@ function pasteNestedClipboardGroups(clipboard,ids,shift){
   state.compoundClips.push(copy);applyNestedProjection(state,copy);
  }
 }
+function bakeCompoundForDecompose(group){
+ if(!group)return;
+ const transform=group.transform||{},scale=Math.max(.05,Math.min(8,Number(transform.scale||1))),rotation=Number(transform.rotation||0),angle=rotation*Math.PI/180,cos=Math.cos(angle),sin=Math.sin(angle),x=Number(transform.x||0),y=Number(transform.y||0),opacity=Math.max(0,Math.min(1,Number(transform.opacity??1)));
+ for(const member of group.members||[]){
+  const object=timelineObjectFor(member.type,member.id);if(!object)continue;
+  if(['videolayer','image','text'].includes(member.type)){
+   const oldX=Number(object.x||0),oldY=Number(object.y||0);
+   object.x=x+scale*(oldX*cos-oldY*sin);object.y=y+scale*(oldX*sin+oldY*cos);
+   object.scale=Math.max(.03,Number(object.scale||1)*scale);object.rotation=Number(object.rotation||0)+rotation;
+   object.opacity=Math.max(0,Math.min(1,Number(object.opacity??1)*opacity));
+   for(const key of ['cropTop','cropBottom','cropLeft','cropRight'])object[key]=Math.min(95,Number(object[key]||0)+Number(transform[key]||0));
+  }
+  if(object.compoundSourceTrackId)object.trackId=object.compoundSourceTrackId;
+  delete object.compoundId;delete object.compoundTrackId;delete object.compoundStackOrder;delete object.compoundSourceTrackId;
+ }
+}
 function compoundProjectForSave(){
  let project=projectData();
  for(const frame of [...compoundEditFrames].reverse())project=updateNestedChildren(cloneClipData(frame.project),frame.groupId,project);
@@ -28561,20 +28762,31 @@ function createNestedCompoundFromSelection(){
  selected=expandLinkedSelection(state.selectedItems?.length?state.selectedItems:selected);
  const entries=[...new Map(selected.map(x=>{const entry=timelineCopyEntry(x.type,x.id);return [x.type+':'+x.id,entry];})).values()].filter(Boolean);
  if(entries.length<2){restoreSnapshot();return toast('请选择可编辑的时间线片段');}
+ for(const entry of entries){
+  if(entry.type!=='videolayer'||(entry.object.spliceRegionId&&entry.object.spliceRegionId!=='auto'))continue;
+  const region=window.spliceRegionForExport?.({type:'layer',clip:entry.object,settings:entry.object,media:entry.object});
+  if(region)entry.object.spliceRegionId=region.id;
+ }
  const start=Math.min(...entries.map(x=>x.object.start)),end=Math.max(...entries.map(x=>x.object.end));
  const id=`compound-${uid()}`;
  const children=entries.map(entry=>{const object=cloneClipData(entry.object);object.start-=start;object.end-=start;for(const word of object.words||[]){word.start-=start;word.end-=start;}delete object.compoundId;return {type:entry.type,object};});
  const keys=new Set(entries.map(x=>x.object.id));
  const inner=(state.compoundClips||[]).filter(g=>(g.members||[]).every(x=>keys.has(x.id)));
  state.compoundClips=(state.compoundClips||[]).filter(g=>!inner.includes(g));
+ const memberTrack=(entry)=>entry.type==='video'?state.mainVideoTrackMap?.[entry.object.id]||'video':entry.type==='audio'?state.mainAudioTrackMap?.[entry.object.id]||'audio':entry.object.trackId||entry.type;
+ const videoTracks=entries.filter(x=>['video','videolayer','image','text','caption','review'].includes(x.type)).map(memberTrack),audioTracks=entries.filter(x=>['audio','audioasset'].includes(x.type)).map(memberTrack);
+ const trackRank=(track)=>{const i=state.trackOrder.indexOf(track);return i<0?Number.MAX_SAFE_INTEGER:i;};
  const group={id,name:`复合片段 ${state.compoundClips.length+1}`,start,end,sourceStart:0,sourceEnd:end-start,sourceDuration:end-start,
-  members:entries.map(x=>({type:x.type,id:x.object.id})),nestedTimeline:{children,compounds:inner.map(g=>({...cloneClipData(g),start:g.start-start,end:g.end-start})),trackOrder:[...state.trackOrder],trackDefinitions:cloneClipData(state.trackDefinitions||{})}};
+  videoTrackId:videoTracks.sort((a,b)=>trackRank(a)-trackRank(b))[0]||'video',audioTrackId:audioTracks.sort((a,b)=>trackRank(a)-trackRank(b))[0]||'',
+  transform:{x:0,y:0,scale:1,rotation:0,opacity:1,cropTop:0,cropBottom:0,cropLeft:0,cropRight:0},canvasWidth:state.width,canvasHeight:state.height,
+  members:entries.map(x=>({type:x.type,id:x.object.id})),nestedTimeline:{children,compounds:inner.map(g=>({...cloneClipData(g),start:g.start-start,end:g.end-start})),trackOrder:[...state.trackOrder],trackDefinitions:cloneClipData(state.trackDefinitions||{}),width:state.width,height:state.height}};
  state.compoundClips.push(group);applyNestedProjection(state,group);
- state.selectedItems=group.members.map(x=>({...x}));state.selected=state.selectedItems[0];
+ state.selectedItems=[{type:'compound',id:group.id}];state.selected=state.selectedItems[0];
  recomputeContentDuration();renderAll();queueAutosave();toast('已创建复合片段；双击可编辑内部时间线');return true;
 }
 function openCompoundTimeline(id){
  const group=state.compoundClips.find(x=>x.id===id);if(!group)return;
+ group.transform||={x:0,y:0,scale:1,rotation:0,opacity:1,cropTop:0,cropBottom:0,cropLeft:0,cropRight:0};
  if((group.members||[]).some(x=>selectionIsLocked(x.type,x.id)))return toast('复合片段含锁定轨道，请先解锁');
  if(state.playing)togglePlay();
  if(!group.nestedTimeline){
@@ -28612,30 +28824,44 @@ $('timelineContent').addEventListener('dblclick',event=>{const proxy=event.targe
 // Manipulate the outer instance, never the untrimmed children.
 (()=>{
  const surface=$('timelineContent'),original=surface.onpointerdown;let drag=null,pending=null,paintFrame=0;
+ const acceptsTrack=(trackId,kind)=>{
+  const targetKind=trackInfo(trackId)?.kind;
+  return kind==='audio'?targetKind==='audio':['video','image','text'].includes(targetKind);
+ };
  surface.onpointerdown=function(event){
   const proxy=event.target.closest('[data-compound-proxy]'),group=proxy&&state.compoundClips.find(g=>g.id===proxy.dataset.compoundId);
   if(event.button!==0||!group?.nestedTimeline||event.ctrlKey)return original.call(this,event);
   if(group.members.some(x=>selectionIsLocked(x.type,x.id)))return toast('复合片段含锁定轨道');
-  drag={pointer:event.pointerId,x:event.clientX,scroll:$('timelineScroll').scrollLeft,group,origin:cloneClipData(group),before:cloneClipData(projectData(true)),edge:event.target.closest('[data-trim]')?.dataset.trim,slip:event.altKey};
-  state.selectedItems=group.members.map(x=>({...x}));state.selected=state.selectedItems[0]||{type:'',id:''};
+  drag={pointer:event.pointerId,x:event.clientX,y:event.clientY,scroll:$('timelineScroll').scrollLeft,group,origin:cloneClipData(group),before:cloneClipData(projectData(true)),edge:event.target.closest('[data-trim]')?.dataset.trim,slip:event.altKey,kind:proxy.classList.contains('audio')?'audio':'video',originTrackId:proxy.dataset.trackId||'',targetTrackId:proxy.dataset.trackId||''};
+  state.selectedItems=[{type:'compound',id:group.id}];state.selected=state.selectedItems[0];
+  renderTimeline();renderPreviewObjects();updateInspector();updateSelectionBox();
   event.preventDefault();event.stopPropagation();
  };
  function paint(event){
   if(!drag)return;
   const delta=(event.clientX-drag.x+$('timelineScroll').scrollLeft-drag.scroll)/state.zoom,origin=drag.origin;
-  if(!drag.moved&&Math.abs(delta)<frameDuration()/2)return;
+  const targetRow=document.elementFromPoint(event.clientX,event.clientY)?.closest('.trackrow[data-track-key]');
+  const targetTrackId=targetRow?.dataset.trackKey||'';
+  const trackChanged=!!(targetTrackId&&targetTrackId!==drag.originTrackId&&acceptsTrack(targetTrackId,drag.kind)&&!isTrackLocked(targetTrackId));
+  if(!drag.moved&&Math.abs(delta)<frameDuration()/2&&!trackChanged)return;
   if(!drag.moved)surface.setPointerCapture?.(event.pointerId);
   drag.moved=true;
   let next;
   if(drag.edge)next=editTrim(origin,drag.edge,origin[drag.edge]+delta,{fps:timelineFrameRate()});
   else if(drag.slip)next=editSlip(origin,delta,{fps:timelineFrameRate()});
   else{const start=frameAlignedTime(Math.max(0,origin.start+delta));next={...origin,start,end:start+origin.end-origin.start};}
+  if(targetTrackId&&acceptsTrack(targetTrackId,drag.kind)&&!isTrackLocked(targetTrackId))drag.targetTrackId=targetTrackId;
   Object.assign(drag.group,next);applyNestedProjection(state,drag.group);recomputeContentDuration();renderTimeline();renderPreviewObjects();
  }
  document.addEventListener('pointermove',event=>{if(drag?.pointer!==event.pointerId)return;pending=event;if(!paintFrame)paintFrame=requestAnimationFrame(()=>{paintFrame=0;paint(pending);});},true);
  document.addEventListener('pointerup',event=>{
   if(drag?.pointer!==event.pointerId)return;if(paintFrame)cancelAnimationFrame(paintFrame);paintFrame=0;paint(event);
   if(!drag.moved){drag=null;return;}
+  if(drag.targetTrackId&&acceptsTrack(drag.targetTrackId,drag.kind)&&!isTrackLocked(drag.targetTrackId)){
+   if(drag.kind==='audio')drag.group.audioTrackId=drag.targetTrackId;
+   else drag.group.videoTrackId=drag.targetTrackId;
+   applyNestedProjection(state,drag.group);
+  }
   const delta=editHistoryDelta(drag.before,projectData(true));if(delta){state.undo.push(JSON.stringify(delta));state.redo=[];queueAutosave();}
   drag=null;renderAll();
  },true);

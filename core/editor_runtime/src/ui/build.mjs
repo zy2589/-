@@ -34,12 +34,16 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
   const gradingEventsScript = fs.readFileSync(path.join(uiDir, 'scripts/19-fonts-shortcuts-dragdrop.js'), 'utf8');
   const spliceStyle = fs.readFileSync(path.join(uiDir, 'styles/37-video-splice.css'), 'utf8');
   const renderScript = fs.readFileSync(path.join(uiDir, '../media/render.mjs'), 'utf8');
+  const nestedTimelineScript = fs.readFileSync(path.join(uiDir, '../nested-timeline.mjs'), 'utf8');
+  const compoundTimelineUi = fs.readFileSync(path.join(uiDir, 'scripts/33-nested-timeline.js'), 'utf8');
+  const clipEditingScript = fs.readFileSync(path.join(uiDir, 'scripts/26-clip-editing.js'), 'utf8');
   const mediaScript = fs.readFileSync(path.join(uiDir, 'scripts/05-stage-objects.js'), 'utf8');
   const coreStateScript = fs.readFileSync(path.join(uiDir, 'scripts/01-core-state.js'), 'utf8');
   const assetScript = fs.readFileSync(path.join(uiDir, 'scripts/04-asset-library.js'), 'utf8');
   const stageScript = fs.readFileSync(path.join(uiDir, 'scripts/05-stage-objects.js'), 'utf8');
   const timelineScript = fs.readFileSync(path.join(uiDir, 'scripts/07-timeline-ruler-tracks.js'), 'utf8');
   const gestureScript = fs.readFileSync(path.join(uiDir, 'scripts/18-timeline-gestures-commands.js'), 'utf8');
+  const captionPaintScript = fs.readFileSync(path.join(uiDir, 'scripts/06-caption-canvas-paint.js'), 'utf8');
   const dragDropScript = fs.readFileSync(path.join(uiDir, 'scripts/19-fonts-shortcuts-dragdrop.js'), 'utf8');
   const mediaClickStart = mediaScript.indexOf('card.onclick = (event) => {');
   const mediaClickEnd = mediaScript.indexOf('card.oncontextmenu', mediaClickStart);
@@ -212,6 +216,28 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
       baseStyle.includes('.resizehandle.n {') &&
       baseStyle.includes('.resizehandle.e {'),
     '预览越界画面必须裁切在画布内，八个细致锚点和选框需独立留在裁切层外。',
+  );
+  requireBuildCheck(
+    stageScript.includes('function syncCompoundPreviewWrappers()') &&
+      stageScript.includes('function syncCompoundPreviewCaptions(caption, wrappers)') &&
+      stageScript.includes('item.compoundStackOrder') &&
+      fs.readFileSync(path.join(uiDir, 'scripts/10-caption-inspector-presets.js'), 'utf8').includes('"text", "compound"') &&
+      clipEditingScript.includes('selected.type === "compound"') &&
+      clipEditingScript.includes('"image", "compound"].includes(state.selected?.type)') &&
+      clipEditingScript.includes('state.selected?.type === "compound"') &&
+      captionPaintScript.includes('compoundId: caption.compoundId || ""') &&
+      nestedTimelineScript.includes('clip.compoundTrackId=') &&
+      nestedTimelineScript.includes('clip.compoundStackOrder=') &&
+      timelineScript.includes('proxy.dataset.type = "compound"') &&
+      compoundTimelineUi.includes('originTrackId:proxy.dataset.trackId') &&
+      compoundTimelineUi.includes('const acceptsTrack=(trackId,kind)=>') &&
+      compoundTimelineUi.includes("['video','image','text'].includes(targetKind)") &&
+      compoundTimelineUi.includes('!isTrackLocked(targetTrackId)') &&
+      renderScript.includes('const overlayCompoundGroupsOnTrack =') &&
+      renderScript.includes('const finalGroupLabel = `[compoundout${index}]`') &&
+      renderScript.includes('item.image?._clipAssistantCaptionRaster && !item.image?.compoundId') &&
+      exportUiScript.includes('compoundClips: (state.compoundClips || []).map'),
+    '复合片段必须以单一外层对象预览、按层级拖放，并让外层变换和裁切进入导出合成。',
   );
   requireBuildCheck(
     assetScript.includes('spliceCanvasOverlay') &&

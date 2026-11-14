@@ -2058,7 +2058,13 @@
         }
         return settings || null;
       }
+      function compoundTransformFor(group) {
+        if (!group) return null;
+        return group.transform ||= { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, cropTop: 0, cropBottom: 0, cropLeft: 0, cropRight: 0 };
+      }
       function currentObject() {
+        if (state.selected.type === "compound")
+          return compoundTransformFor((state.compoundClips || []).find((group) => group.id === state.selected.id));
         if (state.selected.type === "video") {
           if (!state.video) return null;
           const clip = state.selected.id === "main"
@@ -2089,10 +2095,12 @@
         const targets = [];
         const seen = new Set();
         for (const item of selected) {
-          if (!item || !["video", "videolayer", "image"].includes(item.type)) continue;
+          if (!item || !["video", "videolayer", "image", "compound"].includes(item.type)) continue;
           if (selectionIsLocked(item.type, item.id)) continue;
           let object = null;
-          if (item.type === "video") {
+          if (item.type === "compound") {
+            object = compoundTransformFor((state.compoundClips || []).find((group) => group.id === item.id));
+          } else if (item.type === "video") {
             const clip = item.id === "main"
               ? activeMainVideoClip()
               : mainClips().find((entry) => entry.id === item.id);
@@ -2114,10 +2122,13 @@
         const targets = selectedVisualTransformTargets();
         if (!targets.length || !guardUnlocked()) return [];
         for (const target of targets) mutator(target);
+        if ((state.selectedItems || []).some((item) => item.type === "compound") || state.selected.type === "compound")
+          window.syncCompoundPreviewWrappers?.();
         queueAutosave();
         return targets;
       }
       function selectionTrackId(type = state.selected.type, id = state.selected.id) {
+        if (type === "compound") return (state.compoundClips || []).find((group) => group.id === id)?.videoTrackId || "video";
         if (type === "video") return state.mainVideoTrackMap?.[id] || "video";
         if (type === "audio") return state.mainAudioTrackMap?.[id] || "audio";
         if (type === "caption") return timelineObjectFor(type, id)?.trackId || "caption";
@@ -2230,6 +2241,10 @@
           .join(":");
       }
       function selectionIsLocked(type = state.selected.type, id = state.selected.id) {
+        if (type === "compound") {
+          const group = (state.compoundClips || []).find((item) => item.id === id);
+          if (group && (group.members || []).some((member) => selectionIsLocked(member.type, member.id))) return true;
+        }
         return isTrackLocked(selectionTrackId(type, id));
       }
       function guardUnlocked(type = state.selected.type, id = state.selected.id) {
@@ -2271,6 +2286,7 @@
       }
       function timelineObjectFor(type, id) {
         const collections = {
+          compound: state.compoundClips,
           videolayer: state.videoLayers,
           audioasset: state.audioAssets,
           image: state.images,
@@ -2300,7 +2316,15 @@
         else if (!current.some((item) => selectionKey(item.type, item.id) === key))
           state.selectedItems = [...current, { type, id }];
         state.selectedItems = expandCompoundSelection(state.selectedItems);
-        state.selected = state.selectedItems.at(-1) || { type: "video", id: "main" };
+        const selectedCompound = (state.compoundClips || []).find((group) =>
+          group.nestedTimeline && state.selectedItems.length > 0 && state.selectedItems.every((item) =>
+            (group.members || []).some((member) => member.type === item.type && member.id === item.id),
+          ),
+        );
+        if (selectedCompound) {
+          state.selectedItems = [{ type: "compound", id: selectedCompound.id }];
+          state.selected = state.selectedItems[0];
+        } else state.selected = state.selectedItems.at(-1) || { type: "video", id: "main" };
         if (state.selected.type === "caption") activateCaptionListFor(state.selected.id);
         window.syncSelectedClipColor?.();
         window.applyVideoCss?.();
@@ -2433,11 +2457,16 @@
       }
       function decomposeSelectedCompound() {
         const keys = new Set((state.selectedItems || []).map((item) => selectionKey(item.type, item.id)));
+        const groupIds = new Set((state.selectedItems || []).filter((item) => item.type === "compound").map((item) => item.id));
         const before = (state.compoundClips || []).length;
         if (!before) return false;
         snapshot();
+        for (const group of state.compoundClips || []) {
+          const selected = groupIds.has(group.id) || (group.members || []).some((member) => keys.has(selectionKey(member.type, member.id)));
+          if (selected) window.bakeCompoundForDecompose?.(group);
+        }
         state.compoundClips = state.compoundClips.filter((group) =>
-          !(group.members || []).some((member) => keys.has(selectionKey(member.type, member.id))));
+          !groupIds.has(group.id) && !(group.members || []).some((member) => keys.has(selectionKey(member.type, member.id))));
         if (state.compoundClips.length === before) { state.undo.pop(); toast("所选内容不属于复合片段"); return false; }
         renderTimeline();
         queueAutosave();

@@ -393,7 +393,7 @@ function rulerTickPlan(zoom) {
             group.start = Math.min(...liveSpans.map((span) => Number(span.start || 0)));
             group.end = Math.max(...liveSpans.map((span) => Number(span.end || span.start || 0)));
           }
-          const rowMembers = new Map();
+          const outerRows = new Map();
           for (const member of group.members || []) {
             const clip = [...$("timelineContent").querySelectorAll(".clip[data-type][data-id]")]
               .find((element) => element.dataset.type === member.type && element.dataset.id === member.id);
@@ -404,21 +404,34 @@ function rulerTickPlan(zoom) {
             const row = clip.closest(".trackrow");
             if (!row) continue;
             clip.style.display = "none";
-            if (!rowMembers.has(row)) rowMembers.set(row, { member, clip });
+            const kind = clip.classList.contains("audio") ? "audio" : "video";
+            const targetTrack = kind === "audio" ? group.audioTrackId : group.videoTrackId;
+            const rowTrack = clip.dataset.trackId || "";
+            const candidate = { member, clip, kind };
+            const current = outerRows.get(kind);
+            if (!current || rowTrack === targetTrack) outerRows.set(kind, candidate);
           }
-          for (const [row, entry] of rowMembers) {
+          for (const entry of outerRows.values()) {
+            const targetTrack = entry.kind === "audio"
+              ? group.audioTrackId || entry.clip.dataset.trackId
+              : group.videoTrackId || entry.clip.dataset.trackId;
+            const row = $("timelineContent").querySelector(`.trackrow[data-track-key="${CSS.escape(String(targetTrack || ""))}"]`) || entry.clip.closest(".trackrow");
+            if (!row) continue;
             const proxy = document.createElement("div");
-            const audioProxy = entry.clip.classList.contains("audio");
-            proxy.className = `clip compound-proxy${audioProxy ? " audio" : ""}${(group.members || []).some((member) => isSelected(member.type, member.id)) ? " selected" : ""}`;
-            // Reuse a real member id/type so all existing selection/move commands expand to the whole compound group.
-            proxy.dataset.type = entry.member.type;
-            proxy.dataset.id = entry.member.id;
+            const audioProxy = entry.kind === "audio";
+            proxy.className = `clip compound-proxy${audioProxy ? " audio" : ""}${state.selected?.type === "compound" && state.selected.id === group.id ? " selected" : ""}`;
+            // The timeline presents one outer video instance and, when present,
+            // one linked audio instance. Child clips stay hidden until the
+            // compound is opened for nested editing.
+            proxy.dataset.type = "compound";
+            proxy.dataset.id = group.id;
             proxy.dataset.compoundId = group.id;
             proxy.dataset.compoundProxy = "true";
+            proxy.dataset.trackId = targetTrack || (audioProxy ? "audio" : "video");
             proxy.title = `${group.name || "复合片段"} · 双击编辑内部时间线；拖动边缘裁切或恢复`;
             proxy.style.left = `${Number(group.start || 0) * state.zoom}px`;
             proxy.style.width = `${Math.max(4, (Number(group.end || group.start || 0) - Number(group.start || 0)) * state.zoom)}px`;
-            const configuredHeight = Math.max(56, Number(state.trackHeights?.[entry.clip.dataset.trackId || entry.member.type] || row.clientHeight || 68));
+            const configuredHeight = Math.max(56, Number(state.trackHeights?.[targetTrack || entry.member.type] || row.clientHeight || 68));
             proxy.style.top = "3px";
             proxy.style.height = `${Math.max(24, configuredHeight - 7)}px`;
             proxy.innerHTML = `${group.nestedTimeline?'<i class="trim-handle start" data-trim="start"></i>':''}${audioProxy ? `<canvas class="compound-wavecanvas" data-compound-waveform="${escapeHtml(group.id)}"></canvas>` : ""}<span class="compound-name">${escapeHtml(group.name || "复合片段")}</span>${group.nestedTimeline?'<i class="trim-handle end" data-trim="end"></i>':''}`;

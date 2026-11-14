@@ -711,9 +711,11 @@ export function buildExportGraph(config, info) {
     return { image, label: `[img${index}]` };
   });
   graph.push("[base]null[layer0]");
-  const addTextItems = (items) => {
+  const addTextItems = (items, inputLabel = null, namespace = "layer") => {
+    let currentLabel = inputLabel || `[layer${layer}]`;
+    let itemIndex = 0;
     for (const text of items || []) {
-      layer += 1;
+      if (!inputLabel) layer += 1;
       const style = text.style || {};
       const resolvedFont = resolveFontFile(style);
       if (!resolvedFont)
@@ -768,13 +770,17 @@ export function buildExportGraph(config, info) {
           ? `drawtext=text='${escapeDrawtext(content)}'${fontFile}:fontsize=${Math.round(Number(style.fontSize || 54) * textScale)}:line_spacing=${lineSpacing}:fontcolor=white@0:x='${backgroundX}':y='${backgroundY}'${background}:enable='${enable}',`
           : "";
       const draw = `${backgroundDraw}drawtext=text='${escapeDrawtext(content)}'${fontFile}:fontsize=${Math.round(Number(style.fontSize || 54) * textScale)}:line_spacing=${lineSpacing}:fontcolor=${style.color || "white"}:alpha='${alpha}':x='${animatedX}':y='${animatedY}'${shadow}${border}:enable='${enable}'`;
-      graph.push(`[layer${layer - 1}]${draw}[layer${layer}]`);
+      const outputLabel = inputLabel ? `[compoundtext${namespace}_${itemIndex++}]` : `[layer${layer}]`;
+      graph.push(`${currentLabel}${draw}${outputLabel}`);
+      currentLabel = outputLabel;
     }
+    return currentLabel;
   };
   const overlayImagesOnTrack = (trackId) => {
     for (const { image, label } of preparedImages.filter(
       (item) =>
         !item.image?._clipAssistantCaptionRaster &&
+        !item.image?.compoundId &&
         (item.image.trackId === trackId || (!item.image.trackId && trackId === "image")),
     )) {
       layer += 1;
@@ -799,6 +805,81 @@ export function buildExportGraph(config, info) {
       graph.push(
         `[layer${layer - 1}]${label}overlay=x='${imageX}':y='${imageY}':enable='gte(t,${Number(image.start || 0).toFixed(6)})*lt(t,${Number(image.end ?? info.duration).toFixed(6)})':eof_action=pass:shortest=0[layer${layer}]`,
       );
+    }
+  };
+  let compoundRenderIndex = 0;
+  const overlayCompoundGroupsOnTrack = (trackId) => {
+    for (const group of config.compoundClips || []) {
+      if ((group.videoTrackId || "video") !== trackId) continue;
+      const videos = preparedVideos.filter((item) => item.video.compoundId === group.id);
+      const images = preparedImages.filter((item) => item.image.compoundId === group.id);
+      const titles = (config.titles || []).filter((item) => item.compoundId === group.id);
+      const children = [
+        ...videos.map((item) => ({ kind: "video", value: item.video, label: item.label })),
+        ...images.map((item) => ({ kind: "image", value: item.image, label: item.label })),
+        ...titles.map((item) => ({ kind: "text", value: item, label: "" })),
+      ].sort((a, b) => Number(a.value.compoundStackOrder || 0) - Number(b.value.compoundStackOrder || 0));
+      if (!children.length) continue;
+      const index = compoundRenderIndex++;
+      let currentLabel = `[compoundbase${index}]`;
+      graph.push(`color=c=black@0.0:s=${width}x${height}:r=${fps}:d=${outputDuration.toFixed(5)},format=rgba${currentLabel}`);
+      let textIndex = 0;
+      for (const child of children) {
+        if (child.kind === "text") {
+          currentLabel = addTextItems([child.value], currentLabel, `${index}_${textIndex++}`);
+          continue;
+        }
+        const item = child.value;
+        const cropTop = Math.max(0, Math.min(95, Number(item.cropTop || 0)));
+        const cropBottom = Math.max(0, Math.min(95, Number(item.cropBottom || 0)));
+        const cropLeft = Math.max(0, Math.min(95, Number(item.cropLeft || 0)));
+        const cropRight = Math.max(0, Math.min(95, Number(item.cropRight || 0)));
+        const cropW = Math.max(0.01, 1 - (cropLeft + cropRight) / 100);
+        const cropH = Math.max(0.01, 1 - (cropTop + cropBottom) / 100);
+        const baseX = item.spliceRegion
+          ? `${Math.round(Number(item.spliceRegion.x || 0) * width)}`
+          : (cropLeft > 0 || cropRight > 0)
+            ? `(W-w/${cropW.toFixed(5)})/2+${Math.round(Number(item.x || 0))}+${(cropLeft / 100).toFixed(5)}*w/${cropW.toFixed(5)}`
+            : `(W-w)/2+${Math.round(Number(item.x || 0))}`;
+        const baseY = item.spliceRegion
+          ? `${Math.round(Number(item.spliceRegion.y || 0) * height)}`
+          : (cropTop > 0 || cropBottom > 0)
+            ? `(H-h/${cropH.toFixed(5)})/2+${Math.round(Number(item.y || 0))}+${(cropTop / 100).toFixed(5)}*h/${cropH.toFixed(5)}`
+            : `(H-h)/2+${Math.round(Number(item.y || 0))}`;
+        const outputLabel = `[compoundchild${index}_${children.indexOf(child)}]`;
+        graph.push(`${currentLabel}${child.label}overlay=x='${baseX}':y='${baseY}':enable='gte(t,${(Number(item.start || 0) - 1e-7).toFixed(7)})*lt(t,${(Number(item.end || info.duration) - 1e-7).toFixed(7)})':eof_action=pass:shortest=0${outputLabel}`);
+        currentLabel = outputLabel;
+      }
+      const transform = group.transform || {};
+      const scale = Math.max(0.03, Math.min(8, Number(transform.scale || 1)));
+      const rotation = Math.max(-360, Math.min(360, Number(transform.rotation || 0)));
+      const opacity = Math.max(0, Math.min(1, Number(transform.opacity ?? 1)));
+      const left = Math.max(0, Math.min(95, Number(transform.cropLeft || 0)));
+      const right = Math.max(0, Math.min(95 - left, Number(transform.cropRight || 0)));
+      const top = Math.max(0, Math.min(95, Number(transform.cropTop || 0)));
+      const bottom = Math.max(0, Math.min(95 - top, Number(transform.cropBottom || 0)));
+      const cropWidth = Math.max(2, Math.floor(width * (1 - (left + right) / 100) / 2) * 2);
+      const cropHeight = Math.max(2, Math.floor(height * (1 - (top + bottom) / 100) / 2) * 2);
+      const cropX = Math.min(width - cropWidth, Math.round(width * left / 100));
+      const cropY = Math.min(height - cropHeight, Math.round(height * top / 100));
+      const groupFilters = [];
+      // Match the preview wrapper: crop the compound in its local canvas,
+      // preserve the canvas dimensions with transparent padding, then apply
+      // the outer scale/rotation around the group anchor.
+      if (left || right || top || bottom) {
+        groupFilters.push(`crop=${cropWidth}:${cropHeight}:${cropX}:${cropY}`);
+        groupFilters.push(`pad=${width}:${height}:${cropX}:${cropY}:color=black@0`);
+      }
+      groupFilters.push(`scale=w=${Math.max(2, Math.floor(width * scale / 2) * 2)}:h=${Math.max(2, Math.floor(height * scale / 2) * 2)}:flags=lanczos+accurate_rnd`);
+      if (Math.abs(rotation) > 0.001)
+        groupFilters.push(`rotate=${rotation.toFixed(4)}*PI/180:ow=rotw(iw):oh=roth(ih):c=black@0`);
+      groupFilters.push(`crop=w='min(iw,${width})':h='min(ih,${height})':x='(iw-ow)/2':y='(ih-oh)/2'`);
+      groupFilters.push(`pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black@0`);
+      if (opacity < 0.999) groupFilters.push(`colorchannelmixer=aa=${opacity.toFixed(4)}`);
+      const finalGroupLabel = `[compoundout${index}]`;
+      graph.push(`${currentLabel}${groupFilters.join(",")}${finalGroupLabel}`);
+      layer += 1;
+      graph.push(`[layer${layer - 1}]${finalGroupLabel}overlay=x='(W-w)/2+${Math.round(Number(transform.x || 0))}':y='(H-h)/2+${Math.round(Number(transform.y || 0))}':eof_action=pass:shortest=0[layer${layer}]`);
     }
   };
   const order =
@@ -836,8 +917,8 @@ export function buildExportGraph(config, info) {
       }
       for (const { video, label } of preparedVideos.filter(
         (item) =>
-          item.video.trackId === key ||
-          (!item.video.trackId && key === "video-overlay"),
+          !item.video.compoundId &&
+          (item.video.trackId === key || (!item.video.trackId && key === "video-overlay")),
       )) {
         layer += 1;
         const vCropTop = Math.max(0, Math.min(95, Number(video.cropTop || 0)));
@@ -869,11 +950,11 @@ export function buildExportGraph(config, info) {
     } else if (kind === "text")
       addTextItems(
         (config.titles || []).filter(
-          (item) => item.trackId === key || (!item.trackId && key === "text"),
+          (item) => !item.compoundId && (item.trackId === key || (!item.trackId && key === "text")),
         ),
       );
     else if (kind === "caption" && !captionRendered) {
-      const rasters = preparedImages.filter((item) => item.image?._clipAssistantCaptionRaster);
+      const rasters = preparedImages.filter((item) => item.image?._clipAssistantCaptionRaster && !item.image?.compoundId);
       for (const { image, label } of rasters) {
         layer += 1;
         graph.push(
@@ -897,6 +978,7 @@ export function buildExportGraph(config, info) {
         captionRendered = true;
       }
     }
+    overlayCompoundGroupsOnTrack(key);
   }
   for (const [trackId, label] of mainTrackLabels)
     if (!consumedMainTracks.has(trackId)) graph.push(`${label}nullsink`);

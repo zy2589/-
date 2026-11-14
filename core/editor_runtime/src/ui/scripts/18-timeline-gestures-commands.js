@@ -230,6 +230,13 @@ function scaleTimelineClipGeometry(ratio) {
           if (centered) objectDrag.obj.x = 0;
           $("centerGuide").classList.toggle("on", centered);
         }
+        if (state.selected.type === "compound") {
+          window.syncCompoundPreviewWrappers?.();
+          updateSelectionBox();
+          window.syncPositionControlValue?.("X", objectDrag.obj.x);
+          window.syncPositionControlValue?.("Y", objectDrag.obj.y);
+          return;
+        }
         const selectedElement = state.selected.type === "caption"
           ? $("captionPreview")
           : state.selected.type === "video"

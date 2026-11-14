@@ -476,6 +476,34 @@ function captionTextLayout() {
       function updateSelectionBox() {
         const box = $("selectionBox"),
           frame = $("frame");
+        if (state.selected.type === "compound") {
+          const group = (state.compoundClips || []).find((item) => item.id === state.selected.id);
+          const frameRect = frame.getBoundingClientRect();
+          const visibleMember = (group?.members || []).some((member) => {
+            if (!["videolayer", "image", "text", "caption"].includes(member.type)) return false;
+            const object = timelineObjectFor(member.type, member.id);
+            return object && state.currentTime >= Number(object.start || 0) && state.currentTime < Number(object.end || 0);
+          });
+          if (!group || !visibleMember || !frameRect.width || !frameRect.height) {
+            box.classList.remove("on");
+            syncCropHandles();
+            return;
+          }
+          box.style.left = "0px";
+          box.style.top = "0px";
+          box.style.width = `${frame.clientWidth}px`;
+          box.style.height = `${frame.clientHeight}px`;
+          const transform = group.transform || {};
+          const px = frame.clientWidth / Math.max(1, Number(state.width || 1080));
+          const py = frame.clientHeight / Math.max(1, Number(state.height || 1920));
+          box.style.transformOrigin = "center center";
+          box.style.transform = `translate(${Number(transform.x || 0) * px}px,${Number(transform.y || 0) * py}px) rotate(${Number(transform.rotation || 0)}deg) scale(${Number(transform.scale || 1)})`;
+          box.dataset.spliceTarget = "compound";
+          box.classList.remove("text-width");
+          box.classList.add("on");
+          syncCropHandles();
+          return;
+        }
         let element = null;
         if (state.selected.type === "video") element = getActiveVideo();
         else if (state.selected.type === "caption")
@@ -620,6 +648,8 @@ function captionTextLayout() {
               opacity: 1,
               _clipAssistantCaptionRaster: true,
               trackId: "caption",
+              compoundId: caption.compoundId || "",
+              compoundStackOrder: Number(caption.compoundStackOrder || 0),
             });
           }
         }

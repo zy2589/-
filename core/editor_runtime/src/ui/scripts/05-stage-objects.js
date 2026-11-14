@@ -419,6 +419,7 @@ async function placeLibraryAsset(
               `translate(calc(-50% + ${Number(object.x || 0) * px}px),calc(-50% + ${Number(object.y || 0) * py}px)) rotate(${Number(object.rotation || 0)}deg) scale(${object.scale || 1})`,
             );
         }
+        if (state.selected.type === "compound") syncCompoundPreviewWrappers();
         if (updateBox) updateSelectionBox();
       }
       function animationDefinition(item, type, mode) {
@@ -513,6 +514,55 @@ async function placeLibraryAsset(
         }
         element.style.mixBlendMode = item.blendMode || "normal";
       }
+      function syncCompoundPreviewWrappers() {
+        const layer = $("visualLayer"), frame = $("frame");
+        if (!layer || !frame) return new Map();
+        const px = (frame.clientWidth || 1) / Math.max(1, Number(state.width || 1080));
+        const py = (frame.clientHeight || 1) / Math.max(1, Number(state.height || 1920));
+        const wrappers = new Map();
+        for (const group of state.compoundClips || []) {
+          let wrapper = [...layer.children].find((element) => element.dataset.compoundPreview === String(group.id));
+          if (!wrapper) {
+            wrapper = document.createElement("div");
+            wrapper.className = "compound-preview-wrapper";
+            wrapper.dataset.compoundPreview = String(group.id);
+            wrapper.style.position = "absolute";
+            wrapper.style.isolation = "isolate";
+            wrapper.style.pointerEvents = "none";
+            layer.appendChild(wrapper);
+          }
+          const transform = group.transform || {};
+          wrapper.style.left = "50%";
+          wrapper.style.top = "50%";
+          wrapper.style.width = "100%";
+          wrapper.style.height = "100%";
+          wrapper.style.transformOrigin = "center center";
+          wrapper.style.transform = `translate(calc(-50% + ${Number(transform.x || 0) * px}px),calc(-50% + ${Number(transform.y || 0) * py}px)) rotate(${Number(transform.rotation || 0)}deg) scale(${Number(transform.scale || 1)})`;
+          wrapper.style.opacity = String(Math.max(0, Math.min(1, Number(transform.opacity ?? 1))));
+          wrapper.style.mixBlendMode = transform.blendMode || "normal";
+          wrapper.style.zIndex = String(visualZ(group.videoTrackId || "video"));
+          const top = Math.max(0, Math.min(95, Number(transform.cropTop || 0)));
+          const right = Math.max(0, Math.min(95, Number(transform.cropRight || 0)));
+          const bottom = Math.max(0, Math.min(95, Number(transform.cropBottom || 0)));
+          const left = Math.max(0, Math.min(95, Number(transform.cropLeft || 0)));
+          wrapper.style.clipPath = top || right || bottom || left ? `inset(${top}% ${right}% ${bottom}% ${left}%)` : "none";
+          wrappers.set(String(group.id), wrapper);
+        }
+        return wrappers;
+      }
+      function syncCompoundPreviewCaptions(caption, wrappers) {
+        const previewLayer = $("previewClipLayer");
+        if (!previewLayer) return;
+        for (const element of [$("captionPreview"), $("auxCaptionPreview")]) {
+          if (!element) continue;
+          const wrapper = caption?.compoundId ? wrappers.get(String(caption.compoundId)) : null;
+          if (wrapper) {
+            element.style.zIndex = String(Math.max(1, Math.round(100 + Number(caption.compoundStackOrder || 0) * 100)));
+            wrapper.appendChild(element);
+          } else if (element.parentNode !== previewLayer) previewLayer.appendChild(element);
+        }
+      }
+      window.syncCompoundPreviewWrappers = syncCompoundPreviewWrappers;
       function captionAtTime(time = state.currentTime) {
         const t = Number(time || 0);
         const covering = (state.captions || []).filter(
@@ -622,10 +672,10 @@ async function placeLibraryAsset(
             // recreated every visual object during playback and caused visible
             // stutter. Keep preloaded standby decoders out of the composition
             // key; the cached path still syncs them for frame-accurate entry.
-            videos: previewScene.visibleVideoLayers.map((item) => [item.id, item.url || item.path || "", item.trackId]),
-            images: activeImages.map((item) => item.id),
-            titles: activeTitles.map((item) => item.id),
-            caption: caption?.id || "",
+            videos: previewScene.visibleVideoLayers.map((item) => [item.id, item.url || item.path || "", item.trackId, item.compoundId, item.compoundStackOrder, item.x, item.y, item.scale, item.rotation, item.opacity, item.cropTop, item.cropBottom, item.cropLeft, item.cropRight]),
+            images: activeImages.map((item) => [item.id, item.trackId, item.compoundId, item.compoundStackOrder, item.x, item.y, item.scale, item.rotation, item.opacity, item.cropTop, item.cropBottom, item.cropLeft, item.cropRight]),
+            titles: activeTitles.map((item) => [item.id, item.trackId, item.compoundId, item.compoundStackOrder, item.x, item.y, item.scale, item.rotation, item.opacity]),
+            caption: [caption?.id || "", caption?.compoundId || "", caption?.compoundStackOrder || 0],
             review: review?.id || "",
             selected: selectionKey(state.selected.type, state.selected.id),
           });
@@ -634,6 +684,8 @@ async function placeLibraryAsset(
         // their own timeline start.
         if (!timelineVideoLayers.length && layerSeekHold) layerSeekHold.hidden = true;
         if (!force && sceneKey === previewSceneKey) {
+          const compoundWrappers = syncCompoundPreviewWrappers();
+          syncCompoundPreviewCaptions(caption, compoundWrappers);
           for (const item of activeVideoLayers)
             syncLayerVideoElement(
               layer.querySelector(`.layer-video-decoder[data-id="${item.id}"]`),
@@ -673,6 +725,17 @@ async function placeLibraryAsset(
         // Preserve attached decoders across manual slice boundaries.
         for (const child of [...layer.children])
           if (!child.classList.contains("layer-video-decoder") && !child.classList.contains("seek-frame-hold")) child.remove();
+        const compoundWrappers = syncCompoundPreviewWrappers();
+        const appendVisual = (element, item) => {
+          const wrapper = item.compoundId ? compoundWrappers.get(String(item.compoundId)) : null;
+          if (wrapper) {
+            element.style.zIndex = String(Math.max(1, Math.round(100 + Number(item.compoundStackOrder || 0) * 100)));
+            wrapper.appendChild(element);
+          } else {
+            element.style.zIndex = String(visualZ(item.trackId));
+            layer.appendChild(element);
+          }
+        };
         const fw = $("frame").clientWidth || 1,
           fh = $("frame").clientHeight || 1,
           px = fw / state.width,
@@ -781,10 +844,12 @@ async function placeLibraryAsset(
               schedulePreviewRender(false);
             }
           };
-          el.style.zIndex = String(visualZ(item.trackId));
+          el.style.zIndex = String(item.compoundId ? Math.max(1, Math.round(100 + Number(item.compoundStackOrder || 0) * 100)) : visualZ(item.trackId));
           syncLayerVideoElement(el, item);
           syncLayerVideoVisibility(el, onTimeline);
-          if (el.parentNode !== layer) layer.appendChild(el);
+          const wrapper = item.compoundId ? compoundWrappers.get(String(item.compoundId)) : null;
+          if (wrapper) wrapper.appendChild(el);
+          else if (el.parentNode !== layer) layer.appendChild(el);
         }
         for (const unused of retainedVideos.values()) {
           const incoming = activeVideoLayers.find(item => item.trackId === unused.dataset.previewTrack && state.currentTime >= item.start && state.currentTime < item.end);
@@ -838,8 +903,7 @@ async function placeLibraryAsset(
           el.dataset.id = image.id;
           // Preview composition follows the timeline track order for every
           // image, including captured stills and canvas-dropped overlays.
-          el.style.zIndex = String(visualZ(image.trackId));
-          layer.appendChild(el);
+          appendVisual(el, image);
         }
         for (const title of activeTitles) {
           const el = document.createElement("div");
@@ -859,8 +923,7 @@ async function placeLibraryAsset(
           applyTextBoxWidth(el, title.width, px);
           el.dataset.type = "text";
           el.dataset.id = title.id;
-          el.style.zIndex = String(visualZ(title.trackId));
-          layer.appendChild(el);
+          appendVisual(el, title);
         }
         const preview = $("captionPreview");
         renderCaptionWords(preview, caption);
@@ -871,6 +934,7 @@ async function placeLibraryAsset(
         preview.style.zIndex = String(visualZ(caption?.trackId || "caption"));
         preview.dataset.id = caption?.id || "track";
         preview.dataset.animation = state.captionStyle.animation || "fade";
+        syncCompoundPreviewCaptions(caption, compoundWrappers);
         if (caption && preview.dataset.captionKey !== caption.id) {
           preview.dataset.captionKey = caption.id;
           preview.classList.remove("anim-enter");
