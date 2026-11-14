@@ -206,6 +206,8 @@ try {
         'spliceCanvasOverlay',
         'placeSpliceImageOverlayTrack',
         'el.style.zIndex = String(visualZ(image.trackId))',
+        'for (const decoder of [$("video"), $("videoAlt")])',
+        '? getActiveVideo()',
         'ctx.strokeStyle = "#ffffff"',
         'background-color: #123b2d',
         'data-handle="n"',

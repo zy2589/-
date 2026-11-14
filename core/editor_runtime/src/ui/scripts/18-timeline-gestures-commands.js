@@ -233,7 +233,7 @@ function scaleTimelineClipGeometry(ratio) {
         const selectedElement = state.selected.type === "caption"
           ? $("captionPreview")
           : state.selected.type === "video"
-            ? $("video")
+            ? getActiveVideo()
             : frame.querySelector(`[data-type="${state.selected.type}"][data-id="${state.selected.id}"]`);
         if (selectedElement) {
           const px = fw / state.width, py = fh / state.height;
@@ -257,6 +257,13 @@ function scaleTimelineClipGeometry(ratio) {
           selectedElement.style.transform = transform;
           if (spliceStyle?.clipPath) selectedElement.style.clipPath = spliceStyle.clipPath;
           if (state.selected.type === "video") {
+            // Main playback swaps between two decoders at cut boundaries.
+            // Keep both aligned during the drag so the visible decoder moves.
+            for (const decoder of [$("video"), $("videoAlt")]) {
+              if (!decoder) continue;
+              decoder.style.transform = transform;
+              if (spliceStyle) decoder.style.clipPath = spliceStyle.clipPath || "none";
+            }
             $("beautyPreviewCanvas").style.transform = transform;
             if (spliceStyle?.clipPath) $("beautyPreviewCanvas").style.clipPath = spliceStyle.clipPath;
           }

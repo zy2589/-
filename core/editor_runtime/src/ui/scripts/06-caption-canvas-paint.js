@@ -477,7 +477,7 @@ function captionTextLayout() {
         const box = $("selectionBox"),
           frame = $("frame");
         let element = null;
-        if (state.selected.type === "video") element = $("video");
+        if (state.selected.type === "video") element = getActiveVideo();
         else if (state.selected.type === "caption")
           element = $("captionPreview");
         else if (state.selected.type === "review") element = $("reviewPreview");
