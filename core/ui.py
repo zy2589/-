@@ -110,6 +110,27 @@ class ClipAssistant:
         self.support_root.mkdir(parents=True, exist_ok=True)
         self.application_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
         self.editor_engine_dir = self.application_dir / "剪辑助手内核"
+        if not getattr(sys, "frozen", False):
+            # The source launcher lives in the repository, while the complete
+            # WebView2/Node editor kernel is staged beside the packaged app.
+            # Prefer that kernel (or an installed copy) so `运行剪辑助手.bat`
+            # can still open the editor without pointing at a nonexistent
+            # `<repository>\剪辑助手内核` directory.
+            local_app_data = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+            candidates = (
+                self.application_dir / "release" / "剪辑助手" / "剪辑助手内核",
+                self.application_dir / ".build" / "剪辑助手内核",
+                local_app_data / "Programs" / "剪辑助手" / "剪辑助手内核",
+            )
+            required = (
+                Path("runtime") / "node" / "node.exe",
+                Path("剪辑助手.WebView.dll"),
+                Path("Modules") / "剪辑助手" / "剪辑界面" / "src" / "bootstrap.mjs",
+            )
+            for candidate in candidates:
+                if all((candidate / relative).is_file() for relative in required):
+                    self.editor_engine_dir = candidate
+                    break
         self.embedded_editor: EmbeddedEditor | None = None
         self.embedded_editor_frame = None
         self.editor_embed_error = None
