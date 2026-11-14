@@ -12915,13 +12915,9 @@ async function placeLibraryAsset(
           if (imageSpliceStyle?.clipPath) el.style.clipPath = imageSpliceStyle.clipPath;
           el.dataset.type = "image";
           el.dataset.id = image.id;
-          const spliceVideoTopZ = (state.spliceLayout !== "free" || (state.spliceRegions || []).some((region) => region.kind === "pip"))
-            ? Math.max(
-                visualZ(activeMainTrack),
-                ...activeVideoLayers.map((item) => visualZ(item.trackId)),
-              ) + 1
-            : visualZ(image.trackId);
-          el.style.zIndex = String(spliceVideoTopZ);
+          // Preview composition follows the timeline track order for every
+          // image, including captured stills and canvas-dropped overlays.
+          el.style.zIndex = String(visualZ(image.trackId));
           layer.appendChild(el);
         }
         for (const title of activeTitles) {

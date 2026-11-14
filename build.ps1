@@ -205,6 +205,7 @@ try {
         'previewClipLayer',
         'spliceCanvasOverlay',
         'placeSpliceImageOverlayTrack',
+        'el.style.zIndex = String(visualZ(image.trackId))',
         'ctx.strokeStyle = "#ffffff"',
         'background-color: #123b2d',
         'data-handle="n"',
