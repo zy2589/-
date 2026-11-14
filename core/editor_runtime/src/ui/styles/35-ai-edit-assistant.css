@@ -1,0 +1,32 @@
+.ai-edit-page { height:100%; min-height:0; overflow:hidden; }
+.ai-edit-panel { height:100%; min-height:0; margin:-12px; display:flex; flex-direction:column; background:#111214; }
+.ai-edit-context { flex:0 0 auto; min-height:42px; margin:8px 9px 0; padding:7px 9px; display:flex; align-items:center; gap:9px; border:1px solid var(--line); border-radius:8px; background:#17191c; }
+.ai-edit-context strong { display:block; font-size:11px; font-weight:650; color:var(--text); }
+.ai-edit-context small { display:block; margin-top:2px; max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:10px; }
+.ai-edit-spark,.ai-edit-welcome-icon { display:grid; place-items:center; flex:0 0 auto; width:25px; height:25px; color:#b9a1ff; background:#272234; border-radius:8px; font-size:16px; }
+.ai-edit-context .iconbtn { margin-left:auto; width:25px; height:25px; min-width:25px; padding:0; }
+.ai-edit-messages { flex:1 1 auto; min-height:0; overflow:auto; padding:12px 10px; display:flex; flex-direction:column; gap:10px; }
+.ai-edit-empty { margin:auto 0; padding:12px 2px; text-align:center; }
+.ai-edit-welcome-icon { margin:0 auto 12px; width:36px; height:36px; font-size:20px; }
+.ai-edit-empty h3 { margin:0 0 6px; font-size:15px; color:#f1efff; }
+.ai-edit-empty p { margin:0 auto 14px; max-width:285px; color:var(--muted); font-size:11px; line-height:1.55; }
+.ai-edit-prompts { display:grid; gap:6px; }
+.ai-edit-prompts .btn { width:100%; min-height:35px; padding:7px 9px; text-align:left; white-space:normal; font-size:10px; color:#c9b8ff; border-color:#34313f; background:#17171d; }
+.ai-edit-prompts .btn:hover { border-color:#7862b4; background:#211d2c; }
+.ai-edit-message { max-width:95%; padding:8px 10px; border:1px solid var(--line); border-radius:10px; color:var(--text); font-size:11px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; }
+.ai-edit-message.user { align-self:flex-end; background:#252131; border-color:#3d354f; }
+.ai-edit-message.assistant { align-self:flex-start; background:#191b1f; }
+.ai-edit-message.error { color:#ffbcbc; border-color:#653d3d; }
+.ai-edit-action-list { display:grid; gap:6px; margin-top:7px; }
+.ai-edit-action-list .btn { min-height:34px; padding:6px 8px; text-align:left; white-space:normal; font-size:10px; }
+.ai-edit-action-list .btn:disabled { opacity:.62; }
+.ai-edit-composer { flex:0 0 auto; padding:8px 9px 10px; border-top:1px solid var(--line); background:#151619; }
+.ai-edit-privacy { margin:0 1px 6px; color:#87909a; font-size:9px; line-height:1.4; }
+.ai-edit-input-row { display:flex; align-items:flex-end; gap:6px; padding:5px; border:1px solid #383a40; border-radius:9px; background:#1a1c20; }
+.ai-edit-input-row:focus-within { border-color:#7862b4; }
+#aiEditInput { flex:1; width:0; min-height:40px; max-height:100px; resize:vertical; border:0; outline:0; padding:5px; color:var(--text); background:transparent; font:inherit; font-size:11px; line-height:1.45; }
+#aiEditInput::placeholder { color:#85838e; }
+#aiEditSend { flex:0 0 28px; width:28px; min-width:28px; height:28px; min-height:28px; padding:0; border-radius:7px; font-size:17px; line-height:1; }
+.ai-edit-composer > small { display:block; padding:5px 2px 0; color:#747b84; font-size:9px; }
+.ai-edit-open-settings { margin-top:7px; }
+@media (max-width:760px) { .ai-edit-context small { max-width:150px; } }

@@ -1,0 +1,67 @@
+html, body, * {
+  scrollbar-width: thin;
+  scrollbar-color: #4B4D51 #101011;
+}
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-track-piece { background: #101011; }
+*::-webkit-scrollbar-thumb {
+  min-width: 22px;
+  min-height: 22px;
+  background: #4B4D51;
+  border: 2px solid #101011;
+  border-radius: 3px;
+}
+*::-webkit-scrollbar-thumb:hover { background: #686A70; }
+*::-webkit-scrollbar-corner { background: #101011; }
+html body .timeline-main .scroll::-webkit-scrollbar { width: 9px; height: 9px; }
+html body .timeline-main .scroll::-webkit-scrollbar-track,
+html body .timeline-main .scroll::-webkit-scrollbar-track-piece { background: #101011; }
+html body .timeline-main .scroll::-webkit-scrollbar-thumb {
+  background: #4B4D51;
+  border: 2px solid #101011;
+  border-radius: 3px;
+}
+html body .timeline-main .scroll::-webkit-scrollbar-thumb:hover { background: #686A70; }
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  accent-color: #6AAEA7;
+  background: transparent;
+  height: 18px;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border: 1px solid #414348;
+  border-radius: 99px;
+  background: linear-gradient(180deg, #303236, #252629);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 11px;
+  height: 11px;
+  margin-top: -4px;
+  border: 1px solid #DFE2E4;
+  border-radius: 50%;
+  background: #A6A9AE;
+  box-shadow: 0 0 0 2px rgba(16,17,18,.85);
+}
+input[type="range"]:hover::-webkit-slider-thumb,
+input[type="range"]:active::-webkit-slider-thumb { background: #6AAEA7; border-color: #9BD1CB; }
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  border: 1px solid #414348;
+  border-radius: 99px;
+  background: linear-gradient(180deg, #303236, #252629);
+}
+input[type="range"]::-moz-range-progress { height: 4px; background: #252629; }
+input[type="range"]::-moz-range-thumb {
+  width: 9px;
+  height: 9px;
+  border: 1px solid #DFE2E4;
+  border-radius: 50%;
+  background: #A6A9AE;
+  box-shadow: 0 0 0 2px rgba(16,17,18,.85);
+}
+input[type="range"]:hover::-moz-range-thumb,
+input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color: #9BD1CB; }

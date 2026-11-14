@@ -1,0 +1,16 @@
+{
+  "file": {
+    "type": "file",
+    "oid": "f8137390ba815fd741b0aed817820e8c4bd76b9b",
+    "size": 14857107,
+    "lfs": {
+      "oid": "7b3afbb260a08fe9af3d16e3bda992971be1e7e951d1dee7c2d235f5c43f5631",
+      "size": 14857107,
+      "pointerSize": 133
+    },
+    "xetHash": "6f3cad3b492143f9397fd99741d6f8bfd87bc059f7e2975774e25ef1b771ff8a",
+    "path": "onnx/dpdfnet8_48khz_hr.onnx"
+  },
+  "url": "https://huggingface.co/Ceva-IP/DPDFNet/resolve/dd6818d00f50c836fed43a6243ebe49116de5964/onnx/dpdfnet8_48khz_hr.onnx",
+  "revision": "dd6818d00f50c836fed43a6243ebe49116de5964"
+}

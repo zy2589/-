@@ -1,0 +1,16 @@
+
+.persistent-sidebar-panel { margin-top: 12px; }
+.persistent-sidebar-panel > summary {
+  cursor: pointer;
+  padding: 8px 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text, #ddd);
+  user-select: none;
+}
+.persistent-sidebar-panel > summary:hover { background: #ffffff08; }
+.persistent-sidebar-panel > summary:focus-visible { outline: 1px solid #8ab4f8; }
+.persistent-sidebar-panel .sr-only {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}

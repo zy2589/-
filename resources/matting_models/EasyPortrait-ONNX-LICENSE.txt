@@ -1,0 +1,6 @@
+Model: SegFormer-B0 portrait segmentation, 512x512 ONNX export
+Model filename: human_segmentation_segformer_b0_ps_512.onnx
+Source: https://huggingface.co/sadzip/EasyPortrait-ONNX
+Original checkpoint/training project: https://github.com/hukenovs/easyportrait
+License: Apache License 2.0 (as indicated by the source model repository metadata)
+Model input/output details and preprocessing are documented in EasyPortrait-ONNX-ATTRIBUTION.txt.

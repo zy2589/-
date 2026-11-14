@@ -1,0 +1,10 @@
+#subtitleSearchDialog { width: min(640px, 85vw); max-height: 75vh; color: #eee; background: #252830; border: 1px solid #626978; border-radius: 12px; padding: 20px; }
+#subtitleSearchDialog::backdrop { background: #0006; }
+#subtitleSearchDialog form, .subtitle-search-nav { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+#subtitleSearchDialog form { justify-content: space-between; }
+#subtitleSearchInput { width: 100%; }
+.subtitle-search-nav span { font-size: 12px; color: #bac0cc; }
+#subtitleSearchResults { max-height: 42vh; overflow: auto; }
+#subtitleSearchResults button { display: block; width: 100%; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; margin-bottom: 5px; }
+#subtitleSearchResults button.active { background: #345b85; outline: 1px solid #87bcff; }
+

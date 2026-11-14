@@ -1,0 +1,14 @@
+[
+  {
+    "name": "sherpa-onnx-v1.13.8-win-x64-shared-MD-Release-no-tts.tar.bz2",
+    "size": 19164933,
+    "digest": "sha256:876e6b89b8cf84a3a1b375a397507f2cfe9c227c2a945411a11a668475fcb5d3",
+    "browser_download_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-v1.13.8-win-x64-shared-MD-Release-no-tts.tar.bz2"
+  },
+  {
+    "name": "dpdfnet2_48khz_hr.onnx",
+    "size": 10596848,
+    "digest": "sha256:0b399f8a58dc4d70d8cd97541f5c39869406145193b957d00a03b66070944928",
+    "browser_download_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speech-enhancement-models/dpdfnet2_48khz_hr.onnx"
+  }
+]

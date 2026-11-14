@@ -1,0 +1,94 @@
+<section class="home" id="home">
+      <header class="homebar">
+        <div class="homeactions">
+          <button class="btn" id="homeCleanCache">清理缓存</button>
+          <button class="btn" id="homeBatchDelete">批量删除</button>
+          <button class="btn primary" id="homeNewProject">新建工程</button>
+        </div>
+      </header>
+      <main class="homebody">
+        <div class="homeheading">
+          <div>
+            <h1 id="homeWorkspaceHeading">我的剪辑工程</h1>
+            <p id="homeWorkspaceDescription">工程会自动保存到本机，与视频拼接工程分开存储</p>
+          </div>
+          <input
+            class="input homesearch"
+            id="homeSearch"
+            placeholder="搜索工程"
+          />
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
+          <select class="select" id="homePeriod" aria-label="按最后修改时间筛选工程">
+            <option value="today">今天的工程</option><option value="yesterday">昨天的工程</option>
+            <option value="all">全部工程</option><option value="older15">15 天前</option>
+            <option value="older30">30 天前</option><option value="older60">60 天前</option>
+            <option value="older90">90 天前</option><option value="custom">自定义截止日期</option>
+          </select>
+          <input class="input" type="date" id="homeBefore" aria-label="截止日期" hidden>
+          <span class="small" id="homeCount"></span>
+          <span id="homeSelection" hidden>
+            <button class="btn" id="homeSelectAll">选择全部符合条件的工程</button>
+            <button class="btn" id="homeSelectNone">取消全选</button>
+            <span id="homeSelectedCount">已选择 0 个工程</span>
+            <button class="btn danger" id="homeDeleteSelected">删除所选</button>
+            <button class="btn" id="homeCancelSelection">取消</button>
+          </span>
+        </div>
+        <div class="projectgrid" id="homeProjectGrid"></div>
+        <div style="margin-top:16px;display:flex;gap:8px" id="homePages" hidden>
+          <button class="btn" id="homePrevious">上一页</button><span class="small" id="homePageLabel"></span><button class="btn" id="homeNext">下一页</button>
+        </div>
+        <div class="emptyprojects" id="homeEmpty">
+          <div>
+            <b>当前条件下没有工程</b><span>可以切换日期、搜索历史工程或新建工程</span>
+            <div style="margin-top: 16px">
+              <button class="btn primary" id="homeEmptyNew">新建工程</button>
+            </div>
+          </div>
+        </div>
+      </main>
+    </section>
+    <div class="modal" id="newProjectModal">
+      <div class="dialog newdialog">
+        <h2>新建工程</h2>
+        <label
+          >工程名称<input
+            class="input"
+            id="newProjectName"
+            maxlength="80"
+            value="未命名工程" /></label
+        ><label
+          >画布比例<select class="select" id="newProjectRatio">
+            <option value="9:16">9:16 竖屏</option>
+            <option value="16:9">16:9 横屏</option>
+          </select></label
+        >
+        <div class="dialogactions">
+          <button class="btn" id="newProjectCancel">取消</button
+          ><button class="btn primary" id="newProjectConfirm">创建</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal" id="renameProjectModal" role="dialog" aria-modal="true" aria-labelledby="renameProjectTitle">
+      <div class="dialog newdialog">
+      <h2 id="renameProjectTitle">修改工程名称</h2>
+        <label><span id="renameProjectLabel">工程名称</span><input class="input" id="renameProjectName" maxlength="80" autocomplete="off" /></label>
+        <div class="dialogactions">
+          <button class="btn" id="renameProjectCancel" type="button">取消</button>
+          <button class="btn primary" id="renameProjectConfirm" type="button">确定</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal" id="confirmModal">
+      <div class="dialog newdialog">
+        <h2 id="confirmTitle">请确认</h2>
+        <p id="confirmMessage"></p>
+        <div class="dialogactions">
+          <button class="btn" id="confirmCancel">取消</button>
+          <button class="btn danger" id="confirmAccept">确认</button>
+        </div>
+      </div>
+    </div>
+    <div class="app" id="app">
+      

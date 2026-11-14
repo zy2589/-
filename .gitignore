@@ -1,0 +1,12 @@
+.venv/
+.build/
+release/
+__pycache__/
+core/__pycache__/
+*.pyc
+.download-*/
+.clipassistant-*/
+用户数据/
+core/editor_runtime/src/assets/credential-seed/
+core/editor_runtime/src/assets/user-seed/
+core/downloader_runtime/user-seed/

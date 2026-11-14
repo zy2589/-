@@ -1,0 +1,26 @@
+.feature-help { margin:5px 0 9px; line-height:1.5; color:#adb3bc; font-size:11px; }
+.secondary-caption-tools { margin-top:8px; border-top:1px solid #34373c; padding-top:7px; }
+.secondary-caption-tools summary { cursor:pointer; color:#adb3bc; font-size:12px; }
+.timelinebar { grid-template-columns:minmax(150px,max-content) 1px minmax(0,1fr); }
+.timelinebar-left { gap:6px; padding:0 8px; }
+.timelinebar-left>.btn { flex:0 0 auto; white-space:nowrap; }
+.timelinebar-tools { gap:8px; overflow:visible; padding:0 8px; position:relative; }
+.timeline-center-tools { min-width:0; overflow-x:auto; scrollbar-width:none; }
+.timeline-center-tools>.btn { flex:0 0 30px; min-width:30px; }
+.timeline-fit-visible { margin-left:auto; flex:0 0 auto; }
+.timeline-more { margin-left:0; position:relative; flex:0 0 auto; z-index:80; }
+.timeline-more>summary { list-style:none; cursor:pointer; padding:5px 8px; border:1px solid #3b3e43; border-radius:5px; color:#ddd; font-size:12px; }
+.timeline-more .timeline-right-tools { display:none; }
+.timeline-more[open] .timeline-right-tools { display:flex; position:absolute; right:0; top:35px; width:280px; flex-wrap:wrap; padding:12px; gap:8px; background:#202124; border:1px solid #555; border-radius:7px; box-shadow:0 5px 16px #0008; }
+.timeline-more .timeline-right-tools>* { flex-shrink:0; }
+.caption-mild-note { color:#63d98d; white-space:pre-wrap; line-height:1.6; }
+.captionobject,.caption-paint { cursor:pointer; }
+.review-filter { gap:6px; align-items:center; margin-bottom:7px; flex-wrap:wrap; }
+.caption-review-row { width:100%; text-align:left; white-space:normal; display:block; margin:5px 0; padding:8px; }
+.caption-review-row.missing { color:#cf9bff; }
+.caption-review-row.mismatch,.caption-review-row.repeat { color:#ff9292; }
+.caption-review-entry { display:flex; align-items:stretch; gap:6px; margin:5px 0; }
+.caption-review-entry .caption-review-row { flex:1; min-width:0; margin:0; }
+.caption-review-audition { flex:0 0 auto; white-space:nowrap; }
+
+.captionobject { pointer-events:auto; }

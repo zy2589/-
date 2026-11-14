@@ -1,0 +1,90 @@
+---
+license: apache-2.0
+library_name: onnx
+tags:
+  - image-segmentation
+  - face-parsing
+  - portrait-segmentation
+  - onnx
+  - comfyui
+---
+
+# EasyPortrait ONNX
+
+ONNX exports of the pretrained EasyPortrait portrait segmentation and face parsing checkpoints.
+
+The original checkpoints and training code were published by the EasyPortrait authors in [hukenovs/easyportrait](https://github.com/hukenovs/easyportrait). This repository exists to make the models easier to use in modern runtimes, especially ComfyUI environments where installing the old `mmsegmentation` / `mmcv-full` stack can be slow or fragile.
+
+## Files
+
+This repository contains 26 validated ONNX models and a `manifest.json`.
+
+Model families:
+
+- Portrait segmentation:
+  - BiSeNet-V2
+  - DANet
+  - DeepLabV3
+  - FastSCNN
+  - FCN + MobileNetV2
+  - FPN + ResNet50 at 224, 384, 512, and 1024
+  - SegFormer-B0 at 224, 384, 512, and 1024
+- Face parsing:
+  - BiSeNet-V2
+  - DANet
+  - DeepLabV3
+  - FastSCNN
+  - FCN + MobileNetV2
+  - FPN + ResNet50 at 224, 384, 512, and 1024
+  - SegFormer-B0 at 224, 384, 512, and 1024
+
+Three upstream README-only checkpoints are not included because they do not include enough model config metadata for reliable conversion: `extremec3net_ps`, `sinet_ps`, and `ehanet_fp`.
+
+## Input And Output
+
+Each model expects a normalized tensor:
+
+- Input name: `image`
+- Input shape: `[batch, 3, model_size, model_size]`
+- Input dtype: `float32`
+- Channel order before normalization: BGR
+- Mean: `[143.55267075, 132.96705975, 126.94924335]`
+- Std: `[60.2625333, 60.32740275, 59.30988645]`
+
+Each model returns logits:
+
+- Output name: `logits`
+- Output shape: `[batch, classes, model_size, model_size]`
+- Output dtype: `float32`
+
+Use `argmax(axis=1)` to get the segmentation class map.
+
+Labels:
+
+- Portrait segmentation: `background`, `person`
+- Face parsing: `background`, `skin`, `left brow`, `right brow`, `left eye`, `right eye`, `lips`, `teeth`
+
+## Validation
+
+The ONNX models were exported from the original PyTorch/mmseg checkpoints and validated with ONNX Runtime against the PyTorch/mmseg output. The validation compares logits and verifies that the final `argmax` segmentation agrees.
+
+See `manifest.json` for per-model metadata and validation values.
+
+## ComfyUI
+
+These files are used by the ComfyUI custom node:
+
+[ComfyUI-EasyPortrait](https://github.com/sadzip/ComfyUI-EasyPortrait)
+
+The node downloads models from this repository on first use.
+
+## Credits
+
+Thanks to the EasyPortrait authors for training and releasing the original models:
+
+- Original repository: [hukenovs/easyportrait](https://github.com/hukenovs/easyportrait)
+
+Co-authors of this ONNX conversion and ComfyUI integration:
+
+- sadzip
+- OpenAI Codex

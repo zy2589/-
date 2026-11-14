@@ -1,0 +1,354 @@
+
+      .stage {
+        position: relative;
+        min-width: 0;
+        min-height: 0;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        background: radial-gradient(
+          circle at center,
+          #25282b 0,
+          #17191b 62%,
+          #111 100%
+        );
+      }
+      .stage.preview-fullscreen,
+      .stage:fullscreen,
+      .stage:-webkit-full-screen {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        z-index: 10000;
+        background: #050607;
+      }
+      .stage.preview-fullscreen .frame,
+      .stage:fullscreen .frame,
+      .stage:-webkit-full-screen .frame {
+        max-width: calc(100vw - 32px);
+        max-height: calc(100vh - 32px);
+      }
+      .stage.empty:after {
+        content: none;
+        display: none;
+      }
+      .frame {
+        position: relative;
+        background: #050505;
+        border: 1px solid #34383d;
+        /* A huge spread shadow forced the full preview viewport to repaint on
+           every zoom step. The stage already supplies the dark surround. */
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
+        will-change: transform;
+        isolation: isolate;
+        overflow: hidden;
+      }
+      .preview-clipping-layer {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        isolation: isolate;
+        z-index: 1;
+      }
+      /* Objects may extend beyond the export frame while editing, but must
+         remain inside the preview viewport, above transport and timeline. */
+      .frame.editing-overflow { overflow: visible; }
+      .stage.editing-overflow { overflow: hidden; }
+      .previewarea.editing-overflow { overflow: hidden; }
+      .stage.editing-overflow .frame { z-index: 4; }
+      .stage.editing-overflow .videoobject,
+      .stage.editing-overflow .visualobject,
+      .stage.editing-overflow #visualLayer { overflow: visible; }
+      .stage.editing-overflow .frame:after { opacity: 0 !important; }
+      .selectionbox {
+        display: none;
+        position: absolute;
+        border: 1px solid rgba(244, 247, 250, .92);
+        box-shadow: 0 0 0 1px rgba(20, 24, 29, .58);
+        z-index: 180;
+        pointer-events: none;
+        transform-origin: center center;
+        overflow: visible;
+      }
+      .selectionbox.on { display: block; }
+      .resizehandle {
+        position: absolute;
+        width: 8px;
+        height: 8px;
+        border: 1px solid #f7f9fc;
+        background: #1769ff;
+        border-radius: 50%;
+        box-sizing: border-box;
+        pointer-events: auto;
+        z-index: 3;
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, .22);
+        transition: transform 80ms ease, background-color 80ms ease;
+      }
+      .resizehandle:hover { transform: scale(1.18); background: #2d7bff; }
+      .resizehandle.nw { left:-4px; top:-4px; cursor:nwse-resize; }
+      .resizehandle.n { left:50%; top:-4px; margin-left:-4px; cursor:ns-resize; }
+      .resizehandle.ne { right:-4px; top:-4px; cursor:nesw-resize; }
+      .resizehandle.e { right:-4px; top:50%; margin-top:-4px; cursor:ew-resize; }
+      .resizehandle.sw { left:-4px; bottom:-4px; cursor:nesw-resize; }
+      .resizehandle.s { left:50%; bottom:-4px; margin-left:-4px; cursor:ns-resize; }
+      .resizehandle.se { right:-4px; bottom:-4px; cursor:nwse-resize; }
+      .resizehandle.w { left:-4px; top:50%; margin-top:-4px; cursor:ew-resize; }
+      .widthhandle {
+        display:none; position:absolute; top:50%; width:10px; height:32px; margin-top:-16px;
+        border:2px solid #202426; border-radius:5px; background:#157ef0; cursor:ew-resize; pointer-events:auto;
+      }
+      .selectionbox.text-width .widthhandle { display:block; }
+      .widthhandle.w { left:-6px; } .widthhandle.e { right:-6px; }
+      .rotatehandle {
+        position:absolute; left:50%; top:-24px; width:8px; height:8px; margin-left:-4px;
+        border:1px solid #f7f9fc; border-radius:50%; background:#1769ff; pointer-events:auto; cursor:grab;
+        box-shadow:0 0 0 1px rgba(0,0,0,.22); z-index:4;
+      }
+      .frame.editing-overflow:before {
+        border-color: rgba(76, 166, 255, 0.95);
+        box-shadow: 0 0 0 1px rgba(76, 166, 255, 0.2), 0 0 18px rgba(24, 132, 255, 0.2);
+      }
+      .frame:before {
+        content: "";
+        position: absolute;
+        inset: -1px;
+        border: 1px solid rgba(106, 174, 167, 0.24);
+        pointer-events: none;
+        z-index: 30;
+      }
+      .frame:after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: 29;
+        pointer-events: none;
+        background: radial-gradient(
+          circle at center,
+          transparent 48%,
+          rgba(0, 0, 0, 0.94) 100%
+        );
+        opacity: var(--vignette-opacity, 0);
+      }
+      .videoobject {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        transform-origin: center;
+        z-index: 1;
+      }
+      .beauty-preview {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        transform-origin: center;
+        z-index: 2;
+        pointer-events: none;
+        display: none;
+        visibility: hidden;
+      }
+      .beauty-preview.ready { visibility: visible; }
+      .beauty-preview-fallback { z-index: 3; }
+      .blemish-preview {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        transform-origin: center;
+        z-index: 4;
+        display: none;
+        pointer-events: none;
+      }
+      .blemish-preview.active { display: block; }
+      .blemish-preview.brushing { pointer-events: auto; cursor: crosshair; }
+      .frame.object-dragging .visualobject,
+      .frame.object-dragging .videoobject,
+      .frame.object-dragging .beauty-preview {
+        transition: none !important;
+        will-change: transform;
+      }
+      .lutpreview { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; transform-origin:center; z-index:2; pointer-events:none; display:none; }
+      .visualobject {
+        position: absolute;
+        contain: layout paint style;
+        backface-visibility: hidden;
+        left: 50%;
+        top: 50%;
+        transform-origin: center;
+        z-index: 6;
+        cursor: move;
+      }
+      .visualobject.selected {
+        outline: 1px solid var(--blue);
+        box-shadow: 0 0 0 3px rgba(22, 132, 255, 0.18);
+      }
+      .imageobject {
+        position: absolute;
+        max-width: none;
+        max-height: none;
+        user-select: none;
+        -webkit-user-drag: none;
+      }
+      .textobject {
+        white-space: nowrap;
+        padding: 6px 10px;
+        font-weight: 800;
+        text-align: center;
+      }
+      .captionobject {
+        z-index: 8;
+        max-width: 92%;
+        white-space: normal;
+        overflow: visible;
+        contain: layout style;
+        text-align: center;
+        font-weight: 800;
+        pointer-events: none;
+        paint-order: stroke fill;
+      }
+      .textobject, .preset .captionobject, .word { paint-order: stroke fill; }
+      .transport {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        padding: 5px 12px;
+        border-top: 1px solid var(--line);
+        background: #151719;
+      }
+      .transport .iconbtn {
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        font-size: 11px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+        color: #d1d5db;
+      }
+      .transport #play {
+        width: 32px;
+        height: 32px;
+        font-size: 13px;
+      }
+      .transport .timecode {
+        font-variant-numeric: tabular-nums;
+        font-family: monospace;
+        font-size: 12px;
+        color: #c8ccd1;
+        margin-left: 10px;
+        min-width: 140px;
+      }
+      .preview-tools {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-width: 0;
+        padding: 3px 10px;
+        border-top: 1px solid var(--line);
+        background: #191b1e;
+      }
+      .preview-tool-select { position: relative; }
+      #previewToolButton { display:flex; align-items:center; gap:7px; min-width:100px; height:28px; padding:3px 8px; }
+      .preview-tool-symbol { color:#c9d2dc; font-size:15px; line-height:1; }
+      .preview-tool-chevron { margin-left:auto; color:var(--muted); font-size:12px; }
+      .preview-tool-menu {
+        position:absolute; left:0; bottom:calc(100% + 5px); min-width:144px; padding:5px;
+        border:1px solid #444a52; border-radius:6px; background:#222529;
+        box-shadow:0 8px 22px rgba(0,0,0,.55); z-index:200; display:grid; gap:2px;
+      }
+      .preview-tool-menu[hidden] { display:none; }
+      .preview-tool-menu button {
+        display:flex; align-items:center; gap:9px; width:100%; min-height:30px; padding:4px 8px;
+        border:0; border-radius:4px; background:transparent; color:#d3d8df; text-align:left; cursor:pointer;
+      }
+      .preview-tool-menu button:hover,.preview-tool-menu button.active { background:#353a40; color:#fff; }
+      .preview-tool-menu button:disabled { opacity:.45; cursor:not-allowed; }
+      .preview-tool-menu button span { width:15px; text-align:center; }
+      .preview-zoom-controls { display:flex; align-items:center; gap:7px; width:min(300px,48%); min-width:160px; }
+      .preview-zoom-controls .iconbtn { width:25px; height:25px; padding:0; }
+      #previewZoomRange { flex:1; min-width:50px; margin:0; }
+      #previewZoomValue { min-width:42px; color:#d3d8df; font:11px ui-monospace,monospace; text-align:right; }
+      .playback-speed-control {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        margin-left: 2px;
+      }
+      .speed-pill-btn {
+        height: 24px;
+        min-width: 44px;
+        padding: 0 6px;
+        font-size: 11px;
+        font-weight: 700;
+        border-radius: 4px;
+        border: 1px solid #33383f;
+        background: #1e2124;
+        color: #d1d5db;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        user-select: none;
+      }
+      .speed-pill-btn:hover {
+        background: #2a2e34;
+        border-color: var(--blue);
+        color: #fff;
+      }
+      .speed-pill-btn.speed-boosted {
+        border-color: var(--blue);
+        color: #60a5fa;
+        background: rgba(37, 99, 235, 0.15);
+      }
+      .speed-select-overlay {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        cursor: pointer;
+        width: 100%;
+        height: 100%;
+      }
+      .ratio {
+        position: absolute;
+        right: 12px;
+        top: 10px;
+        display: flex;
+        gap: 6px;
+        z-index: 15;
+      }
+      .preview-quick-menu {
+        width: 128px;
+        height: 30px;
+        padding: 0 30px 0 10px;
+        border-color: #3b434d;
+        border-radius: 6px;
+        background: rgba(23, 26, 30, 0.94);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+        font-size: 12px;
+        font-weight: 650;
+      }
+      .canvaszoom {
+        position: absolute;
+        left: 12px;
+        bottom: 9px;
+        color: var(--muted);
+        font-size: 11px;
+        z-index: 15;
+      }
+      .inspector h3 {
+        font-size: 13px;
+        margin: 0;
+      }
+      .inspectsection {
+        padding-bottom: 13px;
+        margin-bottom: 13px;
+        border-bott

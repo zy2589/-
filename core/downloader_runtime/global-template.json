@@ -1,0 +1,38 @@
+{
+  "layout": "自动",
+  "top": 850,
+  "background": "#ffffff",
+  "radius": 10,
+  "padding": 17,
+  "lines": [
+    {
+      "runs": [
+        {
+          "text": "3 Tithing Truths Your",
+          "color": "#000000"
+        }
+      ],
+      "size": 52,
+      "bold": true
+    },
+    {
+      "runs": [
+        {
+          "text": "Pastor May Never Tell You",
+          "color": "#000000"
+        }
+      ],
+      "size": 49,
+      "bold": true
+    }
+  ],
+  "gap": 0,
+  "footer_size": 40,
+  "phone_size": 69,
+  "link_size": 50,
+  "line_spacing": "0.56",
+  "footer_line_spacing": 0.82,
+  "font_path": "EBGaramond-Variable.ttf",
+  "custom_colors": {},
+  "custom_text_styles": {}
+}

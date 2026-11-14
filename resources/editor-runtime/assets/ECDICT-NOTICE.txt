@@ -1,0 +1,4 @@
+English–Chinese definitions derived from ECDICT (MIT).
+Source: https://github.com/skywind3000/ECDICT
+Bundled data: ecdict.csv, downloaded 2026-10-03; English entries and inflected forms retained.
+See ECDICT-LICENSE.txt.

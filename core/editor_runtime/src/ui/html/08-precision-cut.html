@@ -1,0 +1,10 @@
+<dialog id="cutInspector" class="precision-cut-panel">
+  <div class="row"><b>切口精修</b><span class="grow"></span><button id="closeCutInspector" class="btn">关闭</button></div>
+  <div id="cutInspectorTime" class="small"></div>
+  <div class="precision-cut-frames">
+    <section><div>前片最后一帧</div><video id="cutBeforeVideo" muted playsinline></video><div class="row"><button class="btn" data-cut-side="left" data-cut-nudge="-1">尾部 −1 帧</button><button class="btn" data-cut-side="left" data-cut-nudge="1">尾部 +1 帧</button></div></section>
+    <section><div>后片第一帧</div><video id="cutAfterVideo" muted playsinline></video><div class="row"><button class="btn" data-cut-side="right" data-cut-nudge="-1">起点 −1 帧</button><button class="btn" data-cut-side="right" data-cut-nudge="1">起点 +1 帧</button></div></section>
+  </div>
+  <button class="btn" id="loopCutPreview">循环试听前后 1 秒</button>
+  <div class="small">逐帧调整保留其他片段位置；拖动时间线时按住 Ctrl 可暂时取消吸附。</div>
+</dialog>

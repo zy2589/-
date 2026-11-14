@@ -1,0 +1,85 @@
+﻿$ErrorActionPreference = 'Stop'
+$Root = [IO.Path]::GetFullPath($PSScriptRoot)
+$Source = [IO.Path]::GetFullPath((Join-Path $Root 'release\剪辑助手'))
+$ProgramsInstallRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Programs')).TrimEnd('\') + '\'
+$Destination = [IO.Path]::GetFullPath((Join-Path $ProgramsInstallRoot '剪辑助手'))
+$ResolvedDestination = [IO.Path]::GetFullPath($Destination)
+if (!$ResolvedDestination.StartsWith($ProgramsInstallRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    throw '拒绝清理安装目录之外的程序文件。'
+}
+$Executable = Join-Path $Source '剪辑助手.exe'
+if (!(Test-Path -LiteralPath $Executable -PathType Leaf)) {
+    throw '未找到安装文件。请先运行 build.ps1。'
+}
+$EditorHost = Join-Path $Source '剪辑助手内核\剪辑助手.WebView.dll'
+if (!(Test-Path -LiteralPath $EditorHost -PathType Leaf)) {
+    throw '安装包缺少主程序内置剪辑组件，未更改当前安装。'
+}
+$EditorRuntime = Join-Path $Source '剪辑助手内核\Modules\剪辑助手\剪辑界面'
+$UiHtmlPath = Join-Path $EditorRuntime 'src\ui.html'
+$NodeRuntime = Join-Path $Source '剪辑助手内核\runtime\node\node.exe'
+foreach ($PackageFile in @($UiHtmlPath, $NodeRuntime)) {
+    if (!(Test-Path -LiteralPath $PackageFile -PathType Leaf)) {
+        throw "安装包缺少必要文件，未更改当前安装：$PackageFile"
+    }
+}
+$UiHtml = [IO.File]::ReadAllText($UiHtmlPath)
+foreach ($Anchor in @('frame', 'spliceGuideLayer', 'selectionBox', 'spliceFreezePreviewCanvas')) {
+    $AnchorCount = [regex]::Matches($UiHtml, ('id="' + [regex]::Escape($Anchor) + '"')).Count
+    if ($AnchorCount -ne 1) { throw "安装包预览锚点异常，未更改当前安装：$Anchor（数量：$AnchorCount）" }
+}
+foreach ($PlaybackMode in @('normal-audio', 'normal-muted', 'freeze-resume', 'freeze-hold')) {
+    if (!$UiHtml.Contains(('value="' + $PlaybackMode + '"'))) {
+        throw "安装包缺少拼接播放模式，未更改当前安装：$PlaybackMode"
+    }
+}
+foreach ($SpliceFeature in @(
+    '截取片段首帧并填入前方空档',
+    'findTimelineGap(timelineGapItems(trackId)',
+    'Number(duration) || 3',
+    'loadedSpliceStyle?.clipPath',
+    'const hasMainTimeline = mainClips().length > 0',
+    'if (hasMainTimeline && !mainSourcePath)',
+    'spliceFreezeFrameRange',
+    'spliceFreezeUntilRange',
+    'region.borderColor = event.target.value',
+    'region.borderWidth = 10',
+    'Math.max(10, savedBorderWidth)',
+    'function selectedVideoGrade'
+)) {
+    if (!$UiHtml.Contains($SpliceFeature)) {
+        throw "安装包拼接功能预检失败，未更改当前安装：$SpliceFeature"
+    }
+}
+if ($UiHtml.Contains('data-inspect="ai"') -or $UiHtml.Contains('id="inspect-ai"')) {
+    throw '安装包仍包含已移除的 AI 助手属性页，未更改当前安装。'
+}
+$ProcessPath = [IO.Path]::GetFullPath((Join-Path $Destination '剪辑助手.exe'))
+$RunningInstance = Get-CimInstance Win32_Process -Filter "name = '剪辑助手.exe'" |
+    Where-Object { $_.ExecutablePath -and [IO.Path]::GetFullPath($_.ExecutablePath).Equals($ProcessPath, [StringComparison]::OrdinalIgnoreCase) } |
+    Select-Object -First 1
+if ($RunningInstance) {
+    throw '剪辑助手仍在运行。请先正常关闭窗口，再重新安装；当前安装未更改。'
+}
+
+if (Test-Path -LiteralPath $Destination) {
+    Remove-Item -LiteralPath $Destination -Recurse -Force
+}
+New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+Copy-Item -Path (Join-Path $Source '*') -Destination $Destination -Recurse -Force
+$InstalledExe = Join-Path $Destination '剪辑助手.exe'
+if (!(Test-Path -LiteralPath $InstalledExe -PathType Leaf)) { throw '复制后的程序文件不存在。' }
+
+# Keep this application's user data under Documents\ChatGPT\剪辑助手\用户数据.
+# Never import projects, credentials, caches, or settings from other products.
+$Programs = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+New-Item -ItemType Directory -Force -Path $Programs | Out-Null
+$ShortcutPath = Join-Path $Programs '剪辑助手.lnk'
+$Shell = New-Object -ComObject WScript.Shell
+$Shortcut = $Shell.CreateShortcut($ShortcutPath)
+$Shortcut.TargetPath = $InstalledExe
+$Shortcut.WorkingDirectory = $Destination
+$Shortcut.IconLocation = $InstalledExe
+$Shortcut.Save()
+Write-Host "已安装到：$Destination"
+Write-Host "开始菜单快捷方式：$ShortcutPath"

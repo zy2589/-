@@ -1,0 +1,39 @@
+.splice-layout-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.splice-layout-choice { min-height: 34px; padding: 6px 8px; text-align: center; }
+.splice-layout-choice.active { border-color: var(--accent, #68a9a2); color: #dff5f1; background: #253331; }
+.splice-control { display: block; margin: 9px 0; }
+.splice-control .input, #spliceRegionName, #spliceRegionSelect, #spliceShape { width: 100%; margin-top: 5px; }
+.splice-range-row { display: grid; grid-template-columns: minmax(0, 1fr) 72px; align-items: center; gap: 8px; margin-top: 4px; }
+.splice-range-row output { color: var(--text, #eff0f1); font-size: 12px; text-align: right; }
+.splice-section-title { margin-top: 16px; }
+.splice-border-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.splice-border-row .field { min-width: 0; }
+#spliceBorderColor { display: block; width: 100%; height: 34px; margin-top: 5px; padding: 3px; background: var(--input, #18191b); border: 1px solid var(--border, #404247); border-radius: 6px; }
+.splice-actions { display: flex; align-items: center; gap: 9px; margin-top: 12px; }
+.splice-actions .small { line-height: 1.45; }
+.splice-help { margin: 0 0 8px; line-height: 1.45; }
+.splice-selected-video { min-height: 34px; margin-top: 5px; display: flex; align-items: center; color: var(--text, #eff0f1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.splice-audio-quick { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin: 2px 0 8px; }
+.splice-audio-quick .btn { min-height: 34px; }
+.splice-audio-quick .btn.active { border-color: var(--accent, #68a9a2); background: #253331; color: #dff5f1; }
+.splice-advanced-region { margin-top: 16px; border-top: 1px solid var(--border, #34363a); padding-top: 9px; }
+.splice-advanced-region > summary { cursor: pointer; color: var(--muted, #a8aab0); font-size: 12px; }
+.splice-advanced-region[open] > summary { margin-bottom: 10px; }
+.splice-frame-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; margin-top: 5px; }
+.splice-freeze-controls .field { margin: 8px 0; }
+#spliceGuideLayer { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 10000; overflow: visible; pointer-events: none; display: none; }
+#spliceGuideLayer.active { display: block; }
+#spliceGuideLayer .splice-guide-line { fill: none; stroke: rgba(240, 245, 246, .94); stroke-width: 4; vector-effect: non-scaling-stroke; stroke-dasharray: 12 7; }
+#spliceGuideLayer .splice-guide-divider-hit { pointer-events: stroke; stroke: transparent; stroke-width: 24; stroke-dasharray: none; cursor: ns-resize; touch-action: none; }
+#spliceGuideLayer .splice-guide-region { fill: rgba(104, 169, 162, .045); vector-effect: non-scaling-stroke; }
+#spliceGuideLayer .splice-guide-region.selected { filter: drop-shadow(0 0 2px #f4d35e); }
+#spliceGuideLayer .splice-guide-region[data-region-kind="pip"] { pointer-events: all; cursor: move; touch-action: none; }
+#spliceGuideLayer .splice-guide-region[data-region-kind="pip"] { fill: rgba(104,169,162,.015); }
+#spliceGuideLayer .splice-guide-region.drop-target { stroke: #f4d35e; stroke-width: 6; fill: rgba(244, 211, 94, .12); }
+.stage.splice-layout-active .frame { overflow: hidden !important; }
+.splice-freeze-frame { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; transform-origin: center; z-index: 1.5; pointer-events: none; }
