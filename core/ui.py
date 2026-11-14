@@ -168,6 +168,8 @@ class ClipAssistant:
         self.rotoscope_importing = False
         self.rotoscope_import_ready = False
         self.rotoscope_import_error = None
+        self.cutout_prewarm_requested = False
+        self.cutout_open_pending = False
         self.current_page = "download"
         self.media_paths: list[str] = []
         self.preview_photo = None
@@ -399,6 +401,9 @@ class ClipAssistant:
         self.show_download()
         self.root.deiconify()
         self.root.lift()
+        # Prepare the cutout workspace behind the landing page so the first
+        # visit does not reveal an empty shell while its widgets are built.
+        self.root.after(600, self._prewarm_cutout_workspace)
 
     def _nav_button(self, parent, text, command):
         return ttk.Button(parent, text=text, command=command, style="Nav.TButton", cursor="hand2")
@@ -417,12 +422,13 @@ class ClipAssistant:
 
     def _show_page(self, name: str, nav) -> None:
         target = self.page_frames[name]
+        page_changed = self.current_page != name
+        if name != "cutout":
+            self.cutout_open_pending = False
         # All area frames stay mapped for the lifetime of the shell. Switching
         # only changes their stacking order, so returning to a page reuses its
         # existing widgets and media/WebView state instead of remapping and
         # repainting the full surface.
-        if self.current_page != name:
-            target.tkraise()
         try:
             self._set_download_topmost(name == "download")
         except (OSError, AttributeError, tk.TclError):
@@ -445,6 +451,10 @@ class ClipAssistant:
             editor = item.get("editor")
             if editor is not None:
                 editor.set_background_active(name == "cutout" and index == self.current_cutout_page)
+        # Finish view state and popup cleanup before exposing the destination
+        # frame; this avoids painting an intermediate, partially updated page.
+        if page_changed:
+            target.tkraise()
 
     def _set_download_topmost(self, active: bool) -> None:
         """Change only the window z-order, without forcing a Tk/WebView repaint."""
@@ -839,10 +849,51 @@ class ClipAssistant:
         else:
             self.editor_embed_error.configure(text=message)
     def open_cutout(self):
+        if not self.cutout_page_built:
+            # Build and select the destination while it is still behind the
+            # active page. Raising an empty cutout shell and filling it in the
+            # foreground caused a visible blank-to-content flash.
+            self._build_cutout_page()
+        if self.current_page == "cutout":
+            self._activate_nav(self.nav_cutout)
+            return
+        if self.cutout_pages[self.current_cutout_page]["editor"] is None and self.rotoscope_import_error is None:
+            # Keep the current page visible until the cutout controls are ready.
+            # This avoids showing a blank destination during a first-time load.
+            self.cutout_open_pending = True
+            self._prewarm_cutout_workspace()
+            if self.cutout_pages[self.current_cutout_page]["editor"] is None:
+                return
+            self.cutout_open_pending = False
+        self._select_cutout_page(self.current_cutout_page)
         self._show_page("cutout", self.nav_cutout)
+
+    def _prewarm_cutout_workspace(self):
+        if not self.root.winfo_exists():
+            return
         if not self.cutout_page_built:
             self._build_cutout_page()
-        self._select_cutout_page(self.current_cutout_page)
+        if self.cutout_pages[0]["editor"] is not None:
+            return
+        self.cutout_prewarm_requested = True
+        if self.rotoscope_module is not None:
+            self._create_cutout_editor(0, allow_hidden=True)
+            return
+        if self.rotoscope_import_error is not None or self.rotoscope_importing:
+            return
+        self.rotoscope_importing = True
+        self.rotoscope_import_ready = False
+
+        def import_rotoscope():
+            try:
+                self.rotoscope_module = importlib.import_module(".rotoscope", package=__package__)
+            except Exception as exc:
+                self.rotoscope_import_error = exc
+            finally:
+                self.rotoscope_import_ready = True
+
+        threading.Thread(target=import_rotoscope, name="rotoscope-module-load", daemon=True).start()
+        self.root.after(30, self._poll_rotoscope_import)
 
     def _build_cutout_page(self):
         cutout_host = self.page_frames["cutout"]
@@ -897,9 +948,9 @@ class ClipAssistant:
                 self.cutout_editor_pending.add(self.current_cutout_page)
                 self.root.after(60, lambda i=self.current_cutout_page: self._create_cutout_editor(i))
 
-    def _create_cutout_editor(self, index):
+    def _create_cutout_editor(self, index, allow_hidden=False):
         self.cutout_editor_pending.discard(index)
-        if self.current_page != "cutout" or index != self.current_cutout_page:
+        if not allow_hidden and (self.current_page != "cutout" or index != self.current_cutout_page):
             return None
         page = self.cutout_pages[index]
         if page["editor"] is not None:
@@ -933,8 +984,15 @@ class ClipAssistant:
                 placeholder.configure(text=f"抠图模块加载失败：{exc}")
             if index == self.current_cutout_page:
                 self.cutout_page_label.configure(text=f"第 {index + 1} 页 · 抠图模块加载失败：{exc}")
+            if self.cutout_open_pending and allow_hidden:
+                self.cutout_open_pending = False
+                self._select_cutout_page(index)
+                self._show_page("cutout", self.nav_cutout)
             return None
         page["editor"] = editor
+        editor.set_background_active(self.current_page == "cutout" and index == self.current_cutout_page)
+        if index == 0:
+            self.cutout_prewarm_requested = False
         placeholder = page.get("placeholder")
         if placeholder and placeholder.winfo_exists():
             placeholder.destroy()
@@ -944,6 +1002,10 @@ class ClipAssistant:
             self.matting_window = editor
         if page["path"]:
             editor.set_video(page["path"])
+        if self.cutout_open_pending and allow_hidden:
+            self.cutout_open_pending = False
+            self._select_cutout_page(index)
+            self._show_page("cutout", self.nav_cutout)
         return editor
 
     def _poll_rotoscope_import(self):
@@ -958,13 +1020,21 @@ class ClipAssistant:
             index = self.current_cutout_page
             exc = self.rotoscope_import_error
             self.rotoscope_import_error = None
-            if self.current_page == "cutout":
+            self.cutout_prewarm_requested = False
+            if self.current_page == "cutout" or self.cutout_open_pending:
+                self.cutout_open_pending = False
+                if self.current_page != "cutout":
+                    self._select_cutout_page(index)
+                    self._show_page("cutout", self.nav_cutout)
                 self._show_rotoscope_import_error(index, exc)
             return
         if self.current_page == "cutout":
             index = self.current_cutout_page
             self.cutout_editor_pending.add(index)
             self.root.after(40, lambda i=index: self._create_cutout_editor(i))
+        elif self.cutout_prewarm_requested:
+            self.cutout_editor_pending.add(0)
+            self.root.after(1, lambda: self._create_cutout_editor(0, allow_hidden=True))
 
     def _show_rotoscope_import_error(self, index, error):
         page = self.cutout_pages[index]

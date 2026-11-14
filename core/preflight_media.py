@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT))
 from compress_video import transcode_mp4
 from core.denoise import denoise_video
 from app import App, group_download_jobs, media_name, task_pairs, try_publish_title_png
+from local_design import salient_title_spans
 
 
 def run(args):
@@ -37,6 +38,18 @@ def probe(path):
 
 
 def main():
+    # Salience is inferred from each title, not restricted to a small list of
+    # named keywords. Cover unrelated themes and multiword subject phrases.
+    for title, expected in (
+        ("3 Dangerous Steps That Can Lead", "Dangerous Steps"),
+        ("3 Signs the Holy Spirit Is Changing", "Holy Spirit"),
+        ("If You Keep Falling Into Sin, Watch", "Falling Into Sin"),
+        ("How to Build Better Habits Every Morning", "Better Habits"),
+    ):
+        spans = salient_title_spans(title)
+        if not any(title[start:end] == expected for start, end in spans):
+            raise RuntimeError(f"标题重点词自动高亮预检失败：{title!r} 未选中 {expected!r}。")
+
     with tempfile.TemporaryDirectory(prefix="clipassistant-preflight-") as temp:
         root = Path(temp)
         moving = root / "moving.mp4"

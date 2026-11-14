@@ -954,7 +954,7 @@ class App:
 
     def _build_task_rows_slice(self):
         self.row_build_after = None
-        if self._stopped or not self.host.winfo_exists() or not self.view_active:
+        if self._stopped or not self.host.winfo_exists():
             return
         # One row per event-loop turn keeps navigation and text entry
         # responsive.  Previously each batch rebound every existing cell and
@@ -982,12 +982,6 @@ class App:
                 except (AttributeError, tk.TclError):
                     pass
             self.hide_title_preview()
-            if self.row_build_after is not None:
-                try:
-                    self.root.after_cancel(self.row_build_after)
-                except tk.TclError:
-                    pass
-                self.row_build_after = None
         elif (self.view_active and not self.rows_ready and self.row_build_after is None
               and not self._stopped and self.host.winfo_exists()):
             self.row_build_after = self.root.after_idle(self._build_task_rows_slice)
