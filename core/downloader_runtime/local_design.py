@@ -330,124 +330,14 @@ def render(design, green_preview=False, output_size='1080x1920'):
     return image
 
 
-KEYWORD_PATTERN=(r'\b(?:Listen\s+to|Trust\s+in)\s+God\b(?:[\x27’]s\b)?|'
-                 r'\bJesus\s+(?:Returns?|Is\s+Coming(?:\s+(?:Back|Soon))?|Says|Ways)\b|'
-                 r'\bGod(?:[\x27’]s\s+(?:Word|Love)|\s+(?:Says|Always))\b|'
-                 r'\bLord[\x27’]s\s+Return\b|'
-                 r'\b(?:Jesus|God|Lord|Holy\s+Spirit)\b(?:[\x27’](?:s\b)?)?')
-
-# These are grammatical glue words rather than title subjects. The automatic
-# emphasis below scores all remaining words and short phrases, so it works for
-# titles outside the Bible/faith examples too. A broader subject vocabulary
-# adds semantic weight to common topical words without making the behavior
-# depend on a fixed list of names such as God or Jesus.
-TITLE_FUNCTION_WORDS=frozenset('''
-a an the and or but if then than so because while when where how why what which who
-you your yours we our ours they their them he his she her it its this that these those
-is are was were be been being do does did have has had can could would should will
-may might must to of in on at by for from with about as into onto over under after
-before between through during up down out off back again not no nor very more most
-some any each every all both few many much such same other another own only just
-also still already ever never always often usually really much
-'''.split())
-TITLE_LOW_SIGNAL_WORDS=frozenset('''
-keep keeps kept
-thing things something anything everything someone anyone everyone people person
-video videos watch watching look see seeing hear hearing listen read click here there
-get gets getting got make makes making take takes taking know knows knowing tell tells
-telling find finds finding show shows showing use uses using need needs needed want wants
-come comes coming go goes going say says said saying way ways
-'''.split())
-TITLE_TOPIC_WORDS=frozenset('''
-god jesus lord christ spirit holy bible scripture prayer pray prayers faith believe
-believing saved salvation heaven hell sin sins sinful forgiveness forgive grace mercy
-blessing blessings worship church christian gospel truth word love soul soul's angel angels
-dangerous danger powerful powerfulness secret secrets signs sign steps step reasons reason
-mistakes mistake habits habit promises promise verses verse spiritual protect protection
-change changing changed fear afraid hope hopefulness warning warnings warning learn
-'''.split())
-TITLE_TOKEN_RE=re.compile(r"\d+(?:[.,]\d+)?|[A-Za-z]+(?:['’][A-Za-z]+)?")
-
-
-def _title_word_weight(token):
-    word=token.casefold().strip("'’")
-    if not word or word in TITLE_FUNCTION_WORDS:
-        return 0.0
-    if any(char.isdigit() for char in word):
-        return 0.0
-    letters=''.join(char for char in word if char.isalpha())
-    if not letters:
-        return 0.0
-    # Longer, more specific words tend to carry the subject of a short video
-    # title. Suffix cues help surface descriptive words without a language
-    # model or a title-specific list.
-    weight=0.9+min(max(len(letters)-3,0),8)*0.24
-    if re.search(r'(?:ous|ful|less|ive|able|ible|al|ic|ent|ant|ary)$',word):
-        weight+=0.48
-    if word.endswith(('ing','ed')):
-        weight-=0.12
-    if word in TITLE_LOW_SIGNAL_WORDS:
-        return 0.0
-    if word in TITLE_TOPIC_WORDS:
-        weight+=1.05
-    return max(0.2,weight)
+# Only these faith terms receive automatic title color. Other emphasis remains
+# manual through the existing text selection/color controls.
+KEYWORD_PATTERN = r"\b(?:GOD|JESUS)\b(?:['’]s?)?|\bHoly\s+Spirit\b(?:['’]s?)?"
 
 
 def salient_title_spans(text):
-    """Emphasize required faith terms plus one or two inferred title subjects."""
-    tokens=list(TITLE_TOKEN_RE.finditer(text))
-    if not tokens:
-        return []
-    required=[(match.start(),match.end()) for match in re.finditer(
-        r"\b(?:God|Jesus)\b(?:['’]s)?|\bHoly\s+Spirit\b(?:['’]s)?",
-        text, flags=re.IGNORECASE,
-    )]
-    weights=[_title_word_weight(match.group()) for match in tokens]
-    candidates=[]
-    for first in range(len(tokens)):
-        if weights[first]<=0:
-            continue
-        content=[]
-        for last in range(first,min(len(tokens),first+5)):
-            if last>first and last-first>=4:
-                break
-            if weights[last]>0:
-                content.append(last)
-                if len(content)>2:
-                    break
-            elif not content:
-                break
-            if not content:
-                continue
-            # Keep the title emphasis compact: at most two subject words,
-            # while allowing a single connector ("falling into sin").
-            if len(content)==1:
-                score=weights[content[0]]
-            else:
-                gap_count=(content[-1]-content[0]+1)-len(content)
-                score=sum(weights[index] for index in content)+1.65-0.85*gap_count
-                if gap_count==0:
-                    score+=0.38
-                phrase=' '.join(tokens[index].group().casefold().strip("'’") for index in content)
-                if phrase=='holy spirit':
-                    score+=1.5
-            if last>first and weights[last]<=0:
-                continue
-            candidates.append((score,content[0],content[-1],tokens[content[0]].start(),tokens[content[-1]].end()))
-    if not candidates:
-        return required
-    candidates.sort(key=lambda item:(item[0],-item[4]+item[3]),reverse=True)
-    selected=list(required)
-    best_score=candidates[0][0]
-    for score,first_word,last_word,start,end in candidates:
-        if score<max(2.0,best_score*0.67):
-            break
-        if any(not (end<=old_start or start>=old_end) for old_start,old_end in selected):
-            continue
-        selected.append((start,end))
-        if len(selected)>=len(required)+2:
-            break
-    return sorted(selected)
+    """Return only the fixed automatic terms; all other emphasis is manual."""
+    return [(match.start(), match.end()) for match in re.finditer(KEYWORD_PATTERN, text, re.IGNORECASE)]
 
 
 def title_line_runs(values):

@@ -38,21 +38,27 @@ def probe(path):
 
 
 def main():
-    # Salience is inferred from each title, not restricted to a small list of
-    # named keywords. Cover unrelated themes and multiword subject phrases.
-    for title, expected in (
-        ("3 Dangerous Steps That Can Lead", "Dangerous Steps"),
-        ("3 Signs the Holy Spirit Is Changing", "Holy Spirit"),
-        ("If You Keep Falling Into Sin, Watch", "Falling Into Sin"),
-        ("How to Build Better Habits Every Morning", "Better Habits"),
+    # Automatic title emphasis is intentionally limited to the three requested
+    # terms; all other words remain available for manual selection/coloring.
+    for title in (
+        "3 Dangerous Steps That Can Lead",
+        "If You Keep Falling Into Sin, Watch",
+        "How to Build Better Habits Every Morning",
+        "Lord's Return and Christian Habits",
     ):
-        spans = salient_title_spans(title)
-        if not any(title[start:end] == expected for start, end in spans):
-            raise RuntimeError(f"标题重点词自动高亮预检失败：{title!r} 未选中 {expected!r}。")
+        if salient_title_spans(title):
+            raise RuntimeError(f"标题自动高亮超出指定词：{title!r}。")
     required_title = "GOD loves JESUS and the Holy Spirit"
     required_spans = [required_title[start:end].casefold() for start, end in salient_title_spans(required_title)]
-    if not all(required in required_spans for required in ("god", "jesus", "holy spirit")):
-        raise RuntimeError("标题强制高亮预检失败：GOD、JESUS、Holy Spirit 必须全部高亮。")
+    if required_spans != ["god", "jesus", "holy spirit"]:
+        raise RuntimeError("标题自动高亮预检失败：只能自动高亮 GOD、JESUS、Holy Spirit。")
+    possessive_title = "gOd's love, jEsUs' words, and HOLY SPIRIT's guidance"
+    possessive_spans = [possessive_title[start:end].casefold() for start, end in salient_title_spans(possessive_title)]
+    if possessive_spans != ["god's", "jesus'", "holy spirit's"]:
+        raise RuntimeError("标题自动高亮预检失败：大小写和所有格处理异常。")
+    near_match_title = "Goddess, Jesusian, Holy Spiritual"
+    if salient_title_spans(near_match_title):
+        raise RuntimeError("标题自动高亮预检失败：匹配到了非完整词。")
 
     with tempfile.TemporaryDirectory(prefix="clipassistant-preflight-") as temp:
         root = Path(temp)
