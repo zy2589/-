@@ -25,7 +25,6 @@ foreach ($RequiredFile in @($Python, $PyInstaller, $Entry,
         (Join-Path $Assets '剪辑助手图标-1024.png'),
         (Join-Path $Downloader 'app.py'),
         (Join-Path $Downloader 'compress_video.py'),
-        (Join-Path $Downloader 'canva-page-audit.json'),
         (Join-Path $EditorRuntimeCodeSource 'project-store.mjs'),
         (Join-Path $EditorRuntimeCodeSource 'main.mjs'),
         (Join-Path $EditorRuntimeCodeSource 'ui\build.mjs'),
@@ -55,6 +54,17 @@ foreach ($RequiredFile in @($Python, $PyInstaller, $Entry,
         throw 'A required build input is missing.'
     }
 }
+
+$NodeRuntimeInfo = @((& $LocalNode -p "process.versions.node + ' ' + process.versions.undici") -split '\s+')
+if ($LASTEXITCODE -ne 0 -or $NodeRuntimeInfo.Count -lt 2) {
+    throw '无法读取内置 Node.js/Undici 运行时版本。'
+}
+$NodeRuntimeVersion = [version]$NodeRuntimeInfo[0]
+$UndiciRuntimeVersion = [version]$NodeRuntimeInfo[1]
+if ($NodeRuntimeVersion -lt [version]'22.23.5' -or $UndiciRuntimeVersion -lt [version]'6.29.1') {
+    throw "内置运行时需要 Node.js >= 22.23.5 且 Undici >= 6.29.1；当前为 Node.js $NodeRuntimeVersion / Undici $UndiciRuntimeVersion。"
+}
+Write-Host "内置运行时安全基线：Node.js $NodeRuntimeVersion / Undici $UndiciRuntimeVersion"
 
 # Exercise the media path and every standalone title-image row before staging
 # or replacing the release build. This catches silent audio-only outputs and
@@ -87,6 +97,16 @@ Get-ChildItem -LiteralPath $PackageDownloader -Directory -Filter '__pycache__' -
 $BundledColorCache = Join-Path $PackageDownloader 'custom-colors.json'
 if (Test-Path -LiteralPath $BundledColorCache -PathType Leaf) {
     Remove-Item -LiteralPath $BundledColorCache -Force
+}
+foreach ($PrivateSeedPath in @(
+    (Join-Path $PackageDownloader 'user-seed'),
+    (Join-Path $PackageDownloader 'canva-page-audit.json'),
+    (Join-Path $PackageDownloader 'Canva本地页面信息.html'),
+    (Join-Path $PackageDownloader 'Canva本地页面信息.md')
+)) {
+    if (Test-Path -LiteralPath $PrivateSeedPath) {
+        Remove-Item -LiteralPath $PrivateSeedPath -Recurse -Force
+    }
 }
 foreach ($Directory in @('ffmpeg','denoise-dpdfnet','matting_models')) {
     New-Item -ItemType Directory -Force -Path (Join-Path $PackageResources $Directory) | Out-Null
@@ -129,6 +149,14 @@ $RuntimeAssetStage = Join-Path $EngineEditor 'assets'
 New-Item -ItemType Directory -Force -Path $EngineEditorSource, $RuntimeAssetStage | Out-Null
 Copy-Item -Path (Join-Path $EditorRuntimeCodeSource '*') -Destination $EngineEditorSource -Recurse -Force
 Copy-Item -Path (Join-Path $EditorRuntimeAssets '*') -Destination $RuntimeAssetStage -Recurse -Force
+foreach ($PrivateSeedPath in @(
+    (Join-Path $RuntimeAssetStage 'credential-seed'),
+    (Join-Path $RuntimeAssetStage 'user-seed')
+)) {
+    if (Test-Path -LiteralPath $PrivateSeedPath) {
+        Remove-Item -LiteralPath $PrivateSeedPath -Recurse -Force
+    }
+}
 Copy-Item -LiteralPath (Join-Path $EditorRuntimeSource 'deep-filter.exe') -Destination (Join-Path $EngineMedia 'deep-filter.exe') -Force
 Copy-Item -Path (Join-Path $EditorWebViewSource '*.dll') -Destination $EditorStage -Force
 Push-Location $EngineEditor
@@ -375,6 +403,14 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller 构建失败，退出码：$LASTEX
 
 Copy-Item -LiteralPath $EditorStage -Destination (Join-Path $OutputApp '剪辑助手内核') -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $Root 'README.md') -Destination (Join-Path $OutputApp 'README.md') -Force
+$PrivatePackageFiles = @(Get-ChildItem -LiteralPath $OutputApp -Recurse -File | Where-Object {
+    $_.FullName -match '[\\/]credential-seed[\\/]' -or
+    $_.FullName -match '[\\/]user-seed[\\/]' -or
+    $_.Name -in @('canva-page-audit.json','custom-colors.json','Canva本地页面信息.html','Canva本地页面信息.md')
+})
+if ($PrivatePackageFiles.Count -gt 0) {
+    throw ("程序包误包含本机种子或缓存数据：" + ($PrivatePackageFiles.FullName -join '; '))
+}
 $PayloadBytes = (Get-ChildItem -LiteralPath $OutputApp -Recurse -File | Measure-Object Length -Sum).Sum
 Write-Host ("安装目录组件大小：{0:N1} MB（未压缩）" -f ($PayloadBytes / 1MB))
 Write-Host "已生成：$(Join-Path $OutputApp '剪辑助手.exe')"

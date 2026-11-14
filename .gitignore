@@ -11,3 +11,6 @@ core/__pycache__/
 core/editor_runtime/src/assets/credential-seed/
 core/editor_runtime/src/assets/user-seed/
 core/downloader_runtime/user-seed/
+core/downloader_runtime/canva-page-audit.json
+core/downloader_runtime/Canva本地页面信息.html
+core/downloader_runtime/Canva本地页面信息.md
