@@ -11,7 +11,7 @@
 
   function spliceLayoutRegions(layout = state.spliceLayout || DEFAULT_LAYOUT) {
     const ratio = clamp(Number(state.spliceRatio || 0.5), 0.2, 0.8);
-    const pip = (id, name, x, y, w, h) => ({ id, name, x, y, w, h, shape: "rect", borderColor: "#68A9A2", borderWidth: 10, kind: "pip" });
+    const pip = (id, name, x, y, w, h) => ({ id, name, x, y, w, h, frameBaseW: w, frameBaseH: h, frameScale: 100, shape: "rect", borderColor: "#68A9A2", borderWidth: 10, kind: "pip" });
     if (layout === "split-v") return [
       { id: "top", name: "上分区", x: 0, y: 0, w: 1, h: ratio, shape: "rect", kind: "pane" },
       { id: "bottom", name: "下分区", x: 0, y: ratio, w: 1, h: 1 - ratio, shape: "rect", kind: "pane" },
@@ -54,7 +54,20 @@
     const normalizePip = (region) => {
       const w = clamp(Number(region.w || .34), .04, 1);
       const h = clamp(Number(region.h || .28), .04, 1);
-      return { ...region, w, h, x: clamp(Number(region.x || 0), 0, 1 - w), y: clamp(Number(region.y || 0), 0, 1 - h) };
+      return {
+        ...region,
+        // Older projects may have cached polygon points from a previous layout.
+        // PIP geometry is defined by x/y/w/h and its selected shape, so stale
+        // points must never override frame movement or resize controls.
+        points: null,
+        w,
+        h,
+        frameBaseW: clamp(Number(region.frameBaseW || w), .04, 1),
+        frameBaseH: clamp(Number(region.frameBaseH || h), .04, 1),
+        frameScale: clamp(Number(region.frameScale ?? 100), 20, 250),
+        x: clamp(Number(region.x || 0), 0, 1 - w),
+        y: clamp(Number(region.y || 0), 0, 1 - h),
+      };
     };
     const merged = template.map((base) => {
       const old = saved.find((region) => region.id === base.id) || {};
@@ -65,7 +78,7 @@
         shape: old.shape || base.shape,
         borderColor: old.borderColor || base.borderColor,
         borderWidth: savedBorderWidth > 0 ? Math.max(10, savedBorderWidth) : 0,
-        ...(base.kind === "pip" ? normalizePip({ x: Number(old.x ?? base.x), y: Number(old.y ?? base.y), w: Number(old.w ?? base.w), h: Number(old.h ?? base.h) }) : {}),
+        ...(base.kind === "pip" ? normalizePip({ ...base, ...old, x: Number(old.x ?? base.x), y: Number(old.y ?? base.y), w: Number(old.w ?? base.w), h: Number(old.h ?? base.h) }) : {}),
         points: base.points || null,
       };
     });
@@ -78,7 +91,7 @@
   }
 
   function geometryPoints(region) {
-    if (Array.isArray(region?.points) && region.points.length >= 3) return region.points;
+    if (region?.kind !== "pip" && Array.isArray(region?.points) && region.points.length >= 3) return region.points;
     const x = Number(region?.x || 0), y = Number(region?.y || 0), w = Number(region?.w || 1), h = Number(region?.h || 1);
     const shape = region?.shape || "rect";
     if (shape === "circle" || shape === "ellipse") {
@@ -348,12 +361,65 @@
   }
 
   function spliceSelectionBounds(target) {
-    const region = target ? autoSpliceRegion(target) : null;
+    const selectedPip = spliceRegions().find((item) => item.id === state.spliceSelectedRegionId && item.kind === "pip");
+    const region = selectedPip || (target ? autoSpliceRegion(target) : null);
     if (!region) return null;
     const points = geometryPoints(region);
     const xs = points.map(([x]) => x), ys = points.map(([, y]) => y);
     const left = Math.min(...xs), top = Math.min(...ys);
     return { x: left, y: top, w: Math.max(.001, Math.max(...xs) - left), h: Math.max(.001, Math.max(...ys) - top) };
+  }
+
+  function spliceRegionBounds(region) {
+    if (!region) return null;
+    const points = geometryPoints(region);
+    const xs = points.map(([x]) => x), ys = points.map(([, y]) => y);
+    const left = Math.min(...xs), top = Math.min(...ys);
+    return { x: left, y: top, w: Math.max(.001, Math.max(...xs) - left), h: Math.max(.001, Math.max(...ys) - top) };
+  }
+
+  function syncPipGeometryControls(region = spliceRegions().find((item) => item.id === state.spliceSelectedRegionId)) {
+    const scale = $("splicePipScaleRange"), xRange = $("splicePipXRange"), yRange = $("splicePipYRange");
+    if (!scale || !xRange || !yRange) return;
+    const enabled = region?.kind === "pip";
+    const bounds = enabled ? spliceRegionBounds(region) : null;
+    for (const control of [scale, xRange, yRange]) control.disabled = !enabled;
+    if (!enabled || !bounds) return;
+    const scaleValue = clamp(Number(region.frameScale ?? 100), 20, 250);
+    scale.value = String(Math.round(scaleValue));
+    $("splicePipScaleValue").textContent = `${Math.round(scaleValue)}%`;
+    xRange.min = "0";
+    xRange.max = String(Math.max(0, Math.round((1 - bounds.w) * 1000)));
+    xRange.value = String(clamp(Math.round(bounds.x * 1000), 0, Number(xRange.max)));
+    $("splicePipXValue").textContent = `${(Number(xRange.value) / 10).toFixed(1)}%`;
+    yRange.min = "0";
+    yRange.max = String(Math.max(0, Math.round((1 - bounds.h) * 1000)));
+    yRange.value = String(clamp(Math.round(bounds.y * 1000), 0, Number(yRange.max)));
+    $("splicePipYValue").textContent = `${(Number(yRange.value) / 10).toFixed(1)}%`;
+  }
+
+  function setPipRegionFromVisibleBounds(region, bounds, { resetScale = true } = {}) {
+    const fw = Math.max(1, Number(state.width || 1080));
+    const fh = Math.max(1, Number(state.height || 1920));
+    if (["circle", "square"].includes(region.shape)) {
+      const side = Math.min(Number(bounds.w || 0) * fw, Number(bounds.h || 0) * fh);
+      region.w = clamp(side / fw, .04, 1);
+      region.h = clamp(side / fh, .04, 1);
+      const centerX = Number(bounds.x || 0) + Number(bounds.w || 0) / 2;
+      const centerY = Number(bounds.y || 0) + Number(bounds.h || 0) / 2;
+      region.x = clamp(centerX - region.w / 2, 0, 1 - region.w);
+      region.y = clamp(centerY - region.h / 2, 0, 1 - region.h);
+    } else {
+      region.w = clamp(Number(bounds.w || .04), .04, 1);
+      region.h = clamp(Number(bounds.h || .04), .04, 1);
+      region.x = clamp(Number(bounds.x || 0), 0, 1 - region.w);
+      region.y = clamp(Number(bounds.y || 0), 0, 1 - region.h);
+    }
+    if (resetScale) {
+      region.frameBaseW = region.w;
+      region.frameBaseH = region.h;
+      region.frameScale = 100;
+    }
   }
 
   function syncSplicePanel() {
@@ -427,11 +493,13 @@
       $("spliceBorderColor").disabled = !isPip;
       $("spliceBorderWidth").disabled = !isPip;
       $("spliceBorderWidthRange").disabled = !isPip;
+      syncPipGeometryControls(selectedRegion);
     } else {
       $("spliceShape").disabled = true;
       $("spliceBorderColor").disabled = true;
       $("spliceBorderWidth").disabled = true;
       $("spliceBorderWidthRange").disabled = true;
+      syncPipGeometryControls(null);
     }
     document.querySelectorAll("[data-splice-layout]").forEach((button) => button.classList.toggle("active", button.dataset.spliceLayout === state.spliceLayout));
     $("spliceRatio").value = Math.round(Number(state.spliceRatio || .5) * 100);
@@ -480,7 +548,17 @@
     state.spliceLayout = layout;
     const next = spliceLayoutRegions(layout).map((region) => {
       const previous = old.find((item) => item.id === region.id);
-      return previous ? { ...region, name: previous.name, shape: previous.shape || region.shape, borderColor: previous.borderColor, borderWidth: previous.borderWidth } : region;
+      return previous ? {
+        ...region,
+        ...(region.kind === "pip" ? {
+          x: previous.x, y: previous.y, w: previous.w, h: previous.h,
+          frameBaseW: previous.frameBaseW, frameBaseH: previous.frameBaseH, frameScale: previous.frameScale,
+        } : {}),
+        name: previous.name,
+        shape: previous.shape || region.shape,
+        borderColor: previous.borderColor,
+        borderWidth: previous.borderWidth,
+      } : region;
     });
     for (const region of old) if (region.kind === "pip" && layout !== "pip" && !next.some((item) => item.id === region.id)) next.push(region);
     state.spliceRegions = next;
@@ -509,7 +587,7 @@
     }, 0);
     candidates.sort((left, right) => overlap(left) - overlap(right));
     const position = candidates[0] || { x: .04, y: .04 };
-    const region = { id: `pip-${index}`, name: `画中画 ${index}`, ...position, w: pipWidth, h: pipHeight, shape: "rect", borderColor: "#68A9A2", borderWidth: 10, kind: "pip" };
+    const region = { id: `pip-${index}`, name: `画中画 ${index}`, ...position, w: pipWidth, h: pipHeight, frameBaseW: pipWidth, frameBaseH: pipHeight, frameScale: 100, shape: "rect", borderColor: "#68A9A2", borderWidth: 10, kind: "pip" };
     state.spliceRegions = [...regions, region];
     state.spliceSelectedRegionId = region.id;
     if (state.spliceLayout === "free") state.spliceLayout = "pip";
@@ -574,9 +652,11 @@
 
   function installSpliceEvents() {
     const guide = $("spliceGuideLayer");
+    const selectionBox = $("selectionBox");
     let draggedPip = null;
     let draggedContent = null;
     let draggedDivider = null;
+    let resizedPip = null;
     const activeVisualInRegion = (regionId) => {
       const time = Number(state.currentTime || 0), candidates = [];
       let paintOrder = 0;
@@ -612,6 +692,14 @@
       }
       return shortest;
     };
+    const pipFrameMoveHitDistance = (region, bounds) => {
+      const frame = spliceRegionBounds(region);
+      if (!frame) return 0;
+      const renderedSize = Math.min(frame.w * bounds.width, frame.h * bounds.height);
+      // Keep a usable border target on large frames without swallowing the
+      // media's interior on small PIP frames.
+      return Math.min(8, Math.max(2, renderedSize * .18));
+    };
     const refreshSplicePreview = () => {
       updatePreviewTransformOnly(false);
       for (const item of [...(state.videoLayers || []), ...(state.images || [])]) {
@@ -626,6 +714,121 @@
       window.updateSpliceMainFreezePreview?.();
       updateSelectionBox();
     };
+    const updatePipScale = (rawValue) => {
+      const region = state.spliceRegions?.find((item) => item.id === state.spliceSelectedRegionId && item.kind === "pip");
+      if (!region) return;
+      const bounds = spliceRegionBounds(region);
+      const baseW = Math.max(.04, Number(region.frameBaseW || region.w));
+      const baseH = Math.max(.04, Number(region.frameBaseH || region.h));
+      const centerX = bounds.x + bounds.w / 2, centerY = bounds.y + bounds.h / 2;
+      const fitScale = Math.min(centerX * 2 / baseW, (1 - centerX) * 2 / baseW, centerY * 2 / baseH, (1 - centerY) * 2 / baseH) * 100;
+      const maxScale = Math.max(20, Math.min(250, Math.floor(fitScale)));
+      const value = clamp(Number(rawValue || 100), 20, maxScale);
+      const width = baseW * value / 100, height = baseH * value / 100;
+      setPipRegionFromVisibleBounds(region, { x: centerX - width / 2, y: centerY - height / 2, w: width, h: height }, { resetScale: false });
+      region.frameBaseW = baseW;
+      region.frameBaseH = baseH;
+      region.frameScale = value;
+      persistSpliceRegions();
+      renderSpliceGuide();
+      refreshSplicePreview();
+      syncPipGeometryControls(state.spliceRegions.find((item) => item.id === region.id));
+      queueAutosave();
+    };
+    const updatePipPosition = (axis, rawValue) => {
+      const region = state.spliceRegions?.find((item) => item.id === state.spliceSelectedRegionId && item.kind === "pip");
+      if (!region) return;
+      const bounds = spliceRegionBounds(region);
+      const value = clamp(Number(rawValue || 0) / 1000, 0, 1);
+      if (axis === "x") region.x = clamp(Number(region.x || 0) + value - bounds.x, 0, 1 - Number(region.w || .3));
+      else region.y = clamp(Number(region.y || 0) + value - bounds.y, 0, 1 - Number(region.h || .3));
+      persistSpliceRegions();
+      renderSpliceGuide();
+      refreshSplicePreview();
+      syncPipGeometryControls(state.spliceRegions.find((item) => item.id === region.id));
+      queueAutosave();
+    };
+    const resizePipFromHandle = (event) => {
+      if (!resizedPip || resizedPip.pointerId !== event.pointerId) return;
+      const frame = $("frame");
+      const frameBounds = frame?.getBoundingClientRect();
+      if (!frameBounds?.width || !frameBounds?.height) return;
+      const fw = Math.max(1, Number(state.width || 1080)), fh = Math.max(1, Number(state.height || 1920));
+      const dx = (event.clientX - resizedPip.startX) / frameBounds.width * fw;
+      const dy = (event.clientY - resizedPip.startY) / frameBounds.height * fh;
+      const dir = resizedPip.direction;
+      let left = resizedPip.left * fw, right = (resizedPip.left + resizedPip.width) * fw;
+      let top = resizedPip.top * fh, bottom = (resizedPip.top + resizedPip.height) * fh;
+      if (dir.includes("w")) left += dx;
+      if (dir.includes("e")) right += dx;
+      if (dir.includes("n")) top += dy;
+      if (dir.includes("s")) bottom += dy;
+      const lockAspect = ["circle", "square"].includes(resizedPip.region.shape);
+      if (lockAspect) {
+        const anchorX = dir.includes("w") ? right : dir.includes("e") ? left : (left + right) / 2;
+        const anchorY = dir.includes("n") ? bottom : dir.includes("s") ? top : (top + bottom) / 2;
+        const width = dir.includes("w") || dir.includes("e") ? Math.abs(right - left) : 0;
+        const height = dir.includes("n") || dir.includes("s") ? Math.abs(bottom - top) : 0;
+        const minSide = Math.max(fw * .04, fh * .04);
+        let maxSide = Math.min(fw, fh);
+        if (dir.includes("w")) maxSide = Math.min(maxSide, anchorX);
+        else if (dir.includes("e")) maxSide = Math.min(maxSide, fw - anchorX);
+        else maxSide = Math.min(maxSide, anchorX * 2, (fw - anchorX) * 2);
+        if (dir.includes("n")) maxSide = Math.min(maxSide, anchorY);
+        else if (dir.includes("s")) maxSide = Math.min(maxSide, fh - anchorY);
+        else maxSide = Math.min(maxSide, anchorY * 2, (fh - anchorY) * 2);
+        const side = clamp(Math.max(width, height, minSide), Math.min(minSide, maxSide), Math.max(minSide, maxSide));
+        left = dir.includes("w") ? anchorX - side : dir.includes("e") ? anchorX : anchorX - side / 2;
+        right = left + side;
+        top = dir.includes("n") ? anchorY - side : dir.includes("s") ? anchorY : anchorY - side / 2;
+        bottom = top + side;
+      }
+      const minW = fw * .04, minH = fh * .04;
+      if (dir.includes("w")) left = clamp(left, 0, right - minW);
+      else if (dir.includes("e")) right = clamp(right, left + minW, fw);
+      if (dir.includes("n")) top = clamp(top, 0, bottom - minH);
+      else if (dir.includes("s")) bottom = clamp(bottom, top + minH, fh);
+      left = clamp(left, 0, fw - minW);
+      top = clamp(top, 0, fh - minH);
+      right = clamp(right, left + minW, fw);
+      bottom = clamp(bottom, top + minH, fh);
+      const baseW = Number(resizedPip.region.frameBaseW || resizedPip.region.w);
+      const baseH = Number(resizedPip.region.frameBaseH || resizedPip.region.h);
+      setPipRegionFromVisibleBounds(resizedPip.region, { x: left / fw, y: top / fh, w: (right - left) / fw, h: (bottom - top) / fh }, { resetScale: false });
+      resizedPip.region.frameBaseW = baseW;
+      resizedPip.region.frameBaseH = baseH;
+      resizedPip.region.frameScale = clamp(Math.round(((resizedPip.region.w / baseW + resizedPip.region.h / baseH) / 2) * 100), 20, 250);
+      resizedPip.region = state.spliceRegions.find((item) => item.id === resizedPip.region.id) || resizedPip.region;
+      renderSpliceGuide();
+      refreshSplicePreview();
+      syncPipGeometryControls(resizedPip.region);
+      event.preventDefault();
+    };
+    selectionBox?.addEventListener("pointerdown", (event) => {
+      const handle = event.target.closest?.("[data-handle]");
+      if (!handle) return;
+      const region = state.spliceRegions?.find((item) => item.id === state.spliceSelectedRegionId && item.kind === "pip");
+      if (!region) return;
+      const bounds = spliceRegionBounds(region);
+      if (!bounds) return;
+      snapshot();
+      resizedPip = { pointerId: event.pointerId, region, direction: handle.dataset.handle, startX: event.clientX, startY: event.clientY, left: bounds.x, top: bounds.y, width: bounds.w, height: bounds.h };
+      selectionBox.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    }, true);
+    window.addEventListener("pointermove", resizePipFromHandle, true);
+    const finishPipResize = (event) => {
+      if (resizedPip?.pointerId !== event.pointerId) return;
+      resizedPip = null;
+      persistSpliceRegions();
+      try { selectionBox?.releasePointerCapture?.(event.pointerId); } catch {}
+      syncSplicePanel();
+      queueAutosave();
+    };
+    window.addEventListener("pointerup", finishPipResize, true);
+    window.addEventListener("pointercancel", finishPipResize, true);
     guide?.addEventListener("pointerdown", (event) => {
       if (event.target.closest?.("[data-splice-divider]")) {
         event.preventDefault();
@@ -647,7 +850,9 @@
       if (content) {
         window.syncPreviewTimelineSelection?.(content.type, content.id, true);
         const settings = content.target.settings;
-        const moveFrame = edgeDistance(region, event.clientX, event.clientY, frameBounds) <= 12;
+          const edge = edgeDistance(region, event.clientX, event.clientY, frameBounds);
+          const hitDistance = pipFrameMoveHitDistance(region, frameBounds);
+          const moveFrame = edge <= hitDistance;
         snapshot();
         if (moveFrame) draggedPip = { pointerId: event.pointerId, region, startX: event.clientX, startY: event.clientY, x: Number(region.x || 0), y: Number(region.y || 0) };
         else draggedContent = { pointerId: event.pointerId, settings, startX: event.clientX, startY: event.clientY, x: Number(settings.x || 0), y: Number(settings.y || 0), type: content.type };
@@ -683,9 +888,16 @@
       }
       if (!draggedPip || draggedPip.pointerId !== event.pointerId) return;
       const bounds = $("frame").getBoundingClientRect();
-      draggedPip.region.x = clamp(draggedPip.x + (event.clientX - draggedPip.startX) / Math.max(1, bounds.width), 0, 1 - Number(draggedPip.region.w || .3));
-      draggedPip.region.y = clamp(draggedPip.y + (event.clientY - draggedPip.startY) / Math.max(1, bounds.height), 0, 1 - Number(draggedPip.region.h || .3));
+      const region = state.spliceRegions?.find((item) => item.id === draggedPip.region.id && item.kind === "pip");
+      if (!region) return;
+      region.x = clamp(draggedPip.x + (event.clientX - draggedPip.startX) / Math.max(1, bounds.width), 0, 1 - Number(region.w || .3));
+      region.y = clamp(draggedPip.y + (event.clientY - draggedPip.startY) / Math.max(1, bounds.height), 0, 1 - Number(region.h || .3));
+      // The renderer and the inspector use normalized copies of spliceRegions.
+      // Re-persist after editing the live model so both views read the same
+      // current frame during pointer movement, not just after pointerup.
       persistSpliceRegions();
+      draggedPip.region = state.spliceRegions.find((item) => item.id === region.id && item.kind === "pip") || region;
+      syncPipGeometryControls(draggedPip.region);
       renderSpliceGuide();
       refreshSplicePreview();
     });
@@ -727,7 +939,7 @@
       $("spliceAngle").value = event.target.value;
       updateSpliceAngle(event);
     });
-    $("spliceRegionSelect")?.addEventListener("change", (event) => { state.spliceSelectedRegionId = event.target.value; syncSplicePanel(); renderSpliceGuide(); });
+    $("spliceRegionSelect")?.addEventListener("change", (event) => { state.spliceSelectedRegionId = event.target.value; syncSplicePanel(); renderSpliceGuide(); updateSelectionBox(); });
     $("spliceRegionName")?.addEventListener("change", (event) => { persistSpliceRegions(); const region = state.spliceRegions.find((item) => item.id === state.spliceSelectedRegionId); if (region) { region.name = event.target.value.trim() || region.name; persistSpliceRegions(); renderAll(); } });
     $("spliceShape")?.addEventListener("change", (event) => { persistSpliceRegions(); const region = state.spliceRegions.find((item) => item.id === state.spliceSelectedRegionId); if (region) { region.shape = event.target.value; persistSpliceRegions(); renderSpliceGuide(); renderPreviewObjects(); queueAutosave(); } });
     $("spliceBorderColor")?.addEventListener("input", (event) => {
@@ -759,6 +971,12 @@
     $("spliceBorderWidth")?.addEventListener("input", (event) => updateSpliceBorderWidth(event.target.value));
     $("spliceBorderWidth")?.addEventListener("change", (event) => updateSpliceBorderWidth(event.target.value));
     $("spliceBorderWidthRange")?.addEventListener("input", (event) => updateSpliceBorderWidth(event.target.value));
+    $("splicePipScaleRange")?.addEventListener("pointerdown", () => snapshot());
+    $("splicePipXRange")?.addEventListener("pointerdown", () => snapshot());
+    $("splicePipYRange")?.addEventListener("pointerdown", () => snapshot());
+    $("splicePipScaleRange")?.addEventListener("input", (event) => updatePipScale(event.target.value));
+    $("splicePipXRange")?.addEventListener("input", (event) => updatePipPosition("x", event.target.value));
+    $("splicePipYRange")?.addEventListener("input", (event) => updatePipPosition("y", event.target.value));
     $("spliceVideoRegion")?.addEventListener("change", (event) => updateSelectedSpliceTarget({ spliceRegionId: event.target.value }));
     $("spliceAddPip")?.addEventListener("click", addSplicePip);
     $("spliceApplyLayout")?.addEventListener("click", () => { persistSpliceRegions(); renderAll(); toast("布局、时间轴预览与工程设置已同步。"); });

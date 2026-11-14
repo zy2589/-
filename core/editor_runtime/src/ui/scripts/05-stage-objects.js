@@ -298,7 +298,7 @@ async function placeLibraryAsset(
         return `translate(calc(-50% + ${state.captionTransform.x * px}px),calc(-50% + ${(state.captionTransform.y - gap) * py}px)) scale(${state.captionTransform.scale || 1})`;
       }
       function mainVideoSuppressedByDuplicateLayer(clip, track = clip ? state.mainVideoTrackMap?.[clip.id] || "video" : "video") {
-        if (!clip || window.__clipAssistantWorkspaceMode === "splice") return false;
+        if (!clip) return false;
         const sameMedia = (layer) => {
           const mainPaths = [state.video?.path, state.video?.sourcePath].map(value => String(value || "").replace(/\\/g, "/").toLowerCase()).filter(Boolean);
           const layerPaths = [layer.path, layer.sourcePath, layer.mediaPath].map(value => String(value || "").replace(/\\/g, "/").toLowerCase()).filter(Boolean);
@@ -344,8 +344,7 @@ async function placeLibraryAsset(
         // The transform overlay belongs to mouse editing, not transport state.
         // Space may start/pause playback but must not hide, recreate or change
         // the selected preview box and its anchors.
-        const spliceCanvasEditing = window.__clipAssistantWorkspaceMode === "splice" &&
-          (state.spliceLayout !== "free" || (state.spliceRegions || []).some((region) => region.kind === "pip"));
+        const spliceCanvasEditing = state.spliceLayout !== "free" || (state.spliceRegions || []).some((region) => region.kind === "pip");
         const editableSelection =
           !spliceCanvasEditing && ["video", "image", "text", "caption", "review"].includes(state.selected?.type);
         frame.classList.toggle("editing-overflow", editableSelection);
@@ -807,7 +806,7 @@ async function placeLibraryAsset(
           if (imageSpliceStyle?.clipPath) el.style.clipPath = imageSpliceStyle.clipPath;
           el.dataset.type = "image";
           el.dataset.id = image.id;
-          const spliceVideoTopZ = window.__clipAssistantWorkspaceMode === "splice"
+          const spliceVideoTopZ = (state.spliceLayout !== "free" || (state.spliceRegions || []).some((region) => region.kind === "pip"))
             ? Math.max(
                 visualZ(activeMainTrack),
                 ...activeVideoLayers.map((item) => visualZ(item.trackId)),

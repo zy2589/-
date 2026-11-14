@@ -1,7 +1,7 @@
 
       const $ = (id) => document.getElementById(id);
       const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
-      if (window.__clipAssistantWorkspaceMode !== "splice") window.__clipAssistantWorkspaceMode = "edit";
+      window.__clipAssistantWorkspaceMode = "edit";
       function rangeButtonStep(input) {
         const explicit = Number(input.dataset.buttonStep);
         if (Number.isFinite(explicit) && explicit > 0) return explicit;
@@ -1246,7 +1246,7 @@
       function homeQuery() {
         return { period: $('homePeriod').value, before: $('homeBefore').value,
           search: $('homeSearch').value, selection: homeSelectionMode, offset: homeOffset, limit: 40,
-          workspaceMode: window.__clipAssistantWorkspaceMode === "splice" ? "splice" : "edit" };
+          workspaceMode: "all" };
       }
       function updateHomeSelection() {
         $('homeSelection').hidden = !homeSelectionMode;
@@ -1812,7 +1812,7 @@
           await nativeCall("createProject", {
             name: $("newProjectName").value,
             ratio: $("newProjectRatio").value,
-            workspaceMode: window.__clipAssistantWorkspaceMode === "splice" ? "splice" : "edit",
+            workspaceMode: "edit",
           });
           closeNewProjectModal();
           $('homePeriod').value = 'today'; homeOffset = 0;
@@ -1950,37 +1950,18 @@
         }
       }
       function syncWorkspaceModeHomeLabels() {
-        const splice = window.__clipAssistantWorkspaceMode === "splice";
-        if ($("homeWorkspaceHeading")) $("homeWorkspaceHeading").textContent = splice ? "我的拼接工程" : "我的剪辑工程";
-        if ($("homeWorkspaceDescription")) $("homeWorkspaceDescription").textContent = splice
-          ? "工程会自动保存到本机，与剪辑首页工程分开存储"
-          : "工程会自动保存到本机，与视频拼接工程分开存储";
+        if ($("homeWorkspaceHeading")) $("homeWorkspaceHeading").textContent = "我的剪辑工程";
+        if ($("homeWorkspaceDescription")) $("homeWorkspaceDescription").textContent = "工程自动保存到本机；分屏与画中画可在剪辑器中随时添加";
       }
       syncWorkspaceModeHomeLabels();
       let workspaceSwitchQueue = Promise.resolve();
       window.setClipAssistantWorkspaceMode = (mode) => {
-        const next = mode === "splice" ? "splice" : "edit";
+        const next = "edit";
         workspaceSwitchQueue = workspaceSwitchQueue.catch(() => {}).then(async () => {
-          const previous = window.__clipAssistantWorkspaceMode === "splice" ? "splice" : "edit";
+          const previous = "edit";
           syncWorkspaceModeHomeLabels();
-          if (previous === next) return;
           window.__clipAssistantWorkspaceMode = next;
-          homeSelected.clear();
-          homeSelectionMode = false;
-          homeOffset = 0;
-          $("homeSearch").value = "";
-          $("homePeriod").value = "today";
-          $("homeBefore").value = "";
-          $("homeBefore").hidden = true;
-          syncWorkspaceModeHomeLabels();
-          try {
-            if (state.editorActive) await backToHome();
-            else await refreshHome();
-          } catch (error) {
-            window.__clipAssistantWorkspaceMode = previous;
-            syncWorkspaceModeHomeLabels();
-            throw error;
-          }
+          if (previous !== next) await refreshHome();
         });
         return workspaceSwitchQueue.catch((error) => {
           toast(`切换工作区失败：${error.message || error}`);

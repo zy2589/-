@@ -666,7 +666,10 @@ function addLibraryAsset(media, kind) {
           }
           snapshot();
           const captureSettings = asset.spliceCaptureSettings || {};
-          const spliceCanvasOverlay = window.__clipAssistantWorkspaceMode === "splice" && placement !== "gap";
+          const spliceCanvasOverlay = placement !== "gap" && (
+            placement === "preview" || state.spliceLayout !== "free" ||
+            (state.spliceRegions || []).some((region) => region.kind === "pip")
+          );
           const targetRegionId = spliceCanvasOverlay
             ? ""
             : placement === "preview" ? "" : spliceRegionId || captureSettings.spliceRegionId || "";

@@ -188,7 +188,7 @@ function setPreviewToolMode(mode) {
 window.syncPreviewToolUi = syncPreviewToolUi;
 window.setPreviewToolMode = setPreviewToolMode;
 function cropContentBounds(element, object = {}) {
-  if (window.__clipAssistantWorkspaceMode === "splice" && ["video", "videolayer", "image"].includes(state.selected?.type)) {
+  if (["video", "videolayer", "image"].includes(state.selected?.type)) {
     const box = $("selectionBox");
     const clip = state.selected.type === "video"
       ? activeMainVideoClip()

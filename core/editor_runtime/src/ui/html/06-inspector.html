@@ -1,7 +1,7 @@
 <aside class="inspector">
           <nav class="tabs">
             <button class="tab active" data-inspect="basic">属性</button
-            ><button class="tab" data-inspect="splice">拼接</button
+            ><button class="tab" data-inspect="splice">布局</button
             ><button class="tab" data-inspect="color">调色</button
             ><button class="tab feature-retired" data-inspect="filter" hidden aria-hidden="true">滤镜</button
             ><button class="tab" data-inspect="audio">音频</button>
@@ -312,6 +312,9 @@
                 <label class="field"><span class="small">描边颜色</span><input id="spliceBorderColor" type="color" value="#68A9A2"></label>
                 <label class="field"><span class="small">描边宽度（启用时至少 10 px）</span><input class="input" id="spliceBorderWidth" type="number" min="0" max="32" step="1" value="10"><div class="splice-range-row"><input id="spliceBorderWidthRange" type="range" min="0" max="32" step="1" value="10"><output id="spliceBorderWidthValue">10 px</output></div></label>
               </div>
+              <label class="field splice-control"><span class="small">画中画外框大小</span><div class="splice-range-row"><input id="splicePipScaleRange" type="range" min="20" max="250" step="1" value="100"><output id="splicePipScaleValue">100%</output></div></label>
+              <label class="field splice-control"><span class="small">外框位置 X</span><div class="splice-range-row"><input id="splicePipXRange" type="range" min="0" max="1000" step="1" value="580"><output id="splicePipXValue">58.0%</output></div></label>
+              <label class="field splice-control"><span class="small">外框位置 Y</span><div class="splice-range-row"><input id="splicePipYRange" type="range" min="0" max="1000" step="1" value="50"><output id="splicePipYValue">5.0%</output></div></label>
               <div class="splice-actions"><button class="btn" id="spliceApplyLayout" type="button">应用布局</button><span class="small" id="spliceHint">布局轨道会与现有时间轴、预览和导出同步。</span></div>
               </details>
             </div>

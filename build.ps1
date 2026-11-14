@@ -210,12 +210,22 @@ try {
         'data-handle="n"',
         'data-handle="e"',
         'data-handle="s"',
-        'data-handle="w"'
+        'data-handle="w"',
+        'pipFrameMoveHitDistance',
+        'splicePipScaleRange',
+        'splicePipXRange',
+        'splicePipYRange'
     )) {
         if (!$GeneratedUiText.Contains($RequiredUiToken)) {
             throw "生成后的剪辑页面缺少必要功能：$RequiredUiToken"
         }
     }
+$UiHostSourceText = [IO.File]::ReadAllText((Join-Path $Root 'core\ui.py'))
+foreach ($RequiredPagePaintToken in @('_redraw_page_now', 'RDW_ALLCHILDREN', 'RDW_UPDATENOW')) {
+    if (!$UiHostSourceText.Contains($RequiredPagePaintToken)) {
+        throw "区域切换重绘修复缺失，已中止打包：$RequiredPagePaintToken"
+    }
+}
     $RenderSourceText = [IO.File]::ReadAllText((Join-Path $EngineEditorSource 'media\render.mjs'))
     if (!$RenderSourceText.Contains('const hasMainAudio = !config.noMainVideoSource')) {
         throw '视频拼接工程无主视频时，导出器没有使用轨道素材作为视频输入。'

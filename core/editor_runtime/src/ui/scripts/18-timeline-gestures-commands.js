@@ -466,7 +466,10 @@ function scaleTimelineClipGeometry(ratio) {
             const time = previewBladeTime(e.clientX);
             seekTimeline(time);
             setBladeGuide(time, true);
-            if (!splitClipsAt(time, [{ type: clip.dataset.type, id: clip.dataset.id }]))
+            // The edit area's packed main clips have their own source-cut model.
+            // Split them in place so a blade click does not first convert the
+            // whole clip into an overlay object and lose the main-track target.
+            if (!splitClipsAt(time, [{ type: clip.dataset.type, id: clip.dataset.id }], { materializeMain: false }))
               toast("切割位置不在片段的有效范围内");
             e.preventDefault();
             return;

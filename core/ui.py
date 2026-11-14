@@ -350,8 +350,6 @@ class ClipAssistant:
         self.nav_projects.pack(fill="x", padx=12, pady=5)
         self.nav_cutout = self._nav_button(self.sidebar, "抠图区域", self.open_cutout)
         self.nav_cutout.pack(fill="x", padx=12, pady=5)
-        self.nav_splice = self._nav_button(self.sidebar, "拼接区域", self.open_splice)
-        self.nav_splice.pack(fill="x", padx=12, pady=5)
         tk.Frame(self.sidebar, bg=COLORS["sidebar"]).pack(fill="both", expand=True)
         tk.Label(self.sidebar, text="本机处理", bg=COLORS["sidebar"], fg=COLORS["muted"],
                  font=("Microsoft YaHei UI", 10)).pack(anchor="w", padx=24, pady=20)
@@ -382,7 +380,7 @@ class ClipAssistant:
         return ttk.Button(parent, text=text, command=command, style="Nav.TButton", cursor="hand2")
 
     def _activate_nav(self, active):
-        for button in (self.nav_download, self.nav_projects, self.nav_cutout, self.nav_splice):
+        for button in (self.nav_download, self.nav_projects, self.nav_cutout):
             button.configure(style="Nav.TButton")
         active.configure(style="NavSelected.TButton")
 
@@ -395,6 +393,16 @@ class ClipAssistant:
 
     def _show_page(self, name: str, nav) -> None:
         leaving_editor = name != "projects" and self.embedded_editor
+        target = self.page_frames[name]
+        # Prepare and paint the destination page while the current page is
+        # still present, so hiding the embedded editor cannot reveal an empty
+        # black surface during the handoff.
+        target.grid(row=0, column=0, sticky="nsew")
+        target.tkraise()
+        try:
+            target.update_idletasks()
+        except tk.TclError:
+            pass
         # Hide the native WebView child before unmapping its Tk parent. Doing
         # this in the opposite order can leave a stale child surface above the
         # newly selected page until Windows finishes a second composition pass.
@@ -410,14 +418,8 @@ class ClipAssistant:
                 frame.grid(row=0, column=0, sticky="nsew")
             else:
                 frame.grid_remove()
-        self.page_body = self.page_frames[name]
+        self.page_body = target
         self.current_page = name
-        try:
-            self.root.attributes("-topmost", name == "download")
-            if name == "download":
-                self.root.lift()
-        except tk.TclError:
-            pass
         self._activate_nav(nav)
         if self.downloader_app:
             if name != "download":
@@ -427,7 +429,42 @@ class ClipAssistant:
             editor = item.get("editor")
             if editor is not None:
                 editor.set_background_active(name == "cutout" and index == self.current_cutout_page)
-        self.page_body.tkraise()
+        # All area frames and their editors are kept alive. Map and raise the
+        # destination before unmapping the previous page, then flush Tk and
+        # Windows paint queues without erasing the client area (which caused
+        # the black flash during page switches).
+        try:
+            self.page_body.update_idletasks()
+        except tk.TclError:
+            pass
+        self._redraw_page_now(self.page_body)
+        self.root.after_idle(lambda page=name: self._redraw_current_page(page))
+
+    def _redraw_current_page(self, expected_page: str) -> None:
+        if self.current_page != expected_page:
+            return
+        self._redraw_page_now(self.page_body)
+
+    @staticmethod
+    def _redraw_page_now(frame) -> None:
+        """Flush native child-window paints after switching Tk page frames."""
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            user32.RedrawWindow.argtypes = (
+                wintypes.HWND, ctypes.c_void_p, wintypes.HRGN, wintypes.UINT,
+            )
+            user32.RedrawWindow.restype = wintypes.BOOL
+            # RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW. Intentionally
+            # omit RDW_ERASE so Windows paints the destination directly.
+            flags = 0x0001 | 0x0080 | 0x0100
+            user32.RedrawWindow(wintypes.HWND(frame.winfo_id()), None, None, flags)
+        except (OSError, AttributeError, tk.TclError):
+            pass
 
     def _card(self, parent, **kwargs):
         return tk.Frame(
@@ -741,11 +778,6 @@ class ClipAssistant:
 
     def show_projects(self):
         self._open_editor_workspace(self.nav_projects, "edit")
-
-    def open_splice(self):
-        # Reuse the editor surface and export pipeline while the embedded page
-        # switches to its separate splice project catalog and autosave files.
-        self._open_editor_workspace(self.nav_splice, "splice")
 
     def _open_editor_workspace(self, nav_button, mode="edit"):
         self._show_page("projects", nav_button)

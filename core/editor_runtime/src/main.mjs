@@ -1512,7 +1512,7 @@ nativeMethods = {
   uploadEndpoint: safe(
     () => `/upload/${uploadSecret}`,
   ),
-  listProjects: safe((workspaceMode = "edit") =>
+  listProjects: safe((workspaceMode = "all") =>
     listProjects(workspaceMode).map((record) => ({
       ...record,
       thumbnailUrl:

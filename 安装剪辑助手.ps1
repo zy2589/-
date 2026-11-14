@@ -45,7 +45,11 @@ foreach ($SpliceFeature in @(
     'region.borderColor = event.target.value',
     'region.borderWidth = 10',
     'Math.max(10, savedBorderWidth)',
-    'function selectedVideoGrade'
+    'function selectedVideoGrade',
+    'pipFrameMoveHitDistance',
+    'splicePipScaleRange',
+    'splicePipXRange',
+    'splicePipYRange'
 )) {
     if (!$UiHtml.Contains($SpliceFeature)) {
         throw "安装包拼接功能预检失败，未更改当前安装：$SpliceFeature"
@@ -62,11 +66,46 @@ if ($RunningInstance) {
     throw '剪辑助手仍在运行。请先正常关闭窗口，再重新安装；当前安装未更改。'
 }
 
-if (Test-Path -LiteralPath $Destination) {
-    Remove-Item -LiteralPath $Destination -Recurse -Force
+$InstallId = [guid]::NewGuid().ToString('N')
+$InstallStaging = [IO.Path]::GetFullPath((Join-Path $ProgramsInstallRoot ('.剪辑助手-installing-' + $InstallId)))
+$InstallRollback = [IO.Path]::GetFullPath((Join-Path $ProgramsInstallRoot ('.剪辑助手-rollback-' + $InstallId)))
+foreach ($InstallPath in @($InstallStaging, $InstallRollback)) {
+    if (!$InstallPath.StartsWith($ProgramsInstallRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw '拒绝使用安装目录之外的暂存路径。'
+    }
 }
-New-Item -ItemType Directory -Force -Path $Destination | Out-Null
-Copy-Item -Path (Join-Path $Source '*') -Destination $Destination -Recurse -Force
+$StagedExe = Join-Path $InstallStaging '剪辑助手.exe'
+$StagedHost = Join-Path $InstallStaging '剪辑助手内核\剪辑助手.WebView.dll'
+$StagedUi = Join-Path $InstallStaging '剪辑助手内核\Modules\剪辑助手\剪辑界面\src\ui.html'
+$MovedPrevious = $false
+try {
+    New-Item -ItemType Directory -Force -Path $InstallStaging | Out-Null
+    Copy-Item -Path (Join-Path $Source '*') -Destination $InstallStaging -Recurse -Force
+    foreach ($StagedFile in @($StagedExe, $StagedHost, $StagedUi)) {
+        if (!(Test-Path -LiteralPath $StagedFile -PathType Leaf)) {
+            throw "安装包暂存校验失败，现有版本未更改：$StagedFile"
+        }
+    }
+    if (Test-Path -LiteralPath $Destination) {
+        Move-Item -LiteralPath $Destination -Destination $InstallRollback
+        $MovedPrevious = $true
+    }
+    try {
+        Move-Item -LiteralPath $InstallStaging -Destination $Destination
+    } catch {
+        if ((Test-Path -LiteralPath $Destination) -and $MovedPrevious) {
+            Remove-Item -LiteralPath $Destination -Recurse -Force
+        }
+        if ($MovedPrevious -and (Test-Path -LiteralPath $InstallRollback)) {
+            Move-Item -LiteralPath $InstallRollback -Destination $Destination
+        }
+        throw
+    }
+} finally {
+    if (Test-Path -LiteralPath $InstallStaging) {
+        Remove-Item -LiteralPath $InstallStaging -Recurse -Force
+    }
+}
 $InstalledExe = Join-Path $Destination '剪辑助手.exe'
 if (!(Test-Path -LiteralPath $InstalledExe -PathType Leaf)) { throw '复制后的程序文件不存在。' }
 
@@ -81,5 +120,9 @@ $Shortcut.TargetPath = $InstalledExe
 $Shortcut.WorkingDirectory = $Destination
 $Shortcut.IconLocation = $InstalledExe
 $Shortcut.Save()
+if ($MovedPrevious -and (Test-Path -LiteralPath $InstallRollback)) {
+    try { Remove-Item -LiteralPath $InstallRollback -Recurse -Force }
+    catch { Write-Warning "新版本已安装，旧版本临时目录清理失败：$InstallRollback" }
+}
 Write-Host "已安装到：$Destination"
 Write-Host "开始菜单快捷方式：$ShortcutPath"

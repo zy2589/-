@@ -181,7 +181,9 @@ export function saveProjectSnapshot(input = {}) {
 export function queryProjects(query = {}) {
   loadLegacyDeletedProjects();
   const excludeIds = [...new Set([...permanentlyDeletedProjectIds, ...deletingProjectIds])];
-  return queryProjectCatalog(projectsRoot(query.workspaceMode), { ...query, excludeIds });
+  const workspaceMode = String(query.workspaceMode || "all");
+  const roots = workspaceMode === "all" ? projectRoots() : [projectsRoot(workspaceMode)];
+  return queryProjectCatalog(roots, { ...query, excludeIds });
 }
 
 export function loadProject(id) {
@@ -240,9 +242,9 @@ export function renameProject(id, requestedName) {
   });
 }
 
-export function listProjects(workspaceMode = "edit") {
-  const root = projectsRoot(workspaceMode);
-  return fs
+export function listProjects(workspaceMode = "all") {
+  const roots = String(workspaceMode || "all") === "all" ? projectRoots() : [projectsRoot(workspaceMode)];
+  return roots.flatMap(root => fs
     .readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .flatMap((entry) => {
@@ -271,7 +273,7 @@ export function listProjects(workspaceMode = "edit") {
       } catch {
         return [];
       }
-    })
+    }))
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
 }
 

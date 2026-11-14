@@ -312,7 +312,7 @@
         if (type === "review") state.reviewCaptions.push(clone);
         return true;
       }
-      function splitClipsAt(time, targets, { record = true, quiet = false } = {}) {
+      function splitClipsAt(time, targets, { record = true, quiet = false, materializeMain = true } = {}) {
         if (state.video?.analysisPending && !Number(state.video?.frameRate)) { toast("正在读取素材帧率，请稍后切片"); return false; }
         if (state.avLinked || (targets || []).some(item => !["audio", "audioasset"].includes(item.type))) time = frameAlignedTime(time);
         let hits = (targets || []).filter(
@@ -320,10 +320,12 @@
         );
         if (!hits.length) return false;
         if (record) snapshot();
-        const savedSelection=state.selectedItems;
-        state.selectedItems=hits;
-        for(const hit of [...hits])if(['video','audio'].includes(hit.type))materializeMainSegment(hit.type,hit.id);
-        hits=state.selectedItems;state.selectedItems=savedSelection.map(item=>hits.find(x=>x.id===item.id)||item);
+        if (materializeMain) {
+          const savedSelection=state.selectedItems;
+          state.selectedItems=hits;
+          for(const hit of [...hits])if(['video','audio'].includes(hit.type))materializeMainSegment(hit.type,hit.id);
+          hits=state.selectedItems;state.selectedItems=savedSelection.map(item=>hits.find(x=>x.id===item.id)||item);
+        }
         let cut = 0;
         const seen = new Set();
         const mark = (type, id) => {

@@ -82,10 +82,11 @@ if (!isMainThread) {
     try {
       const items = [];
       const excluded = new Set(Array.isArray(query.excludeIds) ? query.excludeIds : []);
-      for (const entry of fs.readdirSync(root,{withFileTypes:true})) {
+      const roots = Array.isArray(root) ? root : [root];
+      for (const projectRoot of roots) for (const entry of fs.readdirSync(projectRoot,{withFileTypes:true})) {
         if (!entry.isDirectory() || !/^[a-f0-9-]{24,64}$/i.test(entry.name)) continue;
         if (excluded.has(entry.name)) continue;
-        const directory = path.join(root,entry.name);
+        const directory = path.join(projectRoot,entry.name);
         try {
           if (fs.existsSync(path.join(directory,'.deleted'))) continue;
           const file = path.join(directory,'project.json');
