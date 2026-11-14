@@ -662,6 +662,11 @@
           return;
         }
         if (record) snapshot();
+        const selectedMainOwnerIds = new Set(
+          selected
+            .filter(item => ["video", "audio"].includes(item.type) && item.id !== "main")
+            .map(item => item.id),
+        );
         // Convert selected main instances before deletion; never remove the backing source.
         state.selectedItems=selected;
         for(const item of [...selected])if(['video','audio'].includes(item.type))materializeMainSegment(item.type,item.id);
@@ -706,8 +711,10 @@
             end: clip.sourceEnd,
             source: "manual",
           });
+          // Video/audio deletion must not implicitly delete timeline captions.
+          // Ripple mode already moves enabled tracks through shiftTracks; a
+          // normal delete leaves overlays at their original timeline times.
           if (ripple) shiftTracks(clip.start, clip.end - clip.start);
-          else trimSubtitleTimeline(clip.start, clip.end);
         }
         const audioOnly = mainAudioClips().filter(
           (clip) => audioIds.has(clip.id) && !shouldRippleAudio,
@@ -715,7 +722,6 @@
         for (const clip of audioOnly) {
           state.audioMutes.push({ start: clip.start, end: clip.end });
           if (ripple) rippleSubtitleTimeline(clip.start, clip.end);
-          else trimSubtitleTimeline(clip.start, clip.end);
         }
         const layerIds = ids("videolayer");
         const audioAssetIds = ids("audioasset");
@@ -732,6 +738,37 @@
         const removedMedia = [...state.videoLayers.filter(x => layerIds.has(x.id)),
           ...state.audioAssets.filter(x => audioAssetIds.has(x.id))];
         const removedOwners = new Set(removedMedia.map(x => x.id));
+        const detachedCaptionOwners = new Set([
+          ...selectedMainOwnerIds,
+          ...removedOwners,
+          ...selectedMainClips.map(clip => clip.id),
+        ]);
+        const detachCaptionOwner = (caption) => {
+          if (!caption || !detachedCaptionOwners.has(caption.ownerClipId)) return false;
+          caption.ownerClipId = "";
+          caption.ownerClipType = "";
+          delete caption.sourceStart;
+          delete caption.sourceEnd;
+          for (const word of caption.words || []) {
+            delete word.sourceStart;
+            delete word.sourceEnd;
+          }
+          return true;
+        };
+        // A source-backed segment can be materialized as a temporary layer
+        // before deletion. Captions previously owned by that layer are
+        // independent timeline items; clear the stale source link before the
+        // remapper runs, otherwise it archives and removes every word whose
+        // owner was just deleted.
+        for (const caption of state.captions || []) detachCaptionOwner(caption);
+        for (const caption of state.reviewCaptions || []) detachCaptionOwner(caption);
+        for (const record of state.captionRecoveryArchive || []) {
+          if (!detachCaptionOwner(record?.caption)) continue;
+          if (record.word) {
+            delete record.word.sourceStart;
+            delete record.word.sourceEnd;
+          }
+        }
         for (const clip of removedMedia) dismissTrimmedIssues(clip.start, clip.end, removedOwners);
         const keep = (type) => (item) => !ids(type).has(item.id);
         state.videoLayers = state.videoLayers.filter((item) => !layerIds.has(item.id));

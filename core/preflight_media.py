@@ -49,6 +49,10 @@ def main():
         spans = salient_title_spans(title)
         if not any(title[start:end] == expected for start, end in spans):
             raise RuntimeError(f"标题重点词自动高亮预检失败：{title!r} 未选中 {expected!r}。")
+    required_title = "GOD loves JESUS and the Holy Spirit"
+    required_spans = [required_title[start:end].casefold() for start, end in salient_title_spans(required_title)]
+    if not all(required in required_spans for required in ("god", "jesus", "holy spirit")):
+        raise RuntimeError("标题强制高亮预检失败：GOD、JESUS、Holy Spirit 必须全部高亮。")
 
     with tempfile.TemporaryDirectory(prefix="clipassistant-preflight-") as temp:
         root = Path(temp)

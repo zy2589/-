@@ -34,11 +34,12 @@ function showCaptionDetails(caption) {
 function syncCaptionToolbarOverflow(){
   const bar=$('timeline').querySelector('.timelinebar'),tools=bar.querySelector('.timelinebar-tools'),right=bar.querySelector('.timeline-right-tools');
   if(!right)return;
-  if(!bar.querySelector('.timeline-more')){
-    const more=document.createElement('details');more.className='timeline-more';const summary=document.createElement('summary');summary.textContent='更多';more.append(summary,right);tools.append(more);
-  }
-  const more=bar.querySelector('.timeline-more'),fit=$('zoomToFitTimeline');
-  if(fit && more){fit.classList.add('timeline-fit-visible');tools.insertBefore(fit,more);}
+  // Keep timeline view and zoom controls in the toolbar. Moving them into a
+  // disclosure popup made essential controls disappear until the user opened
+  // “更多”, even when there was visible space beside the editing tools.
+  const more=bar.querySelector('.timeline-more');
+  if(right.parentElement!==tools)tools.append(right);
+  if(more)more.remove();
 }
 syncCaptionToolbarOverflow();
 

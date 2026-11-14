@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 import uuid
 from datetime import date, datetime
@@ -64,6 +65,12 @@ class ClipAssistant:
     def __init__(self) -> None:
         self._set_app_user_model_id()
         self.root = TkinterDnD.Tk() if TkinterDnD else tk.Tk()
+        # Keep the native window unmapped until the first page has finished
+        # constructing its fixed task rows. Mapping an empty shell and then
+        # filling it made startup look like a page refresh.
+        self.root.withdraw()
+        self._startup_window_revealed = False
+        self._startup_window_started_at = time.monotonic()
         self.root.title("剪辑助手")
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
@@ -399,8 +406,7 @@ class ClipAssistant:
         self.page_body.tkraise()
         self.root.update_idletasks()
         self.show_download()
-        self.root.deiconify()
-        self.root.lift()
+        self.root.after_idle(self._reveal_startup_window_when_ready)
         # Prepare the cutout workspace behind the landing page so the first
         # visit does not reveal an empty shell while its widgets are built.
         self.root.after(600, self._prewarm_cutout_workspace)
@@ -429,10 +435,6 @@ class ClipAssistant:
         # only changes their stacking order, so returning to a page reuses its
         # existing widgets and media/WebView state instead of remapping and
         # repainting the full surface.
-        try:
-            self._set_download_topmost(name == "download")
-        except (OSError, AttributeError, tk.TclError):
-            pass
         if name != "projects" and self.embedded_editor and self.embedded_editor.is_running():
             # Release editor keyboard focus while its native child stays alive
             # behind the selected page.
@@ -455,6 +457,33 @@ class ClipAssistant:
         # frame; this avoids painting an intermediate, partially updated page.
         if page_changed:
             target.tkraise()
+            # Flush Tk's pending geometry/paint work for the chosen page
+            # before the native window is restacked without a repaint.
+            self.root.update_idletasks()
+        # The destination must be the active surface before Windows changes
+        # the top-level Z group. Otherwise the old page is briefly presented
+        # during the HWND restack, which looks like a full-page flash.
+        try:
+            self._set_download_topmost(name == "download")
+        except (OSError, AttributeError, tk.TclError):
+            pass
+
+    def _reveal_startup_window_when_ready(self):
+        """Show one fully built landing page instead of exposing row-by-row setup."""
+        try:
+            if self._startup_window_revealed or not self.root.winfo_exists():
+                return
+            app = self.downloader_app
+            loading = bool(self.download_loading or self.downloader_importing)
+            rows_ready = bool(app and (app.rows_ready or len(app.rows) >= 12))
+            timed_out = time.monotonic() - self._startup_window_started_at >= 25
+            if not rows_ready and (loading or app is not None) and not timed_out:
+                self.root.after(20, self._reveal_startup_window_when_ready)
+                return
+            self._startup_window_revealed = True
+            self.root.deiconify()
+        except tk.TclError:
+            return
 
     def _set_download_topmost(self, active: bool) -> None:
         """Change only the window z-order, without forcing a Tk/WebView repaint."""
@@ -465,6 +494,9 @@ class ClipAssistant:
             from ctypes import wintypes
 
             user32 = ctypes.WinDLL("user32", use_last_error=True)
+            get_ancestor = user32.GetAncestor
+            get_ancestor.argtypes = (wintypes.HWND, wintypes.UINT)
+            get_ancestor.restype = wintypes.HWND
             set_window_pos = user32.SetWindowPos
             set_window_pos.argtypes = (
                 wintypes.HWND, wintypes.HWND,
@@ -472,9 +504,18 @@ class ClipAssistant:
                 wintypes.UINT,
             )
             set_window_pos.restype = wintypes.BOOL
-            hwnd = wintypes.HWND(self.root.winfo_id())
+            widget_hwnd = wintypes.HWND(self.root.winfo_id())
+            # Tk's winfo_id can be the client HWND. Topmost belongs to the
+            # real top-level window; changing the client HWND only restacks
+            # the page surface and leaves the whole app pinned on top.
+            hwnd = get_ancestor(widget_hwnd, 2)  # GA_ROOT
+            if not hwnd:
+                raise ctypes.WinError(ctypes.get_last_error())
             insert_after = ctypes.c_void_p(-1 if active else -2)  # HWND_TOPMOST / HWND_NOTOPMOST
-            flags = 0x0001 | 0x0002 | 0x0010 | 0x0200  # NOSIZE | NOMOVE | NOACTIVATE | NOOWNERZORDER
+            # This operation only changes Z order. The client pixels are
+            # already current after tkraise(); asking Windows to repaint the
+            # entire parent here creates the visible flash during navigation.
+            flags = 0x0001 | 0x0002 | 0x0008 | 0x0010 | 0x0200  # NOSIZE | NOMOVE | NOREDRAW | NOACTIVATE | NOOWNERZORDER
             if not set_window_pos(hwnd, insert_after, 0, 0, 0, 0, flags):
                 raise ctypes.WinError(ctypes.get_last_error())
         else:
@@ -602,6 +643,7 @@ class ClipAssistant:
             child.destroy()
         self._label(page, f"视频下载页面打开失败：{error}", muted=True,
                     wraplength=640, justify="left").place(relx=0.04, rely=0.06, anchor="nw")
+        self.root.after_idle(self._reveal_startup_window_when_ready)
 
     def _close_downloader_view(self):
         if self.downloader_app:

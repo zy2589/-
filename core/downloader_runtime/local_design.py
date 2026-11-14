@@ -394,10 +394,14 @@ def _title_word_weight(token):
 
 
 def salient_title_spans(text):
-    """Choose one or two short, meaningful emphasis spans for a title."""
+    """Emphasize required faith terms plus one or two inferred title subjects."""
     tokens=list(TITLE_TOKEN_RE.finditer(text))
     if not tokens:
         return []
+    required=[(match.start(),match.end()) for match in re.finditer(
+        r"\b(?:God|Jesus)\b(?:['’]s)?|\bHoly\s+Spirit\b(?:['’]s)?",
+        text, flags=re.IGNORECASE,
+    )]
     weights=[_title_word_weight(match.group()) for match in tokens]
     candidates=[]
     for first in range(len(tokens)):
@@ -431,9 +435,9 @@ def salient_title_spans(text):
                 continue
             candidates.append((score,content[0],content[-1],tokens[content[0]].start(),tokens[content[-1]].end()))
     if not candidates:
-        return []
+        return required
     candidates.sort(key=lambda item:(item[0],-item[4]+item[3]),reverse=True)
-    selected=[]
+    selected=list(required)
     best_score=candidates[0][0]
     for score,first_word,last_word,start,end in candidates:
         if score<max(2.0,best_score*0.67):
@@ -441,7 +445,7 @@ def salient_title_spans(text):
         if any(not (end<=old_start or start>=old_end) for old_start,old_end in selected):
             continue
         selected.append((start,end))
-        if len(selected)==2:
+        if len(selected)>=len(required)+2:
             break
     return sorted(selected)
 

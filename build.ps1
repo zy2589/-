@@ -280,14 +280,21 @@ foreach ($RequiredPageSwitchToken in @(
     'target.tkraise()',
     'self._set_download_topmost(name == "download")',
     'def _set_download_topmost(',
+    'get_ancestor(widget_hwnd, 2)',
     'SetWindowPos',
+    'NOREDRAW',
     'NOACTIVATE',
     'self.page_body = target',
-    'set_view_active'
+    'set_view_active',
+    'def _reveal_startup_window_when_ready',
+    'app.rows_ready'
 )) {
     if (!$PageSwitchSourceText.Contains($RequiredPageSwitchToken)) {
         throw "区域常驻切换缺少必要逻辑，已中止打包：$RequiredPageSwitchToken"
     }
+}
+if (!$UiHostSourceText.Contains('self.root.withdraw()')) {
+    throw '启动窗口未等待首屏准备，已中止打包。'
 }
 foreach ($RemovedPageSwitchToken in @('grid_remove()', 'RedrawWindow', 'embedded_editor.hide()')) {
     if ($PageSwitchSourceText.Contains($RemovedPageSwitchToken)) {

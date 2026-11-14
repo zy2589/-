@@ -1512,6 +1512,9 @@ function polishSectionHtml(title, rows, emptyText) {
           return item;
         };
         state.captions = state.captions.map((caption) => {
+          if (state.trackLocks?.[caption.trackId || "caption"] ||
+              state.trackSyncLocks?.[caption.trackId || "caption"] === false)
+            return caption;
           if (!Array.isArray(caption.words) || !caption.words.length)
             return shiftTimedItem(caption);
           const words = [];
@@ -1553,6 +1556,9 @@ function polishSectionHtml(title, rows, emptyText) {
         if (cutEnd <= cutStart + 0.001) return;
         dismissTrimmedIssues(cutStart, cutEnd);
         state.captions = (state.captions || []).flatMap((caption) => {
+          if (state.trackLocks?.[caption.trackId || "caption"] ||
+              state.trackSyncLocks?.[caption.trackId || "caption"] === false)
+            return [caption];
           const captionStart = Number(caption.start || 0);
           const captionEnd = Number(caption.end || captionStart + 0.04);
           if (captionEnd <= cutStart + 0.001 || captionStart >= cutEnd - 0.001)
