@@ -461,14 +461,13 @@ function scaleTimelineClipGeometry(ratio) {
             return;
           }
           if (editTool === "blade") {
-            const guided = Number($("bladeGuide")?.dataset.time);
-            const time = Number.isFinite(guided)
-              ? guided
-              : previewBladeTime(e.clientX);
+            // Use the current pointer position. bladeGuide.dataset.time can be
+            // left over from the previous hover when the tool is re-enabled.
+            const time = previewBladeTime(e.clientX);
             seekTimeline(time);
             setBladeGuide(time, true);
             if (!splitClipsAt(time, [{ type: clip.dataset.type, id: clip.dataset.id }]))
-              toast("点在片段中部切割");
+              toast("切割位置不在片段的有效范围内");
             e.preventDefault();
             return;
           }
