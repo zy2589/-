@@ -104,9 +104,14 @@ class EmbeddedEditor:
 
     def __init__(self, root: tk.Misc, frame: tk.Widget, engine_dir: Path,
                  storage_root: Path, node_path: Path | None = None,
-                 on_error: Callable[[str], None] | None = None):
+                 on_error: Callable[[str], None] | None = None,
+                 native_parent: tk.Widget | None = None):
         self.root = root
         self.frame = frame
+        # Parent the WinForms/WebView2 HWND beside the stacked Tk area frames,
+        # not beneath the Projects frame. This lets us order it with the active
+        # page without hiding/recreating the browser surface on every switch.
+        self.native_parent = native_parent or frame
         self.engine_dir = Path(engine_dir)
         self.storage_root = Path(storage_root)
         self.node_path = Path(node_path) if node_path else self.engine_dir / "runtime" / "node" / "node.exe"
@@ -119,6 +124,7 @@ class EmbeddedEditor:
         self._close_deadline = 0.0
         self._resize_after_id = None
         self._last_bounds = None
+        self._page_active = False
         self.workspace_mode = "edit"
         self.frame.bind("<Configure>", self._on_configure, add="+")
 
@@ -148,13 +154,15 @@ class EmbeddedEditor:
                 )
                 self.host = DesktopHost()
                 self.host.SetWorkspaceMode(self.workspace_mode)
+                x, y, width, height = self._bounds()
                 self.host.AttachAsChildWindow(
-                    IntPtr(int(self.frame.winfo_id())),
-                    Rectangle(0, 0, max(1, self.frame.winfo_width()), max(1, self.frame.winfo_height())),
+                    IntPtr(int(self.native_parent.winfo_id())),
+                    Rectangle(x, y, width, height),
                 )
                 self.starting = True
 
             self.host.ShowEmbedded()
+            self._page_active = True
             if not self.resize(force=True):
                 raise RuntimeError("剪辑工作区无法填满当前主窗口。")
             return True
@@ -176,13 +184,15 @@ class EmbeddedEditor:
             except Exception as exc:
                 self._fail(f"无法隐藏剪辑工作区：{exc}")
 
-    def _bounds(self) -> tuple[int, int]:
+    def _bounds(self) -> tuple[int, int, int, int]:
         try:
-            if not self.frame.winfo_exists():
-                return 1, 1
-            return max(1, self.frame.winfo_width()), max(1, self.frame.winfo_height())
+            if not self.frame.winfo_exists() or not self.native_parent.winfo_exists():
+                return 0, 0, 1, 1
+            x = self.frame.winfo_rootx() - self.native_parent.winfo_rootx()
+            y = self.frame.winfo_rooty() - self.native_parent.winfo_rooty()
+            return x, y, max(1, self.frame.winfo_width()), max(1, self.frame.winfo_height())
         except tk.TclError:
-            return 1, 1
+            return 0, 0, 1, 1
 
     def _on_configure(self, _event=None) -> None:
         if self.host is not None and not bool(self.host.IsClosed):
@@ -204,18 +214,31 @@ class EmbeddedEditor:
     def resize(self, force: bool = False) -> bool:
         if self.host is None or bool(self.host.IsClosed):
             return False
-        width, height = self._bounds()
-        bounds = (width, height)
+        x, y, width, height = self._bounds()
+        bounds = (x, y, width, height)
         if bounds == self._last_bounds and not force:
             return True
         try:
-            self.host.ResizeEmbedded(width, height)
+            self.host.ResizeEmbedded(x, y, width, height)
             self._last_bounds = bounds
             return True
         except Exception as exc:
             self._last_bounds = None
             self._fail(f"剪辑工作区尺寸调整失败：{exc}")
             return False
+
+    def set_page_active(self, active: bool) -> None:
+        """Stack the native editor surface with its sibling Tk pages."""
+        active = bool(active)
+        if not self.is_running() or active == self._page_active:
+            return
+        try:
+            if active and not self.resize(force=True):
+                return
+            self.host.SetEmbeddedPageActive(active)
+            self._page_active = active
+        except Exception as exc:
+            self._fail(f"剪辑工作区层级调整失败：{exc}")
 
     def request_close(self, callback: Callable[[bool], None]) -> None:
         if self.close_in_progress:
@@ -260,6 +283,7 @@ class EmbeddedEditor:
             self.host = None
             self.starting = False
             self.closing = False
+            self._page_active = False
         if error:
             self._fail(error)
         if callback:
@@ -276,6 +300,7 @@ class EmbeddedEditor:
                 pass
         self.host = None
         self.starting = False
+        self._page_active = False
 
     def _fail(self, message: str) -> None:
         if self.on_error:

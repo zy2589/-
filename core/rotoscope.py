@@ -472,8 +472,11 @@ class RotoscopeWindow:
         self._mask_scan_lock = threading.Lock()
         self._mask_scan_process = None
         # Page visibility may reduce UI polling, but must never pause an
-        # in-flight cutout or the frame-mask scan it depends on.
+        # in-flight cutout or the frame-mask scan it depends on. Preview paint
+        # is deferred while this embedded page is hidden to avoid work on an
+        # unmapped canvas during unrelated workspace switches.
         self._background_active = True
+        self._preview_render_pending = False
         self.is_exporting = False
         self.export_jobs = {}
         self.close_when_finished = False
@@ -816,8 +819,14 @@ class RotoscopeWindow:
         self.load_frame()
 
     def _show_image(self, zoom_anchor=None):
+        if self.embedded and not self._background_active:
+            self._preview_render_pending = True
+            if self.app is not None:
+                self.app._record_cutout_preview_event("deferred")
+            return
         if self.image is None:
             return
+        render_started = time.perf_counter()
         try:
             old_xview = self.canvas.xview()[0]
             old_yview = self.canvas.yview()[0]
@@ -915,6 +924,10 @@ class RotoscopeWindow:
             scroll_y = max(0.0, min(total_h - ch, y + fy * size[1] - pointer_y))
             self.canvas.xview_moveto(scroll_x / max(1, total_w))
             self.canvas.yview_moveto(scroll_y / max(1, total_h))
+        if self.app is not None:
+            self.app._record_cutout_preview_event(
+                "painted", (time.perf_counter() - render_started) * 1000
+            )
 
     def _change_zoom(self, multiplier, event=None):
         if self.image is None:
@@ -1308,8 +1321,15 @@ class RotoscopeWindow:
         return generation
 
     def set_background_active(self, active):
-        """Track visibility for UI polling only; background jobs always continue."""
+        """Track page visibility; background jobs continue, hidden paints coalesce."""
+        was_active = self._background_active
         self._background_active = bool(active)
+        if self.embedded and self._background_active and not was_active and self._preview_render_pending:
+            self._preview_render_pending = False
+            try:
+                self.window.after_idle(self._show_image)
+            except tk.TclError:
+                pass
 
     def shutdown_background_work(self):
         self._preview_cancel_event.set()

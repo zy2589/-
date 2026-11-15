@@ -18,6 +18,31 @@ $Build = Join-Path $Root '.build'
 $OutputApp = Join-Path $Output '剪辑助手'
 $PackageResources = Join-Path $Build 'package-resources'
 $PackageDownloader = Join-Path $Build 'package-downloader'
+$FfmpegDownloadRoot = Join-Path $Build 'downloads'
+$FfmpegArchive = Join-Path $FfmpegDownloadRoot 'ffmpeg-release-essentials-9.0.2.zip'
+$FfmpegArchiveSha256 = '60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba'
+$FfmpegStage = Join-Path $Build 'ffmpeg-9.0.2'
+$FfmpegExecutable = Join-Path $FfmpegStage 'ffmpeg-9.0.2-essentials_build\bin\ffmpeg.exe'
+$FfprobeExecutable = Join-Path $FfmpegStage 'ffmpeg-9.0.2-essentials_build\bin\ffprobe.exe'
+
+# Keep the very large media executables out of Git history. Fetch the pinned
+# Gyan essentials archive during a build and verify its publisher checksum.
+New-Item -ItemType Directory -Force -Path $FfmpegDownloadRoot | Out-Null
+if (!(Test-Path -LiteralPath $FfmpegArchive -PathType Leaf)) {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' -OutFile $FfmpegArchive
+}
+$ActualFfmpegArchiveSha256 = (Get-FileHash -LiteralPath $FfmpegArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($ActualFfmpegArchiveSha256 -ne $FfmpegArchiveSha256) {
+    throw "FFmpeg archive SHA-256 mismatch; expected $FfmpegArchiveSha256, received $ActualFfmpegArchiveSha256."
+}
+if (!(Test-Path -LiteralPath $FfmpegExecutable -PathType Leaf) -or !(Test-Path -LiteralPath $FfprobeExecutable -PathType Leaf)) {
+    New-Item -ItemType Directory -Force -Path $FfmpegStage | Out-Null
+    Expand-Archive -LiteralPath $FfmpegArchive -DestinationPath $FfmpegStage -Force
+}
+if (!(Test-Path -LiteralPath $FfmpegExecutable -PathType Leaf) -or !(Test-Path -LiteralPath $FfprobeExecutable -PathType Leaf)) {
+    throw '校验后的 FFmpeg 9.0.2 构建包中缺少 ffmpeg.exe 或 ffprobe.exe。'
+}
 
 foreach ($RequiredFile in @($Python, $PyInstaller, $Entry,
         (Join-Path $Assets '剪辑助手.ico'),
@@ -43,8 +68,7 @@ foreach ($RequiredFile in @($Python, $PyInstaller, $Entry,
         (Join-Path $EditorWebViewSource 'Microsoft.Web.WebView2.WinForms.dll'),
         (Join-Path $EditorWebViewSource 'WebView2Loader.dll'),
         $Csc,
-        (Join-Path $Resources 'ffmpeg\ffmpeg.exe'),
-        (Join-Path $Resources 'ffmpeg\ffprobe.exe'),
+        (Join-Path $Resources 'ffmpeg\LICENSE.txt'),
         (Join-Path $Resources 'denoise-dpdfnet\sherpa-onnx-offline-denoiser.exe'),
         (Join-Path $Resources 'denoise-dpdfnet\dpdfnet2_48khz_hr.onnx'),
         (Join-Path $Resources 'matting_models\rvm_mobilenetv3_fp32.onnx'),
@@ -65,6 +89,23 @@ if ($NodeRuntimeVersion -lt [version]'22.23.5' -or $UndiciRuntimeVersion -lt [ve
     throw "内置运行时需要 Node.js >= 22.23.5 且 Undici >= 6.29.1；当前为 Node.js $NodeRuntimeVersion / Undici $UndiciRuntimeVersion。"
 }
 Write-Host "内置运行时安全基线：Node.js $NodeRuntimeVersion / Undici $UndiciRuntimeVersion"
+
+$PythonRuntimeInfo = & $Python -c "import platform; print(platform.python_version())"
+if ($LASTEXITCODE -ne 0) { throw '无法读取打包用 Python 运行时版本。' }
+$PythonRuntimeVersion = [version]$PythonRuntimeInfo.Trim()
+if ($PythonRuntimeVersion -lt [version]'3.14.10') {
+    throw "打包用 Python 需要 >= 3.14.10；当前为 $PythonRuntimeVersion。"
+}
+$FfmpegInfo = (& $FfmpegExecutable -version | Select-Object -First 1)
+$FfprobeInfo = (& $FfprobeExecutable -version | Select-Object -First 1)
+$FfmpegMatch = [regex]::Match($FfmpegInfo, '^ffmpeg version (?<version>\d+\.\d+\.\d+)')
+$FfprobeMatch = [regex]::Match($FfprobeInfo, '^ffprobe version (?<version>\d+\.\d+\.\d+)')
+if (!$FfmpegMatch.Success -or !$FfprobeMatch.Success -or
+    [version]$FfmpegMatch.Groups['version'].Value -lt [version]'9.0.2' -or
+    [version]$FfprobeMatch.Groups['version'].Value -lt [version]'9.0.2') {
+    throw "FFmpeg/FFprobe 需要 >= 9.0.2；当前为 '$FfmpegInfo' / '$FfprobeInfo'。"
+}
+Write-Host "媒体安全基线：Python $PythonRuntimeVersion / FFmpeg $($FfmpegMatch.Groups['version'].Value) / FFprobe $($FfprobeMatch.Groups['version'].Value)"
 
 # Exercise the media path and every standalone title-image row before staging
 # or replacing the release build. This catches silent audio-only outputs and
@@ -112,7 +153,7 @@ foreach ($Directory in @('ffmpeg','denoise-dpdfnet','matting_models')) {
     New-Item -ItemType Directory -Force -Path (Join-Path $PackageResources $Directory) | Out-Null
 }
 foreach ($RelativeFile in @(
-    'ffmpeg\ffmpeg.exe','ffmpeg\ffprobe.exe','ffmpeg\LICENSE.txt',
+    'ffmpeg\LICENSE.txt',
     'denoise-dpdfnet\dpdfnet2_48khz_hr.onnx','denoise-dpdfnet\sherpa-onnx-offline-denoiser.exe',
     'denoise-dpdfnet\onnxruntime.dll','denoise-dpdfnet\onnxruntime_providers_shared.dll',
     'denoise-dpdfnet\DPDFNet-LICENSE.txt','denoise-dpdfnet\onnxruntime-LICENSE.txt',
@@ -125,6 +166,8 @@ foreach ($RelativeFile in @(
     if (!(Test-Path -LiteralPath $From -PathType Leaf)) { throw "缺少运行资源：$RelativeFile" }
     Copy-Item -LiteralPath $From -Destination (Join-Path $PackageResources $RelativeFile) -Force
 }
+Copy-Item -LiteralPath $FfmpegExecutable -Destination (Join-Path $PackageResources 'ffmpeg\ffmpeg.exe') -Force
+Copy-Item -LiteralPath $FfprobeExecutable -Destination (Join-Path $PackageResources 'ffmpeg\ffprobe.exe') -Force
 $EditorStage = Join-Path $Build '剪辑助手内核'
 if (Test-Path -LiteralPath $EditorStage) {
     $ResolvedStage = [IO.Path]::GetFullPath($EditorStage)
@@ -266,6 +309,8 @@ try {
         }
     }
 $UiHostSourceText = [IO.File]::ReadAllText((Join-Path $Root 'core\ui.py'))
+$EmbeddedEditorSourceText = [IO.File]::ReadAllText((Join-Path $Root 'core\embedded_editor.py'))
+$DesktopHostSourceText = [IO.File]::ReadAllText((Join-Path $Root 'core\editor_host\DesktopHost.cs'))
 $CutoutPageLoops = [regex]::Matches($UiHostSourceText, 'range\(CUTOUT_PAGE_COUNT\)').Count
 if (!$UiHostSourceText.Contains('CUTOUT_PAGE_COUNT = 2') -or $CutoutPageLoops -ne 2) {
     throw "抠图页数量不是 2，已中止打包（页面循环数：$CutoutPageLoops）。"
@@ -290,10 +335,17 @@ foreach ($RequiredPageSwitchToken in @(
 if (!$UiHostSourceText.Contains('self.root.withdraw()')) {
     throw '启动窗口未等待首屏准备，已中止打包。'
 }
-foreach ($RemovedPageSwitchToken in @('grid_remove()', 'RedrawWindow', 'embedded_editor.hide()')) {
+foreach ($RemovedPageSwitchToken in @('grid_remove()', 'RedrawWindow')) {
     if ($PageSwitchSourceText.Contains($RemovedPageSwitchToken)) {
         throw "区域切换仍会卸载或强制重绘页面，已中止打包：$RemovedPageSwitchToken"
     }
+}
+if (!$PageSwitchSourceText.Contains('self.embedded_editor.set_page_active(name == "projects")') -or
+    !$UiHostSourceText.Contains('native_parent=self.page_stage') -or
+    !$EmbeddedEditorSourceText.Contains('def set_page_active(self, active: bool)') -or
+    !$DesktopHostSourceText.Contains('SetEmbeddedPageActive(bool active)') -or
+    !$DesktopHostSourceText.Contains('ResizeEmbedded(int x, int y, int width, int height)')) {
+    throw '区域切换未将 WebView2 子窗口与页面放在同一层级管理，已中止打包。'
 }
 if (!$UiHostSourceText.Contains('for frame in self.page_frames.values():') -or
     !$UiHostSourceText.Contains('frame.grid(row=0, column=0, sticky="nsew")')) {

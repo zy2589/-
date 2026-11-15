@@ -34,6 +34,8 @@ public class DesktopHost : Form
     const long WS_EX_APPWINDOW = 0x00040000L;
     const long WS_EX_TOOLWINDOW = 0x00000080L;
     const uint SWP_NOACTIVATE = 0x0010;
+    const uint SWP_NOMOVE = 0x0002;
+    const uint SWP_NOSIZE = 0x0001;
     const uint SWP_FRAMECHANGED = 0x0020;
     readonly WebView2 view = new WebView2();
     readonly Label status = new Label { Text = "剪辑工作区正在启动…", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Color.White };
@@ -113,7 +115,7 @@ public class DesktopHost : Form
         if (IsDisposed) throw new ObjectDisposedException("DesktopHost");
         Show();
         BringToFront();
-        ResizeEmbedded(Math.Max(1, Width), Math.Max(1, Height));
+        ResizeEmbedded(0, 0, Math.Max(1, Width), Math.Max(1, Height));
     }
     public void SetWorkspaceMode(string mode)
     {
@@ -132,10 +134,21 @@ public class DesktopHost : Form
     {
         if (!IsDisposed && Visible) Hide();
     }
-    public void ResizeEmbedded(int width, int height)
+    public void SetEmbeddedPageActive(bool active)
     {
         if (IsDisposed || !IsHandleCreated) return;
-        if (!SetWindowPos(Handle, IntPtr.Zero, 0, 0, Math.Max(1, width), Math.Max(1, height),
+        // HWND_TOP/HWND_BOTTOM affect only sibling windows under page_stage;
+        // they do not set the application window's always-on-top flag.
+        IntPtr insertAfter = active ? IntPtr.Zero : new IntPtr(1);
+        if (!SetWindowPos(Handle, insertAfter, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "无法调整剪辑工作区页面层级。");
+        Log("EMBEDDED_PAGE_ACTIVE active=" + (active ? "1" : "0"));
+    }
+    public void ResizeEmbedded(int x, int y, int width, int height)
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        if (!SetWindowPos(Handle, IntPtr.Zero, x, y, Math.Max(1, width), Math.Max(1, height),
             SWP_NOACTIVATE | 0x0004 | (Visible ? 0x0040U : 0U)))
             throw new Win32Exception(Marshal.GetLastWin32Error(), "无法调整剪辑工作区尺寸。");
     }
@@ -303,6 +316,8 @@ public class DesktopHost : Form
                     window.addEventListener('unhandledrejection', event => report('unhandledrejection', event.reason && (event.reason.stack || event.reason.message) || event.reason), true);
                 })();");
             view.CoreWebView2.NavigationCompleted += async (s, e) => {
+                Log("NAVIGATION_COMPLETE id=" + e.NavigationId + " success=" + (e.IsSuccess ? "1" : "0") +
+                    (e.IsSuccess ? "" : " error=" + e.WebErrorStatus));
                 if (!e.IsSuccess) {
                     hostState = "error";
                     lastError = "剪辑界面加载失败：" + e.WebErrorStatus;
@@ -314,7 +329,7 @@ public class DesktopHost : Form
                 status.Hide();
                 hostState = "ready";
                 lastError = "";
-                Log("DESKTOP_READY " + view.CoreWebView2.Source);
+                Log("DESKTOP_READY");
                 try {
                     await Task.Delay(500);
                     ApplyWorkspaceMode();
@@ -363,7 +378,13 @@ public class DesktopHost : Form
             view.CoreWebView2.Settings.AreDevToolsEnabled = false;
             view.CoreWebView2.Settings.IsStatusBarEnabled = false;
             view.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
-            view.CoreWebView2.NavigationStarting += (s, e) => { Uri target; if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out target) || target.GetLeftPart(UriPartial.Authority) != origin.GetLeftPart(UriPartial.Authority)) e.Cancel = true; };
+            view.CoreWebView2.NavigationStarting += (s, e) => {
+                Uri target;
+                bool allowed = Uri.TryCreate(e.Uri, UriKind.Absolute, out target) &&
+                    target.GetLeftPart(UriPartial.Authority) == origin.GetLeftPart(UriPartial.Authority);
+                Log("NAVIGATION_START id=" + e.NavigationId + " allowed=" + (allowed ? "1" : "0"));
+                if (!allowed) e.Cancel = true;
+            };
             view.CoreWebView2.NewWindowRequested += (s, e) => { e.Handled = true; Uri link; if (e.IsUserInitiated && Uri.TryCreate(e.Uri, UriKind.Absolute, out link) && (link.Scheme == "https" || link.Scheme == "http")) Process.Start(new ProcessStartInfo(link.AbsoluteUri) { UseShellExecute = true }); };
             status.Text = "正在加载编辑界面…";
             view.CoreWebView2.Navigate(url);
