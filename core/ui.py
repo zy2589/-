@@ -46,8 +46,17 @@ CUTOUT_PAGE_COUNT = 2
 
 
 def resource_root() -> Path:
-    root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
-    return root / "resources"
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    if frozen_root:
+        return Path(frozen_root) / "resources"
+    project_root = Path(__file__).resolve().parent.parent
+    built_resources = project_root / ".build" / "package-resources"
+    if (
+        (built_resources / "ffmpeg" / "ffmpeg.exe").is_file()
+        and (built_resources / "ffmpeg" / "ffprobe.exe").is_file()
+    ):
+        return built_resources
+    return project_root / "resources"
 
 
 def bundle_root() -> Path:
