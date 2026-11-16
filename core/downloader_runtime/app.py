@@ -2139,7 +2139,7 @@ class App:
                         raise RuntimeError('下载没有生成可处理的视频文件。')
 
                 from core.denoise import denoise_video
-                from compress_video import transcode_mp4
+                from compress_video import CRF, transcode_mp4
                 terminal_keys = set()
                 for strength, strength_batch in strengths.items():
                     strength_keys = [job[0] for job in strength_batch]
@@ -2173,7 +2173,7 @@ class App:
                                 self.events.put((key, '处理中', f'文件不超过 80 MB，跳过压缩 {index}/{len(raw_sources)}'))
                         if needs_compression:
                             for key in strength_keys:
-                                self.events.put((key, '处理中', f'H.264 压缩 {index}/{len(raw_sources)} · x264 CRF {23}'))
+                                self.events.put((key, '处理中', f'H.264 压缩 {index}/{len(raw_sources)} · x264 CRF {CRF}'))
                             try:
                                 output = transcode_mp4(
                                     output,

@@ -417,6 +417,14 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
     '下载压缩必须保留输入素材的横竖方向与画面比例，不得强制画布或补边。',
   );
   requireBuildCheck(
+    compressScript.includes('CRF = 18') &&
+      compressScript.includes('source_video_mbps * 0.75') &&
+      compressScript.includes('_video_filter(source_video, expected_width, expected_height, fps=None)') &&
+      compressScript.includes('"-fps_mode", "passthrough"') &&
+      !compressScript.includes('source_video_mbps * 0.24'),
+    '下载压缩要使用较高画质档、宽松来源码率上限，并保留源帧率。',
+  );
+  requireBuildCheck(
     reviewScript.includes('planReviewCaptionDeletion(state.captions,selected') &&
       reviewScript.includes('state.captions=deletion.captions') &&
       reviewScript.includes('ambiguousCaptionIds.size') &&

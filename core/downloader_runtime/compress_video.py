@@ -14,7 +14,7 @@ from typing import Callable
 
 
 FPS = 30
-CRF = 23
+CRF = 18
 AUDIO_RATE = "128k"
 AUDIO_SAMPLE_RATE = 44100
 
@@ -139,7 +139,8 @@ def _even_display_dimensions(video: dict) -> tuple[int, int]:
     return width, height
 
 
-def _video_filter(video: dict, output_width: int, output_height: int) -> str:
+def _video_filter(video: dict, output_width: int, output_height: int,
+                  fps: float | None = FPS) -> str:
     display_width, display_height = _display_dimensions(video)
     filters = []
     if (abs(display_width - output_width) > 0.01 or
@@ -149,7 +150,8 @@ def _video_filter(video: dict, output_width: int, output_height: int) -> str:
     # The output dimensions already include any source pixel aspect ratio.
     # Normalize to square pixels so players cannot reinterpret the frame shape.
     filters.append("setsar=1")
-    filters.append(f"fps={FPS}")
+    if fps is not None:
+        filters.append(f"fps={fps:g}")
     return ",".join(filters)
 
 
@@ -168,16 +170,16 @@ def _int_or_zero(value) -> int:
 
 
 def _recommended_cap(path: Path, media: dict) -> float:
-    """Use the editor's RF-mode rule: cap by source video bitrate and a pixel budget."""
+    """Keep the compressed stream below a generous source-relative quality ceiling."""
     pixels = int(media["video"].get("width") or 0) * int(media["video"].get("height") or 0)
-    pixel_budget = 38.0 if pixels >= 7_000_000 else 24.0 if pixels >= 3_000_000 else 14.0 if pixels >= 1_500_000 else 8.0
+    pixel_budget = 60.0 if pixels >= 7_000_000 else 36.0 if pixels >= 3_000_000 else 20.0 if pixels >= 1_500_000 else 12.0
     duration = media["duration"]
     if not duration:
         return 2.30
     total_mbps = path.stat().st_size * 8 / duration / 1_000_000
     audio_mbps = (media["audio_bitrate"] / 1_000_000) if media["audio"] and media["audio_bitrate"] else (0.128 if media["audio"] else 0)
     source_video_mbps = max(0.01, total_mbps - audio_mbps)
-    return max(0.01, min(pixel_budget, source_video_mbps * 0.24))
+    return max(0.01, min(pixel_budget, source_video_mbps * 0.75))
 
 
 def _encode_once(command: list[str], duration: float, *, cancel=None,
@@ -271,7 +273,7 @@ def transcode_mp4(video: Path, *, resource_dir: Path, cancel=None,
     staged = video.parent / f".clipassistant-transcode-{uuid.uuid4().hex}.mp4"
     source_video = source["video"]
     source_codec = (source_video.get("codec_name") or "").casefold()
-    expected_fps = FPS
+    expected_fps = source["fps"] if compress else FPS
     source_width = int(source_video.get("width") or 0)
     source_height = int(source_video.get("height") or 0)
     display_width, display_height = _display_dimensions(source_video)
@@ -282,8 +284,8 @@ def transcode_mp4(video: Path, *, resource_dir: Path, cancel=None,
         maxrate = f"{cap_mbps * 1.2:.2f}M"
         bufsize = f"{cap_mbps * 2:.2f}M"
         video_args = [
-            "-vf", _video_filter(source_video, expected_width, expected_height),
-            "-fps_mode", "cfr", "-c:v", "libx264", "-preset", "veryfast",
+            "-vf", _video_filter(source_video, expected_width, expected_height, fps=None),
+            "-fps_mode", "passthrough", "-c:v", "libx264", "-preset", "veryfast",
             "-crf", str(CRF), "-maxrate", maxrate, "-bufsize", bufsize, "-pix_fmt", "yuv420p",
         ]
         progress_label = f"H.264 压缩转码 CRF {CRF}"
