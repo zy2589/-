@@ -88,6 +88,12 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
   const gestureScript = fs.readFileSync(path.join(uiDir, 'scripts/18-timeline-gestures-commands.js'), 'utf8');
   const captionPaintScript = fs.readFileSync(path.join(uiDir, 'scripts/06-caption-canvas-paint.js'), 'utf8');
   const dragDropScript = fs.readFileSync(path.join(uiDir, 'scripts/19-fonts-shortcuts-dragdrop.js'), 'utf8');
+  requireBuildCheck(
+    !dragDropScript.includes('activeBatchDropModal') &&
+      countMatches(dragDropScript, /if \(!state\.editorActive\) return;/g) >= 2 &&
+      dragDropScript.includes('if (!state.editorActive) {\n            toast("请先新建或打开一个工程");\n            return;'),
+    '工程首页的拖放监听不得调用未定义的弹窗判断函数，也不得在工程外处理素材。',
+  );
   const mediaClickStart = mediaScript.indexOf('card.onclick = (event) => {');
   const mediaClickEnd = mediaScript.indexOf('card.oncontextmenu', mediaClickStart);
   const mediaClickHandler = mediaClickStart >= 0 && mediaClickEnd > mediaClickStart

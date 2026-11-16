@@ -1527,7 +1527,7 @@ function registerFontFace(font) {
         (event) => {
           if (hasDragType(event, "application/x-clipassistant-track")) return;
           event.preventDefault();
-          if (!state.editorActive && !activeBatchDropModal()) return;
+          if (!state.editorActive) return;
           dragDepth += 1;
           const intent = dropLocation(event);
           sendDropIntent(intent);
@@ -1541,7 +1541,7 @@ function registerFontFace(font) {
           if (hasDragType(event, "application/x-clipassistant-track")) return;
           event.preventDefault();
           if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
-          if (!state.editorActive && !activeBatchDropModal()) return;
+          if (!state.editorActive) return;
           const intent = dropLocation(event);
           sendDropIntent(intent);
           showDropUi(intent);
@@ -1564,13 +1564,13 @@ function registerFontFace(font) {
           if (hasDragType(event, "application/x-clipassistant-track")) return;
           event.preventDefault();
           event.stopPropagation();
-          const intent = dropLocation(event);
-          sendDropIntent(intent, true);
-          clearDropUi();
-          if (!state.editorActive && !activeBatchDropModal()) {
+          if (!state.editorActive) {
             toast("请先新建或打开一个工程");
             return;
           }
+          const intent = dropLocation(event);
+          sendDropIntent(intent, true);
+          clearDropUi();
           const internalId = event.dataTransfer?.getData?.(
             "application/x-clipassistant-asset",
           );
@@ -1623,7 +1623,7 @@ function registerFontFace(font) {
                         return;
                       }
                       window.__clipAssistantExternalDropFiles = null;
-                      if (activeBatchDropModal()) { await uploadBrowserFiles(files, intent); return; }
+                      if (state.editorActive) { await uploadBrowserFiles(files, intent); return; }
                       toast("无法取得拖入素材的原路径，请点击“导入素材”选择；不会复制素材副本");
                 } catch (error) {
                   toast(error.message);
