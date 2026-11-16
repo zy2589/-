@@ -22,8 +22,9 @@ sys.path.insert(0, str(ROOT))
 
 from core.denoise import denoise_video
 from app import (App, clipboard_field_rows, clipboard_link_groups, clipboard_matrix,
-                 group_download_jobs, media_name, plan_link_fill, task_pairs, task_rows,
-                 try_publish_title_png)
+                 _sheets_clipboard_json_fragment, group_download_jobs, media_name,
+                 plan_link_fill, task_pairs, task_rows,
+                 strip_title_hashtags, try_publish_title_png)
 from local_design import normalize_manual_title_lines, replace_title, salient_title_spans
 from page_cache import extract_phone_input, format_phone_like
 
@@ -41,6 +42,20 @@ def probe(path):
 
 
 def main():
+    hashtag_titles = (
+        ('3 Signs a Preacher May Be Using Your Faith for Money #Pastor #Church #Bible #Discernment #Truth',
+         '3 Signs a Preacher May Be Using Your Faith for Money'),
+        ('When You Have No One Else, God Is Still With You! #ChristianUSA #ChristianCanada #GodIsWithYou #TrustGod #FaithOverFear',
+         'When You Have No One Else, God Is Still With You!'),
+        ('2 Types of Christians Who May Miss the Bridegroom’s Coming! #ChristianUSA #ChristianCanada #JesusIsComing #WiseVirgins #HearGodsVoice',
+         '2 Types of Christians Who May Miss the Bridegroom’s Coming!'),
+        ('Want to Grow Closer to God? Start These 6 Daily Habits! #ChristianUSA #ChristianCanada #DrawCloserToGod #DailyPrayer #SpiritualGrowth',
+         'Want to Grow Closer to God? Start These 6 Daily Habits!'),
+    )
+    for source_title, expected_title in hashtag_titles:
+        if strip_title_hashtags(source_title) != expected_title:
+            raise RuntimeError('标题清理预检失败：# 后面的标签没有全部移除，或标题正文被误删。')
+
     folder_link = "https://drive.google.com/drive/folders/test-folder-id"
     video_link = "https://drive.google.com/file/d/test-video-id/view"
     rich_cell = (f'<table><tr><td><a href="{folder_link}">文件夹链接</a><br>'
@@ -48,6 +63,18 @@ def main():
     rich_groups = clipboard_link_groups(rich_cell)
     if rich_groups != [[folder_link, video_link]]:
         raise RuntimeError("Google 表格剪贴板预检失败：同一单元格中的两个真实超链接没有一起识别。")
+    sheets_rich_cell = (f'<table><tr><td><a class="in-cell-link" href="{folder_link}">文件夹</a>'
+                        f'<br><a class="in-cell-link" href="{video_link}">测试视频12.mp4</a>'
+                        '</td></tr></table>')
+    if clipboard_link_groups(sheets_rich_cell) != [[folder_link, video_link]]:
+        raise RuntimeError('Google 表格富文本预检失败：单元格内链接卡片的 href 没有保留。')
+    sheets_private_data = json.dumps({
+        'cell': {'text': '测试视频12.mp4',
+                 'links': [{'uri': folder_link}, {'uri': video_link}]}
+    }).encode('utf-8')
+    private_fragment = _sheets_clipboard_json_fragment(sheets_private_data)
+    if clipboard_link_groups(private_fragment) != [[folder_link, video_link]]:
+        raise RuntimeError('Google 表格专用剪贴板格式预检失败：双链接没有保留在同一行。')
     bulk_plan = plan_link_fill(f'{folder_link} | {video_link}', ["", ""])
     if bulk_plan != [(0, f'{folder_link} | {video_link}')]:
         raise RuntimeError("双链接粘贴预检失败：一个单元格的链接被拆到了两行。")
@@ -64,8 +91,10 @@ def main():
         raise RuntimeError("带表头的表格批量粘贴预检失败：人名、号码、文案或真实链接映射错误。")
 
     class ClipboardStatus:
+        text = ''
+
         def config(self, **_kwargs):
-            pass
+            self.text = _kwargs.get('text', self.text)
 
     class PasteVariable:
         def __init__(self, value=''):
@@ -106,6 +135,27 @@ def main():
         raise RuntimeError("单格双链接粘贴预检失败：链接列没有应用到当前行。")
     if clipboard_app.rows[0][2].get() != f'{folder_link} | {video_link}':
         raise RuntimeError("单格双链接粘贴预检失败：两个链接没有留在同一行。")
+    clipboard_app._paste_matrix = lambda _widget: [
+        [{'text': '测试视频12.mp4', 'links': []}]]
+    if App.paste_column_values(clipboard_app, paste_event, 0, 'link') != 'break':
+        raise RuntimeError('文件名误粘贴预检失败：只有显示名称时没有拦截并提示。')
+    if '只有文件名' not in clipboard_app.status.text:
+        raise RuntimeError('文件名误粘贴预检失败：没有明确告知需要复制真实链接。')
+    clipboard_app._paste_matrix = lambda _widget: [
+        [{'text': source_title, 'links': []}] for source_title, _ in hashtag_titles]
+    if App.paste_column_values(clipboard_app, paste_event, 0, 'title') != 'break':
+        raise RuntimeError('标题列清理预检失败：带标签的标题没有进入清理粘贴路径。')
+    if [clipboard_app.rows[index][1].get() for index in range(len(hashtag_titles))] != [
+            expected for _, expected in hashtag_titles]:
+        raise RuntimeError('标题列清理预检失败：批量粘贴后仍含有 # 标签。')
+    clipboard_app._paste_matrix = lambda _widget: [
+        [{'text': '演员', 'links': []}, {'text': '标题', 'links': []}],
+        [{'text': '演员甲', 'links': []}, {'text': hashtag_titles[1][0], 'links': []}],
+    ]
+    if App.paste_column_values(clipboard_app, paste_event, 4, 'name') != 'break':
+        raise RuntimeError('表头标题清理预检失败：多列表格标题没有进入映射粘贴路径。')
+    if clipboard_app.rows[4][1].get() != hashtag_titles[1][1]:
+        raise RuntimeError('表头标题清理预检失败：视频名称列仍含有 # 标签。')
 
     phone_us = '合拍視頻\\\n電話：+12025550147'
     phone_nz = '1.25倍+ IG輪播圖合拍  \\\n電話： ＋64 27 000 0000'
@@ -341,7 +391,60 @@ def main():
                 any(item.read_bytes() != moving.read_bytes() for item in saved_videos)):
             raise RuntimeError("双链接任务预检失败：同名视频未分别保存，或有视频被覆盖。")
 
-    print("MEDIA PREFLIGHT PASSED: rich spreadsheet links and header mapping work; two links in one row download to one person/title folder without overwriting; no-denoise videos remain byte-identical; one shared link produced 5 independent person folders.")
+        visible_root = root / "visible-download"
+        visible_root.mkdir()
+        visible_folder = visible_root / "双链接演员-处理中"
+        visible_folder.mkdir()
+        visible_worker = App.__new__(App)
+        visible_worker.resource_dir = RESOURCE_DIR
+        visible_worker.jobs = {
+            "visible-link-2": {
+                "row": 0, "name": "双链接演员-处理中", "url": video_link,
+                "path": visible_folder, "link_index": 2, "link_count": 2,
+                "state": "排队中", "denoise_failed_files": [],
+            }
+        }
+        visible_worker.events = queue.Queue()
+
+        def fake_visible_download(_key, _url, _cancel, settings):
+            markers = settings[7]
+            if len(markers) != 1 or not next(iter(markers.values())).is_file():
+                raise RuntimeError("可见下载预检失败：下载开始前目标文件夹没有对应链接状态文件。")
+            if "准备下载" not in next(iter(markers.values())).read_text(encoding="utf-8"):
+                raise RuntimeError("可见下载预检失败：初始状态文件内容不正确。")
+            download_folder = Path(settings[3])
+            download_folder.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(moving, download_folder / "visible-video.mp4")
+
+        visible_worker._download = fake_visible_download
+        marker = visible_folder / "视频2-下载处理中.txt"
+        visible_batch = [(
+            "visible-link-2", video_link, threading.Event(),
+            (visible_folder, "best", "", False, 5, []),
+        )]
+        from core import denoise as denoise_module
+        original_denoise_video = denoise_module.denoise_video
+
+        def fake_denoise_visible(video, **_kwargs):
+            visible_videos = list(visible_folder.glob("*.mp4"))
+            if len(visible_videos) != 1 or visible_videos[0].read_bytes() != moving.read_bytes():
+                raise RuntimeError("可见下载预检失败：降噪过程中目标文件夹没有可见的原视频。")
+            if not marker.is_file() or "降噪中" not in marker.read_text(encoding="utf-8"):
+                raise RuntimeError("可见下载预检失败：降噪期间状态文件未更新。")
+            return Path(video)
+
+        denoise_module.denoise_video = fake_denoise_visible
+        try:
+            if not visible_worker._download_group(visible_batch):
+                raise RuntimeError("可见下载预检失败：处理任务未完成。")
+        finally:
+            denoise_module.denoise_video = original_denoise_video
+        visible_outputs = list(visible_folder.glob("*.mp4"))
+        if (len(visible_outputs) != 1 or visible_outputs[0].name != "视频2-visible-video.mp4" or
+                visible_outputs[0].read_bytes() != moving.read_bytes() or marker.exists()):
+            raise RuntimeError("可见下载预检失败：结束后未留下成品视频，或临时状态文件没有清理。")
+
+    print("MEDIA PREFLIGHT PASSED: rich spreadsheet links and header mapping work; two links in one row download to one folder; source videos and per-link status are visible during denoising; status files are removed after publishing; no-denoise videos remain byte-identical; one shared link produced 5 independent person folders.")
 
 
 if __name__ == "__main__":

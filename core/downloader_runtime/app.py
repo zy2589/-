@@ -1,5 +1,6 @@
 """Windows video download assistant. Run with Python 3.10+."""
 import os
+import ctypes
 import html
 import csv
 import io
@@ -521,6 +522,12 @@ def extract_urls(text):
     return urls
 
 
+def strip_title_hashtags(value):
+    """Keep the title text before its first social hashtag."""
+    text = str(value or '').replace('＃', '#')
+    return text.split('#', 1)[0].rstrip()
+
+
 class _ClipboardLinkParser(HTMLParser):
     """Read link targets from Google Sheets rich clipboard HTML."""
     def __init__(self):
@@ -672,8 +679,102 @@ def clipboard_link_groups(fragment):
     return groups if any(groups) else []
 
 
+def _clipboard_diagnostic(message):
+    """Write clipboard diagnostics without storing clipboard contents or URLs."""
+    try:
+        profile = Path(os.environ.get('USERPROFILE') or Path.home())
+        log_dir = profile / 'Documents' / 'ChatGPT' / '剪辑助手' / '用户数据' / '运行配置' / 'logs'
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / ('clipboard-' + datetime.now().strftime('%Y%m%d') + '.log')
+        with log_path.open('a', encoding='utf-8') as stream:
+            stream.write(f'{datetime.now().isoformat(timespec="milliseconds")} {message}\n')
+    except OSError:
+        pass
+
+
+def _clipboard_format_label(user32, format_id):
+    standard = {1: 'CF_TEXT', 2: 'CF_BITMAP', 3: 'CF_METAFILEPICT', 8: 'CF_DIB',
+                13: 'CF_UNICODETEXT', 15: 'CF_HDROP', 16: 'CF_LOCALE', 17: 'CF_DIBV5'}
+    if format_id in standard:
+        return standard[format_id]
+    name = ctypes.create_unicode_buffer(256)
+    length = user32.GetClipboardFormatNameW(format_id, name, len(name))
+    return name.value if length else f'FORMAT_{format_id}'
+
+
+def _clipboard_bytes(user32, kernel32, format_id):
+    handle = user32.GetClipboardData(format_id) if format_id else None
+    if not handle:
+        return b''
+    size = kernel32.GlobalSize(handle)
+    if not size or size > 32 * 1024 * 1024:
+        return b''
+    pointer = kernel32.GlobalLock(handle)
+    if not pointer:
+        return b''
+    try:
+        raw = ctypes.string_at(pointer, size)
+        if raw.startswith((b'\xff\xfe', b'\xfe\xff')):
+            while raw.endswith(b'\0\0'):
+                raw = raw[:-2]
+            return raw
+        return raw.rstrip(b'\0')
+    finally:
+        kernel32.GlobalUnlock(handle)
+
+
+def _decode_clipboard_html(raw, cf_html=False):
+    if not raw:
+        return ''
+    if cf_html:
+        header = raw[:4096].decode('ascii', 'ignore')
+        start_match = re.search(r'StartFragment:(\d+)', header)
+        end_match = re.search(r'EndFragment:(\d+)', header)
+        if start_match and end_match:
+            start, end = int(start_match.group(1)), int(end_match.group(1))
+            if 0 <= start <= end <= len(raw):
+                raw = raw[start:end]
+    if raw.startswith((b'\xff\xfe', b'\xfe\xff')):
+        return raw.decode('utf-16', 'replace').strip('\x00')
+    return raw.decode('utf-8-sig', 'replace').strip('\x00')
+
+
+def _clipboard_json_urls(raw):
+    """Extract link targets from Sheets' private rich-cell clipboard payload."""
+    if not raw:
+        return []
+    try:
+        payload = json.loads(raw.decode('utf-8-sig', 'replace').strip('\x00'))
+    except (UnicodeError, ValueError, TypeError):
+        return []
+    urls = []
+
+    def visit(value):
+        if isinstance(value, str):
+            for url in extract_urls(value):
+                if url not in urls:
+                    urls.append(url)
+        elif isinstance(value, dict):
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(payload)
+    return urls
+
+
+def _sheets_clipboard_json_fragment(raw):
+    urls = _clipboard_json_urls(raw)
+    if not urls:
+        return ''
+    anchors = ''.join(f'<a href="{html.escape(url, quote=True)}">link</a><br>' for url in urls)
+    return f'<table><tr><td>{anchors}</td></tr></table>'
+
+
 def read_clipboard_html():
-    """Read Windows CF_HTML without changing clipboard contents."""
+    """Read rich Windows clipboard HTML, with a Google Sheets link-chip fallback."""
     if os.name != 'nt':
         return ''
     import ctypes
@@ -687,6 +788,10 @@ def read_clipboard_html():
     user32.CloseClipboard.restype = wintypes.BOOL
     user32.RegisterClipboardFormatW.argtypes = [wintypes.LPCWSTR]
     user32.RegisterClipboardFormatW.restype = wintypes.UINT
+    user32.EnumClipboardFormats.argtypes = [wintypes.UINT]
+    user32.EnumClipboardFormats.restype = wintypes.UINT
+    user32.GetClipboardFormatNameW.argtypes = [wintypes.UINT, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetClipboardFormatNameW.restype = ctypes.c_int
     user32.GetClipboardData.argtypes = [wintypes.UINT]
     user32.GetClipboardData.restype = wintypes.HANDLE
     kernel32.GlobalSize.argtypes = [wintypes.HGLOBAL]
@@ -697,32 +802,54 @@ def read_clipboard_html():
     kernel32.GlobalUnlock.restype = wintypes.BOOL
 
     if not user32.OpenClipboard(None):
+        _clipboard_diagnostic('open_failed')
         return ''
-    handle = None
-    pointer = None
     try:
-        format_id = user32.RegisterClipboardFormatW('HTML Format')
-        handle = user32.GetClipboardData(format_id) if format_id else None
-        if not handle:
-            return ''
-        size = kernel32.GlobalSize(handle)
-        pointer = kernel32.GlobalLock(handle)
-        if not pointer or not size:
-            return ''
-        raw = ctypes.string_at(pointer, size).split(b'\0', 1)[0]
-        header = raw[:4096].decode('ascii', 'ignore')
-        match = re.search(r'StartFragment:(\d+)', header)
-        end_match = re.search(r'EndFragment:(\d+)', header)
-        if match and end_match:
-            start, end = int(match.group(1)), int(end_match.group(1))
-            if 0 <= start <= end <= len(raw):
-                raw = raw[start:end]
-        return raw.decode('utf-8', 'replace')
+        available = []
+        current = 0
+        while True:
+            current = user32.EnumClipboardFormats(current)
+            if not current:
+                break
+            available.append((current, _clipboard_format_label(user32, current)))
+            if len(available) >= 100:
+                break
+
+        registered = {
+            name: user32.RegisterClipboardFormatW(name)
+            for name in ('HTML Format', 'text/html',
+                         'application/x-vnd.google-spreadsheet-compact-table+json')
+        }
+        present_ids = {format_id for format_id, _ in available}
+        sizes = []
+        candidates = []
+        for name, format_id in registered.items():
+            if not format_id or format_id not in present_ids:
+                continue
+            raw = _clipboard_bytes(user32, kernel32, format_id)
+            sizes.append(f'{name}:{len(raw)}')
+            if name in ('HTML Format', 'text/html'):
+                fragment = _decode_clipboard_html(raw, cf_html=(name == 'HTML Format'))
+                if fragment:
+                    candidates.append((fragment, len(extract_urls(fragment))))
+            else:
+                fragment = _sheets_clipboard_json_fragment(raw)
+                if fragment:
+                    candidates.append((fragment, len(_clipboard_json_urls(raw))))
+
+        # Prefer a rich HTML fragment which contains hrefs. If the HTML format
+        # only carries visible labels, use the private Sheets payload instead.
+        candidates.sort(key=lambda item: item[1], reverse=True)
+        chosen = candidates[0] if candidates else ('', 0)
+        labels = ','.join(label for _, label in available)
+        _clipboard_diagnostic(
+            f'read formats=[{labels}] sizes=[{",".join(sizes)}] '
+            f'rich_links={chosen[1]} result={"rich" if chosen[1] else "plain_only"}')
+        return chosen[0]
     except (OSError, ValueError, ctypes.ArgumentError):
+        _clipboard_diagnostic('read_failed')
         return ''
     finally:
-        if pointer:
-            kernel32.GlobalUnlock(handle)
         user32.CloseClipboard()
 
 
@@ -736,7 +863,7 @@ def task_rows(base, rows):
         urls = extract_urls(text)
         if text.strip() and not urls:
             raise ValueError(f'第 {index} 行：没有识别到有效的视频链接')
-        person=person.strip();title=title.strip()
+        person=person.strip();title=strip_title_hashtags(title).strip()
         # Rows are independent: any combination of person, title, phone and
         # URL is valid. Missing naming fields get stable per-row placeholders.
         name = folder_name(person or f'第{index}行', title or '引流')
@@ -945,6 +1072,21 @@ def replace_published_file(source, folder, name=None):
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def update_processing_markers(marker_paths, state, detail=''):
+    """Keep a small, readable per-link status file in each output folder."""
+    if not marker_paths:
+        return
+    paths = marker_paths.values() if isinstance(marker_paths, dict) else marker_paths
+    content = f'剪辑助手：{state}\n{str(detail or "").strip()[:300]}\n'
+    for path in set(Path(item) for item in paths if item):
+        try:
+            path.write_text(content, encoding='utf-8')
+        except OSError:
+            # The task itself should continue even if Explorer status markers
+            # cannot be written (for example, the destination became read-only).
+            continue
 
 
 class App:
@@ -1330,6 +1472,7 @@ class App:
             entry.bind('<KeyRelease>',lambda _,i=index:self.preview_folder(i),add='+')
         title_entry.bind('<Enter>',lambda _,i=index:self.schedule_title_preview(i),add='+')
         title_entry.bind('<Leave>',lambda _:self.schedule_title_preview_close(),add='+')
+        title_entry.bind('<FocusOut>',lambda _,i=index:self.clean_title_field(i),add='+')
         title_entry.bind('<ButtonRelease-1>',lambda _,i=index:self.root.after_idle(lambda:self._capture_title_selection(i)),add='+')
         title_entry.bind('<KeyRelease>',lambda _,i=index:self.root.after_idle(lambda:self._capture_title_selection(i)),add='+')
         title_entry.bind('<KeyRelease>',lambda _,i=index:self.schedule_title_preview(i,180),add='+')
@@ -1380,6 +1523,14 @@ class App:
                     self.title_manual_lines[index]=None
         if index is not None and self.title_preview_index==index:
             self.schedule_title_preview(index,180)
+
+    def clean_title_field(self, index):
+        title = self.rows[index][1]
+        raw = title.get()
+        cleaned = strip_title_hashtags(raw)
+        if cleaned != raw:
+            title.set(cleaned)
+            self.status.config(text='已从视频标题中移除 # 后面的标签。')
 
     def _title_layout_changed(self,index):
         if self.title_manual_lines[index] is not None:
@@ -2125,6 +2276,16 @@ class App:
             values.append(value)
         has_rich_link = field == 'link' and any(row[0]['links'] for row in matrix)
         if len(values) == 1 and not has_rich_link:
+            if field == 'title':
+                cleaned = strip_title_hashtags(values[0])
+                if cleaned != values[0]:
+                    if self.apply_clipboard_rows(start_index, [{'title': cleaned}]):
+                        self.status.config(text='已从视频标题中移除 # 后面的标签。')
+                    return 'break'
+            if field == 'link' and values[0] and not extract_urls(values[0]):
+                self.status.config(
+                    text='剪贴板只有文件名，没有链接地址。请在 Google 表格里对视频链接卡片选择“复制链接”，再粘贴。')
+                return 'break'
             return None
         assignments = [{field: value} for value in values]
         if self.apply_clipboard_rows(start_index, assignments):
@@ -2156,7 +2317,7 @@ class App:
                 if self.phone_vars[index].get().strip():
                     self.format_phone_cell(index)
             if 'title' in values:
-                self.rows[index][1].set(str(values['title']).strip())
+                self.rows[index][1].set(strip_title_hashtags(values['title']).strip())
             if 'link' in values:
                 self.rows[index][2].set(str(values['link']).strip())
         if tracked:
@@ -2371,7 +2532,12 @@ class App:
             return
         self.completion_actions.pack_forget()
         try:
-            values = [(name.get(), title.get(), link.get()) for name, title, link in self.rows]
+            values = []
+            for name, title, link in self.rows:
+                cleaned_title = strip_title_hashtags(title.get()).strip()
+                if cleaned_title != title.get():
+                    title.set(cleaned_title)
+                values.append((name.get(), cleaned_title, link.get()))
             count = int(self.count.get())
             templates = {}
             title_image_errors = {}
@@ -2533,6 +2699,7 @@ class App:
         leader_key, url, cancel, leader_settings = batch[0]
         keys = [job[0] for job in batch]
         output_folders = {job[0]: Path(job[3][0]) for job in batch}
+        marker_paths = {}
         retry_sources = []
         for _key, _, _, settings in batch:
             for item in settings[5] if len(settings) > 5 else ():
@@ -2541,6 +2708,14 @@ class App:
                     retry_sources.append(source)
 
         try:
+            for key in keys:
+                job = self.jobs.get(key, {})
+                folder = output_folders[key]
+                link_count = int(job.get('link_count', 1) or 1)
+                link_index = int(job.get('link_index', 1) or 1)
+                marker_label = f'视频{link_index}' if link_count > 1 else '视频'
+                marker_paths[key] = folder / f'{marker_label}-下载处理中.txt'
+            update_processing_markers(marker_paths, '准备下载', '正在连接并获取视频。')
             base = Path(leader_settings[0]).parent
             base.mkdir(parents=True, exist_ok=True)
             quality, cookie, browser_auth = leader_settings[1:4]
@@ -2575,30 +2750,59 @@ class App:
                     raw_folder.mkdir()
                     download_temp.mkdir()
                     self._download(leader_key, url, cancel,
-                                   (download_temp, quality, cookie, raw_folder, browser_auth, 0, keys))
+                                   (download_temp, quality, cookie, raw_folder, browser_auth,
+                                    0, keys, marker_paths))
                     raw_sources = local_video_files(raw_folder)
                     if not raw_sources:
                         raise RuntimeError('下载没有生成可处理的视频文件。')
+
+                # Publish the downloaded source as soon as it is complete. Keep
+                # it visible while denoising, then atomically replace it with
+                # the finished file below.
+                update_processing_markers(marker_paths, '下载完成', '原视频已下载，正在显示到目标文件夹。')
+                raw_published = {}
+                for key in keys:
+                    folder = output_folders[key]
+                    job = self.jobs[key]
+                    link_prefix = (f'视频{job.get("link_index", 1)}-'
+                                   if job.get('link_count', 1) > 1 else '')
+                    for source in raw_sources:
+                        raw_name = f'{link_prefix}{source.stem}{source.suffix}'
+                        raw_published[(key, source.name.casefold())] = replace_published_file(
+                            source, folder, raw_name)
 
                 from core.denoise import denoise_video
                 terminal_keys = set()
                 for strength, strength_batch in strengths.items():
                     strength_keys = [job[0] for job in strength_batch]
+                    strength_markers = {key: marker_paths[key] for key in strength_keys
+                                        if key in marker_paths}
                     result_files = {}
                     denoise_errors = {}
                     for index, source in enumerate(raw_sources, start=1):
                         if cancel.is_set():
                             raise RuntimeError('任务已取消')
-                        source_work = work_root / f'process-{strength}' / f'{index:04d}' / source.name
-                        source_work.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(source, source_work)
-                        output = source_work
+                        if strength > 0:
+                            source_work = work_root / f'process-{strength}' / f'{index:04d}' / source.name
+                            source_work.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(source, source_work)
+                            output = source_work
+                        else:
+                            output = source
 
                         # Keep the downloaded video stream and original format;
                         # only denoise its audio when the selected strength is on.
                         if strength > 0:
+                            update_processing_markers(
+                                strength_markers, '降噪中',
+                                f'原视频已显示；正在处理视频 {index}/{len(raw_sources)}（{strength}%）。')
                             for key in strength_keys:
                                 self.events.put((key, '处理中', f'降噪 {index}/{len(raw_sources)} · {strength}%'))
+                            def denoise_progress(detail, i=index, n=len(raw_sources),
+                                                 group_keys=tuple(strength_keys), markers=strength_markers):
+                                update_processing_markers(markers, '降噪中', f'视频 {i}/{n} · {detail}')
+                                for group_key in group_keys:
+                                    self.events.put((group_key, '处理中', f'降噪 {i}/{n} · {detail}'))
                             try:
                                 output = denoise_video(
                                     output,
@@ -2607,9 +2811,7 @@ class App:
                                     output_audio_bitrate='128k',
                                     output_sample_rate=44100,
                                     output_channels=2,
-                                    progress=lambda detail, i=index, n=len(raw_sources), group_keys=tuple(strength_keys):
-                                        [self.events.put((key, '处理中', f'降噪 {i}/{n} · {detail}'))
-                                         for key in group_keys],
+                                    progress=denoise_progress,
                                     cancel=cancel,
                                 )
                             except Exception as exc:
@@ -2630,7 +2832,13 @@ class App:
                                            if job.get('link_count', 1) > 1 else '')
                             output_name = f'{link_prefix}{Path(source.name).stem}{output.suffix}'
                             try:
-                                published = replace_published_file(output, folder, output_name)
+                                already_published = (strength == 0 and
+                                                     output.resolve() == source.resolve())
+                                published = (raw_published.get((key, source.name.casefold()))
+                                             if already_published else
+                                             replace_published_file(output, folder, output_name))
+                                if published is None:
+                                    published = folder / safe_video_filename(output_name)
                                 if output.suffix.casefold() != source.suffix.casefold():
                                     old_source = folder / video_output_filename(f'{link_prefix}{source.name}')
                                     if old_source != published and old_source.is_file():
@@ -2667,6 +2875,12 @@ class App:
                 if key not in locals().get('terminal_keys', set()):
                     self.events.put((key, state, str(exc)))
             return False
+        finally:
+            for path in marker_paths.values():
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def _download_uncached(self, key, url, cancel, settings, produced_outputs=None):
         folder, quality, cookie = settings[:3]
@@ -2761,9 +2975,20 @@ class App:
 
     def _download(self, key, url, cancel, settings):
         progress_keys = settings[6] if len(settings) > 6 and isinstance(settings[6], (list, tuple)) else (key,)
+        marker_paths = settings[7] if len(settings) > 7 else None
+        last_marker_payload = None
+        last_marker_write = 0.0
         def update(state, detail=''):
+            nonlocal last_marker_payload, last_marker_write
             for event_key in progress_keys:
                 self.events.put((event_key, state, detail))
+            payload = (state, detail)
+            now = time.monotonic()
+            if (marker_paths and payload != last_marker_payload and
+                    (state != '下载中' or now - last_marker_write >= 0.5)):
+                update_processing_markers(marker_paths, state, detail)
+                last_marker_payload = payload
+                last_marker_write = now
         def check():
             if cancel.is_set():
                 raise RuntimeError('任务已取消')
