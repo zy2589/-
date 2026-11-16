@@ -333,6 +333,19 @@ async function placeLibraryAsset(
           decoder.style.zIndex = String(visualZ(track));
           decoder.style.mixBlendMode = transform.blendMode || "normal";
         }
+        const blemishCanvas = $("blemishPreviewCanvas");
+        if (blemishCanvas) {
+          // The retouch canvas is a full-frame copy of the main decoder. Keep
+          // it attached to that clip's timeline slot and stack position so an
+          // ended/hidden main clip can never leak its last frame into empty
+          // split or PiP regions. The small z offset places repairs over the
+          // main decoder while leaving every higher video track above them.
+          const hasRetouch = (state.blemishMarks || []).length > 0 || blemishCanvas.classList.contains("brushing");
+          blemishCanvas.dataset.previewTargetVisible = visible ? "true" : "false";
+          blemishCanvas.style.visibility = visible ? "visible" : "hidden";
+          blemishCanvas.style.zIndex = String(visualZ(track) + 1);
+          blemishCanvas.classList.toggle("active", visible && hasRetouch);
+        }
       }
       function updatePreviewTransformOnly(updateBox = true) {
         ensureIndependentTransforms();
@@ -667,6 +680,15 @@ async function placeLibraryAsset(
         } = previewScene;
         const sceneKey = JSON.stringify({
             main: [activeMainClip?.id || "", state.video?.url || state.video?.path || "", !!state.video?.missing, activeMainTrack, state.trackVisibility[activeMainTrack] !== false],
+            // A track reorder changes both z-order and automatic split-pane
+            // assignment even when the clips themselves stay unchanged. Keep
+            // the stack/layout inputs in the scene key so playback's fast path
+            // cannot retain a composition built with the previous order.
+            trackOrder: state.trackOrder,
+            spliceLayout: state.spliceLayout,
+            spliceRatio: state.spliceRatio,
+            spliceAngle: state.spliceAngle,
+            spliceRegions: (state.spliceRegions || []).map((region) => [region.id, region.x, region.y, region.w, region.h, region.frameScale, region.shape, region.points]),
             // Readiness and `seeking` change while a frame is decoding. They
             // are transport state, not scene structure: including them here
             // recreated every visual object during playback and caused visible

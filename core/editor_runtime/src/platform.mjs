@@ -112,7 +112,6 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 [System.Windows.Forms.Application]::EnableVisualStyles()
 $owner = New-Object System.Windows.Forms.Form
-$owner.TopMost = $true
 $owner.ShowInTaskbar = $false
 $owner.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $owner.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
@@ -122,7 +121,6 @@ $owner.Show()
 $owner.BringToFront()
 $owner.Activate()
 $owner.Focus()
-$owner.TopMost = $true
 try {
 ${scriptBody}
 } catch {

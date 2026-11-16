@@ -271,7 +271,11 @@ try {
         'function spliceRegionAtPoint',
         'function spliceRegionOccupied',
         'function spliceVideoTrackOrder',
-        'trackOrder.indexOf(String(target?.clip?.trackId',
+        'mainVideoTrackMap?.[clip.id]',
+        'mainVideoTrackMap?.[target.clip?.id]',
+        'trackOrder: state.trackOrder',
+        'spliceLayout: state.spliceLayout',
+        'trackOrder.indexOf(trackId)',
         'window.spliceSelectionBounds = spliceSelectionBounds',
         'splice-guide-divider-hit',
         'spliceGuideLayer',
@@ -308,6 +312,11 @@ try {
             throw "生成后的剪辑页面缺少必要功能：$RequiredUiToken"
         }
     }
+$RegressionChecklist = Join-Path $Root 'docs\打包前复检清单.md'
+if (!(Test-Path -LiteralPath $RegressionChecklist -PathType Leaf)) {
+    throw '缺少近期高频回归复检清单，已中止打包。'
+}
+Write-Host '自动化门禁通过后，仍须按 docs\打包前复检清单.md 完成实际界面回归；未验证项不得交付。'
 $UiHostSourceText = [IO.File]::ReadAllText((Join-Path $Root 'core\ui.py'))
 $EmbeddedEditorSourceText = [IO.File]::ReadAllText((Join-Path $Root 'core\embedded_editor.py'))
 $DesktopHostSourceText = [IO.File]::ReadAllText((Join-Path $Root 'core\editor_host\DesktopHost.cs'))
@@ -335,31 +344,131 @@ foreach ($RequiredPageSwitchToken in @(
 if (!$UiHostSourceText.Contains('self.root.withdraw()')) {
     throw '启动窗口未等待首屏准备，已中止打包。'
 }
-foreach ($RemovedPageSwitchToken in @('grid_remove()', 'RedrawWindow')) {
+foreach ($RemovedPageSwitchToken in @('RedrawWindow')) {
     if ($PageSwitchSourceText.Contains($RemovedPageSwitchToken)) {
         throw "区域切换仍会卸载或强制重绘页面，已中止打包：$RemovedPageSwitchToken"
     }
 }
-if (!$PageSwitchSourceText.Contains('self.embedded_editor.set_page_active(name == "projects")') -or
-    !$UiHostSourceText.Contains('native_parent=self.page_stage') -or
-    !$EmbeddedEditorSourceText.Contains('def set_page_active(self, active: bool)') -or
-    !$DesktopHostSourceText.Contains('SetEmbeddedPageActive(bool active)') -or
+if (!$UiHostSourceText.Contains('native_parent=host') -or
+    $PageSwitchSourceText.Contains('set_page_active') -or
+    $EmbeddedEditorSourceText.Contains('def set_page_active(self, active: bool)') -or
+    $DesktopHostSourceText.Contains('SetEmbeddedPageActive(bool active)') -or
+    !$EmbeddedEditorSourceText.Contains('self.native_parent = native_parent or frame') -or
     !$DesktopHostSourceText.Contains('ResizeEmbedded(int x, int y, int width, int height)')) {
-    throw '区域切换未将 WebView2 子窗口与页面放在同一层级管理，已中止打包。'
+    throw '区域切换必须由页面宿主统一管理 WebView2 子窗口，不能在切页时额外调整同级 HWND，已中止打包。'
 }
 if (!$UiHostSourceText.Contains('for frame in self.page_frames.values():') -or
-    !$UiHostSourceText.Contains('frame.grid(row=0, column=0, sticky="nsew")')) {
-    throw '区域页面未在初始化时常驻映射，已中止打包。'
+    !$UiHostSourceText.Contains('frame.grid(row=0, column=0, sticky="nsew")') -or
+    $PageSwitchSourceText.Contains('grid_remove()') -or
+    !$PageSwitchSourceText.Contains('target.tkraise()') -or
+    !$UiHostSourceText.Contains('self.page_stage.grid_propagate(False)')) {
+    throw '区域页面必须只初始化映射一次并通过堆叠顺序切换，禁止切页卸载页面，已中止打包。'
+}
+$CutoutSelectionStart = $UiHostSourceText.IndexOf('    def _select_cutout_page(self, index):')
+$CutoutSelectionEnd = $UiHostSourceText.IndexOf('    def _create_cutout_editor(', $CutoutSelectionStart)
+if ($CutoutSelectionStart -lt 0 -or $CutoutSelectionEnd -le $CutoutSelectionStart) {
+    throw '抠图分页切换代码段缺失，已中止打包。'
+}
+$CutoutSelectionText = $UiHostSourceText.Substring($CutoutSelectionStart, $CutoutSelectionEnd - $CutoutSelectionStart)
+if ($CutoutSelectionText.Contains('grid_remove()') -or !$CutoutSelectionText.Contains('page["host"].tkraise()') -or
+    !$UiHostSourceText.Contains('            host.grid(row=0, column=0, sticky="nsew")')) {
+    throw '抠图分页切换仍会卸载画面，已中止打包。'
+}
+foreach ($RequiredEditorWarmupToken in @(
+    'def _start_editor_when_mapped(self, generation):',
+    'self.embedded_editor.is_ready()',
+    'self.editor_open_pending',
+    'def _finish_editor_open(self, generation):'
+)) {
+    if (!$UiHostSourceText.Contains($RequiredEditorWarmupToken)) {
+        throw "剪辑页必须在宿主准备完成后切换，已中止打包：$RequiredEditorWarmupToken"
+    }
 }
 if ($PageSwitchSourceText.Contains('self.root.update_idletasks()')) {
     throw '页面切换仍同步强制刷新 Tk 绘制队列，已中止打包。'
 }
-foreach ($RemovedTopmostToken in @('attributes("-topmost"', '_set_download_topmost', '_queue_download_topmost', 'SetWindowPos')) {
-    if ($UiHostSourceText.Contains($RemovedTopmostToken)) {
-        throw "主窗口仍包含已移除的置顶逻辑，已中止打包：$RemovedTopmostToken"
+$AlwaysOnTopPatterns = @(
+    'attributes\(\s*[''\"]-topmost[''\"]\s*,\s*(?:True|true|1)\b',
+    '\.TopMost\s*=\s*\$?true\b',
+    'SetWindowPos\(\s*handle\s*,\s*-1\s*,'
+)
+$TopmostSourceFiles = Get-ChildItem (Join-Path $Root 'core') -Recurse -File -Include '*.py','*.mjs','*.js','*.cs'
+foreach ($SourceFile in $TopmostSourceFiles) {
+    $SourceText = [IO.File]::ReadAllText($SourceFile.FullName)
+    foreach ($Pattern in $AlwaysOnTopPatterns) {
+        if ([regex]::IsMatch($SourceText, $Pattern)) {
+            throw "软件不得强制窗口置顶；发现置顶调用：$($SourceFile.FullName)（$Pattern）"
+        }
     }
 }
+$SpliceSourceText = [IO.File]::ReadAllText((Join-Path $EditorRuntimeCodeSource 'ui\scripts\38-video-splice.js'))
+$SpliceOrderStart = $SpliceSourceText.IndexOf('  function spliceVideoTrackOrder() {')
+$SpliceOrderEnd = $SpliceSourceText.IndexOf('  function autoSpliceRegion(target) {', $SpliceOrderStart)
+$SpliceAutoStart = $SpliceOrderEnd
+$SpliceAutoEnd = $SpliceSourceText.IndexOf('  function splicePreviewStyle(', $SpliceAutoStart)
+if ($SpliceOrderStart -lt 0 -or $SpliceOrderEnd -le $SpliceOrderStart -or $SpliceAutoEnd -le $SpliceAutoStart) {
+    throw '分区轨道映射代码缺失，已中止打包。'
+}
+$SpliceTrackOrderCode = $SpliceSourceText.Substring($SpliceOrderStart, $SpliceOrderEnd - $SpliceOrderStart)
+$SpliceRegionCode = $SpliceSourceText.Substring($SpliceAutoStart, $SpliceAutoEnd - $SpliceAutoStart)
+if (!$SpliceTrackOrderCode.Contains('mainClips()') -or
+    !$SpliceTrackOrderCode.Contains('state.mainVideoTrackMap?.[clip.id]') -or
+    !$SpliceRegionCode.Contains('state.mainVideoTrackMap?.[target.clip?.id]') -or
+    !$SpliceRegionCode.Contains('trackOrder.indexOf(trackId)') -or
+    $SpliceRegionCode.Contains('const index = target?.type === "main"')) {
+    throw '分区素材必须按同一真实视频轨道映射，禁止主视频固定占据最上分区，已中止打包。'
+}
+$PreviewStageSourceText = [IO.File]::ReadAllText((Join-Path $EditorRuntimeCodeSource 'ui\scripts\05-stage-objects.js'))
+$PreviewSceneStart = $PreviewStageSourceText.IndexOf('      function timelinePreviewSceneAt(time = state.currentTime) {')
+$PreviewSceneEnd = $PreviewStageSourceText.IndexOf('      window.timelinePreviewSceneAt = timelinePreviewSceneAt;', $PreviewSceneStart)
+if ($PreviewSceneStart -lt 0 -or $PreviewSceneEnd -le $PreviewSceneStart) {
+    throw '预览活动素材判定代码缺失，已中止打包。'
+}
+$PreviewSceneCode = $PreviewStageSourceText.Substring($PreviewSceneStart, $PreviewSceneEnd - $PreviewSceneStart)
+if (!$PreviewSceneCode.Contains('t < Number(clip.end || 0)') -or
+    !$PreviewSceneCode.Contains('t < Number(item.end || 0)')) {
+    throw '预览场景必须严格按素材起止时间判定；禁止在素材结束后保留旧帧，已中止打包。'
+}
+$PreviewSceneKeyStart = $PreviewStageSourceText.IndexOf('        const sceneKey = JSON.stringify({')
+$PreviewSceneKeyEnd = $PreviewStageSourceText.IndexOf('        // `activeVideoLayers`', $PreviewSceneKeyStart)
+if ($PreviewSceneKeyStart -lt 0 -or $PreviewSceneKeyEnd -le $PreviewSceneKeyStart) {
+    throw '预览场景缓存键缺失，已中止打包。'
+}
+$PreviewSceneKeyCode = $PreviewStageSourceText.Substring($PreviewSceneKeyStart, $PreviewSceneKeyEnd - $PreviewSceneKeyStart)
+foreach ($RequiredSceneStackToken in @('trackOrder: state.trackOrder', 'spliceLayout: state.spliceLayout', 'spliceRatio: state.spliceRatio', 'spliceAngle: state.spliceAngle')) {
+    if (!$PreviewSceneKeyCode.Contains($RequiredSceneStackToken)) {
+        throw "播放预览缓存未包含叠放/分区状态，可能复用旧画面，已中止打包：$RequiredSceneStackToken"
+    }
+}
+$SpliceGuideStart = $SpliceSourceText.IndexOf('  function renderSpliceGuide() {')
+$SpliceGuideEnd = $SpliceSourceText.IndexOf('  function spliceRegionOccupied(region) {', $SpliceGuideStart)
+if ($SpliceGuideStart -lt 0 -or $SpliceGuideEnd -le $SpliceGuideStart) {
+    throw '分区预览引导层代码缺失，已中止打包。'
+}
+$SpliceGuideCode = $SpliceSourceText.Substring($SpliceGuideStart, $SpliceGuideEnd - $SpliceGuideStart)
+if ($SpliceGuideCode.Contains('<text') -or $SpliceGuideCode.Contains('region.name')) {
+    throw '分区预览不应绘制上区/下区等说明文字，已中止打包。'
+}
+$SliceSourceText = [IO.File]::ReadAllText((Join-Path $EditorRuntimeCodeSource 'ui\scripts\13-pause-cut-split.js'))
+$TimelineGestureSourceText = [IO.File]::ReadAllText((Join-Path $EditorRuntimeCodeSource 'ui\scripts\18-timeline-gestures-commands.js'))
+if (!$SliceSourceText.Contains('function splitMainClipAt(') -or
+    !$TimelineGestureSourceText.Contains('splitClipsAt(')) {
+    throw '剪辑区域切片命令入口缺失，已中止打包。'
+}
 $DownloaderAppSourceText = [IO.File]::ReadAllText((Join-Path $Root 'core\downloader_runtime\app.py'))
+$TitleDesignSourceText = [IO.File]::ReadAllText((Join-Path $Root 'core\downloader_runtime\local_design.py'))
+foreach ($RequiredDownloadToken in @(
+    'if len(self.rows) < 12:',
+    'def folder_name(person, title):',
+    'def try_publish_title_png(',
+    'saved.stat().st_size < 128',
+    'KEYWORD_PATTERN = r"\b(?:GOD|JESUS)\b',
+    'Holy\s+Spirit'
+)) {
+    if (!$DownloaderAppSourceText.Contains($RequiredDownloadToken) -and !$TitleDesignSourceText.Contains($RequiredDownloadToken)) {
+        throw "下载行数、归档或标题图关键字规则缺失，已中止打包：$RequiredDownloadToken"
+    }
+}
 $DownloadMethodStart = $DownloaderAppSourceText.IndexOf('    def _download(self, key, url, cancel, settings):')
 $DownloadMethodEnd = $DownloaderAppSourceText.IndexOf('    def cancel(self):', $DownloadMethodStart)
 $DownloadGroupStart = $DownloaderAppSourceText.IndexOf('    def _download_group(self, batch):')
@@ -395,6 +504,10 @@ if (!$LegacyPipelineSourceText.Contains('"format": "best"') -or
     }
     if (!$RenderSourceText.Contains('overlayImagesOnTrack(key)')) {
         throw '图片未按视频轨顺序进入导出合成，无法保证拼接图片置顶。'
+    }
+    if (!$RenderSourceText.Contains('Array.isArray(config.trackOrder)') -or
+        !$RenderSourceText.Contains('[...config.trackOrder].reverse()')) {
+        throw '导出合成必须按与预览一致的视频轨道顺序从底向上叠放，已中止打包。'
     }
     if ($GeneratedUiText.Contains('label: "加入时间线"') -or $GeneratedUiText.Contains('placeLibraryAsset(card.dataset.libraryId')) {
         throw '素材区单击或右键菜单仍可直接插入时间线，必须通过拖放添加。'
@@ -452,6 +565,7 @@ $Args = @(
     '--collect-all', 'certifi',
     '--collect-all', 'phonenumbers',
     '--collect-all', 'onnxruntime',
+    '--collect-all', 'nvidia',
     '--collect-all', 'pythonnet',
     '--collect-all', 'clr_loader',
     '--hidden-import', 'PIL.ImageGrab',

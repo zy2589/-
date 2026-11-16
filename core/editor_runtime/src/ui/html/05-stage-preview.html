@@ -1,6 +1,22 @@
 <main class="previewarea">
-          <div class="stage empty" id="stage" data-drop-zone="preview">
-            <div class="ratio">
+          <div class="preview-tools" id="previewTools">
+            <div class="preview-tool-select">
+              <button class="btn" id="previewToolButton" type="button" aria-haspopup="true" aria-expanded="false" title="选择预览操作模式">
+                <span class="preview-tool-symbol" aria-hidden="true">▱</span><span id="previewToolLabel">变换</span><span class="preview-tool-chevron" aria-hidden="true">⌄</span>
+              </button>
+              <div class="preview-tool-menu" id="previewToolMenu" hidden role="menu">
+                <button type="button" data-preview-tool="transform" role="menuitem"><span aria-hidden="true">▱</span>变换</button>
+                <button type="button" data-preview-tool="crop" role="menuitem"><span aria-hidden="true">◩</span>裁切</button>
+              </div>
+            </div>
+            <div class="preview-zoom-controls" role="group" aria-label="素材缩放">
+              <span class="preview-control-label">素材缩放</span>
+              <button class="btn iconbtn" id="previewZoomOut" type="button" title="缩小所选素材">−</button>
+              <input class="range" id="previewZoomRange" type="range" min="10" max="300" step="1" value="100" aria-label="所选素材缩放比例">
+              <output id="previewZoomValue">100%</output>
+              <button class="btn iconbtn" id="previewZoomIn" type="button" title="放大所选素材">+</button>
+            </div>
+            <div class="preview-canvas-settings">
               <select class="select preview-quick-menu" id="previewQuickMenu" title="画布与预览设置">
                 <option value="">画布设置</option>
                 <option value="ratio:9:16">9:16 竖屏</option>
@@ -10,14 +26,16 @@
                 <option value="resolution:2160x3840">2160×3840</option>
               </select>
               <button class="btn feature-retired" id="previewFullscreen" hidden aria-hidden="true">全屏预览</button>
-              <button class="btn feature-retired" data-ratio="9:16" hidden aria-hidden="true">9:16</button
-              ><button class="btn feature-retired" data-ratio="16:9" hidden aria-hidden="true">16:9</button
-              ><select class="select feature-retired" id="resolution" hidden aria-hidden="true">
+              <button class="btn feature-retired" data-ratio="9:16" hidden aria-hidden="true">9:16</button>
+              <button class="btn feature-retired" data-ratio="16:9" hidden aria-hidden="true">16:9</button>
+              <select class="select feature-retired" id="resolution" hidden aria-hidden="true">
                 <option value="1080x1920">1080×1920</option>
                 <option value="1440x2560">1440×2560</option>
                 <option value="2160x3840">2160×3840</option>
               </select>
             </div>
+          </div>
+          <div class="stage empty" id="stage" data-drop-zone="preview">
             <div class="frame" id="frame">
               <div class="preview-clipping-layer" id="previewClipLayer">
                 <div class="center-guide" id="centerGuide"></div>
@@ -105,24 +123,7 @@
                 <option value="3">3.0×</option>
               </select>
             </div>
-            <span class="timecode" id="timecode">00:00.000 / 00:00.000</span>
-          </div>
-          <div class="preview-tools" id="previewTools">
-            <div class="preview-tool-select">
-              <button class="btn" id="previewToolButton" type="button" aria-haspopup="true" aria-expanded="false" title="选择预览操作模式">
-                <span class="preview-tool-symbol" aria-hidden="true">▱</span><span id="previewToolLabel">变换</span><span class="preview-tool-chevron" aria-hidden="true">⌄</span>
-              </button>
-              <div class="preview-tool-menu" id="previewToolMenu" hidden role="menu">
-                <button type="button" data-preview-tool="transform" role="menuitem"><span aria-hidden="true">▱</span>变换</button>
-                <button type="button" data-preview-tool="crop" role="menuitem"><span aria-hidden="true">◩</span>裁切</button>
-              </div>
-            </div>
-            <div class="preview-zoom-controls" role="group" aria-label="选中素材缩放">
-              <button class="btn iconbtn" id="previewZoomOut" type="button" title="缩小所选素材">−</button>
-              <input class="range" id="previewZoomRange" type="range" min="10" max="300" step="1" value="100" aria-label="所选素材缩放比例">
-              <output id="previewZoomValue">100%</output>
-              <button class="btn iconbtn" id="previewZoomIn" type="button" title="放大所选素材">+</button>
-            </div>
+            <span class="timecode" id="timecode">00:00 / 00:00</span>
           </div>
         </main>
         <div class="panel-resizer" id="rightPanelResizer" data-resize="inspector"></div>

@@ -2,6 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'url';
+import {
+  planReviewCaptionDeletion,
+  reviewCaptionBlockIsCovered,
+  reviewCaptionWordMatches,
+} from '../review-caption-deletion.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,10 +34,48 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
   const baseStyle = fs.readFileSync(path.join(uiDir, 'html/01-body-prefix.html'), 'utf8');
   const waveformScript = fs.readFileSync(path.join(uiDir, 'scripts/09-timeline-clips-waveform.js'), 'utf8');
   const exportUiScript = fs.readFileSync(path.join(uiDir, 'scripts/17-project-export-resolve.js'), 'utf8');
+  const projectStoreScript = fs.readFileSync(path.join(uiDir, '../project-store.mjs'), 'utf8');
+  const projectTrashCleaner = fs.readFileSync(path.join(uiDir, '../project-trash-cleaner.mjs'), 'utf8');
+  const timelineMarkup = fs.readFileSync(path.join(uiDir, 'html/07-timeline.html'), 'utf8');
+  const previewLayoutStyle = fs.readFileSync(path.join(uiDir, 'styles/03-sidebar-panels.css'), 'utf8');
   const spliceScript = fs.readFileSync(path.join(uiDir, 'scripts/38-video-splice.js'), 'utf8');
   const gradingScript = fs.readFileSync(path.join(uiDir, 'scripts/11-video-grading-beauty.js'), 'utf8');
   const gradingEventsScript = fs.readFileSync(path.join(uiDir, 'scripts/19-fonts-shortcuts-dragdrop.js'), 'utf8');
   const spliceStyle = fs.readFileSync(path.join(uiDir, 'styles/37-video-splice.css'), 'utf8');
+  const blemishRetouchScript = fs.readFileSync(path.join(uiDir, 'scripts/35-blemish-retouch.js'), 'utf8');
+  // The editor UI is also built from a staged copy under .build. Resolve the
+  // download regression guard against both the source tree and that staging
+  // tree so a package build validates the same downloader code as local UI
+  // generation instead of depending on one fixed directory layout.
+  const downloaderSourceCandidates = [
+    path.resolve(uiDir, '../../../downloader_runtime/app.py'),
+    path.resolve(uiDir, '../../../../../../../core/downloader_runtime/app.py'),
+  ];
+  const downloaderSourcePath = downloaderSourceCandidates.find((candidate) => fs.existsSync(candidate));
+  requireBuildCheck(!!downloaderSourcePath, '无法定位下载器源码以执行下载完成布局回归检查。');
+  const downloaderScript = fs.readFileSync(downloaderSourcePath, 'utf8');
+  const downloaderDesktopCandidates = [
+    path.resolve(uiDir, '../../../downloader_runtime/desktop_ui.py'),
+    path.resolve(uiDir, '../../../../../../../core/downloader_runtime/desktop_ui.py'),
+  ];
+  const downloaderDesktopPath = downloaderDesktopCandidates.find(candidate => fs.existsSync(candidate));
+  requireBuildCheck(!!downloaderDesktopPath, '无法定位下载器弹层源码以执行弹层布局回归检查。');
+  const downloaderDesktop = fs.readFileSync(downloaderDesktopPath, 'utf8');
+  const uiHostCandidates = [
+    path.resolve(uiDir, '../../../ui.py'),
+    path.resolve(uiDir, '../../../../../../../core/ui.py'),
+  ];
+  const uiHostPath = uiHostCandidates.find(candidate => fs.existsSync(candidate));
+  requireBuildCheck(!!uiHostPath, '无法定位主窗口源码以执行抠图入口回归检查。');
+  const uiHost = fs.readFileSync(uiHostPath, 'utf8');
+  const compressSourceCandidates = [
+    path.resolve(uiDir, '../../../downloader_runtime/compress_video.py'),
+    path.resolve(uiDir, '../../../../../../../core/downloader_runtime/compress_video.py'),
+  ];
+  const compressSourcePath = compressSourceCandidates.find((candidate) => fs.existsSync(candidate));
+  requireBuildCheck(!!compressSourcePath, '无法定位压缩源码以执行横竖屏比例回归检查。');
+  const compressScript = fs.readFileSync(compressSourcePath, 'utf8');
+  const reviewScript = fs.readFileSync(path.join(uiDir, 'scripts/15-ai-review-polish.js'), 'utf8');
   const renderScript = fs.readFileSync(path.join(uiDir, '../media/render.mjs'), 'utf8');
   const nestedTimelineScript = fs.readFileSync(path.join(uiDir, '../nested-timeline.mjs'), 'utf8');
   const compoundTimelineUi = fs.readFileSync(path.join(uiDir, 'scripts/33-nested-timeline.js'), 'utf8');
@@ -272,7 +315,9 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
   requireBuildCheck(combinedJs.includes('function spliceRegionAtPoint'), '预览拖放没有按鼠标位置命中分区。');
   requireBuildCheck(combinedJs.includes('function spliceRegionOccupied'), '有素材的分区没有隐藏占位名称处理。');
   requireBuildCheck(
-    combinedJs.includes('function spliceVideoTrackOrder') && combinedJs.includes('trackOrder.indexOf(String(target?.clip?.trackId'),
+    combinedJs.includes('function spliceVideoTrackOrder') &&
+      combinedJs.includes('mainClips().map((clip) => String(state.mainVideoTrackMap?.[clip.id] || "video"))') &&
+      combinedJs.includes('const trackIndex = trackOrder.indexOf(trackId)'),
     '多轨自动分区必须按轨道映射，不能因同轨新增剪辑片段而漂移。',
   );
   requireBuildCheck(combinedJs.includes('window.spliceSelectionBounds = spliceSelectionBounds'), '分区视频选择框锚点没有独立对齐到分区。');
@@ -290,6 +335,186 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
   }
   requireBuildCheck(combinedJs.includes('function applySpliceLayout'), '拼接布局处理逻辑没有进入生成页面。');
   requireBuildCheck(combinedJs.includes('function renderSpliceGuide'), '拼接预览引导层逻辑没有进入生成页面。');
+  const blemishPaintStart = blemishRetouchScript.indexOf('function paint(');
+  const blemishPaintEnd = blemishRetouchScript.indexOf('function insertKey(', blemishPaintStart);
+  const blemishPaint = blemishPaintStart >= 0 && blemishPaintEnd > blemishPaintStart
+    ? blemishRetouchScript.slice(blemishPaintStart, blemishPaintEnd)
+    : '';
+  requireBuildCheck(
+    stageScript.includes('blemishCanvas.dataset.previewTargetVisible = visible ? "true" : "false"') &&
+      stageScript.includes('blemishCanvas.style.zIndex = String(visualZ(track) + 1)') &&
+      blemishPaint.includes('canvas.dataset.previewTargetVisible !== "true"') &&
+      !blemishPaint.includes('canvas.classList.add("active")'),
+    '瑕疵预览画布必须跟随有效主片段的可见范围和轨道层级，不能显示结束片段的残留帧。',
+  );
+  requireBuildCheck(
+    downloaderScript.includes('self.completion_actions = ttk.Frame(row') &&
+      !downloaderScript.includes('self.clear_on_finish') &&
+      !downloaderScript.includes('if hasattr(self, \'clear_on_finish\')'),
+    '下载完成后不能自动清空表单或增加第二行页脚造成整页重排。',
+  );
+  requireBuildCheck(
+    downloaderScript.includes("text='引流模板'") &&
+      downloaderScript.includes("text='抠图区域'") &&
+      downloaderScript.indexOf("text='引流模板'") < downloaderScript.indexOf("text='抠图区域'") &&
+      !downloaderScript.includes('打开抠图功能') &&
+      uiHost.includes('MAX_CUTOUT_WINDOWS = 2') &&
+      uiHost.includes('len(alive) + self.pending_cutout_windows >= MAX_CUTOUT_WINDOWS') &&
+      uiHost.includes('self.rotoscope_module.RotoscopeWindow(self)') &&
+      !uiHost.includes('self.nav_cutout.pack('),
+    '抠图只能从引流模板后的入口打开，最多两个独立窗口，侧栏不得保留重复入口。',
+  );
+  requireBuildCheck(
+    stagePreview.indexOf('id="previewTools"') >= 0 &&
+      stagePreview.indexOf('id="previewTools"') < stagePreview.indexOf('id="stage"') &&
+      stagePreview.includes('素材缩放') &&
+      stagePreview.includes('id="previewQuickMenu"') &&
+      previewLayoutStyle.includes('grid-template-rows: minmax(36px, auto) minmax(0, 1fr) 43px'),
+    '预览工具必须显示在画布上方，并清楚区分素材缩放与画布设置。',
+  );
+  const clipDurationStart = timelineStyle.indexOf('.clip-duration {');
+  const clipDurationEnd = timelineStyle.indexOf('\n      }', clipDurationStart);
+  const clipDurationRule = clipDurationStart >= 0 && clipDurationEnd > clipDurationStart
+    ? timelineStyle.slice(clipDurationStart, clipDurationEnd)
+    : '';
+  requireBuildCheck(
+    coreStateScript.includes('function formatTime(seconds)') &&
+      !coreStateScript.includes('remainder.toFixed(3)') &&
+      !stagePreview.includes('00:00.000') &&
+      waveformScript.includes('formatTime(duration, false)') &&
+      timelineMarkup.includes('时间线缩放') &&
+      clipDurationRule.includes('background: transparent;') &&
+      !clipDurationRule.includes('background: rgba('),
+    '播放时间和片段时长不得显示小数或黑底，并需区分时间线缩放控件。',
+  );
+  requireBuildCheck(
+    downloaderDesktop.includes('row.winfo_rooty() + row.winfo_height()') &&
+      downloaderDesktop.includes('popup.lift()') &&
+      downloaderDesktop.includes('popup.transient(self.root_widget)'),
+    '下载区选项弹层必须锚定在按钮下方并显示在所属窗口前面。',
+  );
+  requireBuildCheck(
+    projectStoreScript.includes('await fs.promises.rename(source, trashDirectory)') &&
+      projectStoreScript.includes('new Worker(new URL("./project-trash-cleaner.mjs"') &&
+      !projectStoreScript.includes('const checkTree = async directory') &&
+      projectTrashCleaner.includes('otherProjectReferences()') &&
+      projectTrashCleaner.includes('cacheFileIsSafe(cachePath, cacheRoot)') &&
+      projectTrashCleaner.includes('await fs.promises.rm'),
+    '删除工程必须先快速移出列表，再在后台安全清理工程文件和未共享缓存。',
+  );
+  requireBuildCheck(
+    compressScript.includes('def _even_display_dimensions') &&
+      compressScript.includes('def _display_dimensions') &&
+      compressScript.includes('_video_filter(source_video, expected_width, expected_height)') &&
+      !compressScript.includes('force_original_aspect_ratio') &&
+      !compressScript.includes('pad='),
+    '下载压缩必须保留输入素材的横竖方向与画面比例，不得强制画布或补边。',
+  );
+  requireBuildCheck(
+    reviewScript.includes('planReviewCaptionDeletion(state.captions,selected') &&
+      reviewScript.includes('state.captions=deletion.captions') &&
+      reviewScript.includes('ambiguousCaptionIds.size') &&
+      !reviewScript.includes('state.captions=state.captions.filter(c=>!removed.has(c))') &&
+      reviewScript.includes('if (!captionWordsRemain(preservedCaptionWords))') &&
+      reviewScript.includes('无法准确切出重复范围，已取消删除以保护其他文案'),
+    '删除文案必须按 issue、时间、轨道和素材限定到对应词句，禁止整组删字幕，并防止重复片段误删。',
+  );
+
+  const selectedReview = { id: 'review-a', issueId: 'shared-issue', captionTrackId: 'caption-a', ownerClipId: 'clip-a', start: 1, end: 2 };
+  const reviewDeleteCaptions = [
+    { id: 'grouped', trackId: 'caption-a', ownerClipId: 'clip-a', text: 'before remove after', words: [
+      { display: 'before', issueId: 'other', start: 0.2, end: 0.6 },
+      { display: 'remove', issueId: 'shared-issue', start: 1.2, end: 1.5 },
+      { display: 'after', issueId: 'other', start: 2.3, end: 2.7 },
+    ] },
+    { id: 'later-repeat', trackId: 'caption-a', ownerClipId: 'clip-a', text: 'later', words: [
+      { display: 'later', issueId: 'shared-issue', start: 5.2, end: 5.5 },
+    ] },
+    { id: 'other-track', trackId: 'caption-b', ownerClipId: 'clip-a', text: 'other track', words: [
+      { display: 'other', issueId: 'shared-issue', start: 1.2, end: 1.5 },
+    ] },
+    { id: 'other-clip', trackId: 'caption-a', ownerClipId: 'clip-b', text: 'other clip', words: [
+      { display: 'other', issueId: 'shared-issue', start: 1.2, end: 1.5 },
+    ] },
+  ];
+  const deletion = planReviewCaptionDeletion(reviewDeleteCaptions, [selectedReview], {
+    joinWords: words => words.map(word => word.display).join(' '),
+  });
+  const grouped = deletion.captions.find(caption => caption.id === 'grouped');
+  requireBuildCheck(
+    deletion.removedWords.length === 1 && deletion.removedReviewIds.has('review-a') &&
+      grouped?.words.map(word => word.display).join(' ') === 'before after' &&
+      deletion.captions.some(caption => caption.id === 'later-repeat') &&
+      deletion.captions.some(caption => caption.id === 'other-track') &&
+      deletion.captions.some(caption => caption.id === 'other-clip'),
+    '重复 issue ID 的删除回归失败：必须保留同一字幕组内的其他词、其他时间段、字幕轨和素材。',
+  );
+  const fullyCovered = planReviewCaptionDeletion([
+    { id: 'whole-block', trackId: 'caption-a', ownerClipId: 'clip-a', text: 'repeat', start: 1.1, end: 1.8 },
+  ], [selectedReview]);
+  requireBuildCheck(fullyCovered.removedCaptionIds.has('whole-block') && !fullyCovered.captions.length,
+    '精确覆盖的整句字幕应可删除。');
+  const ambiguous = planReviewCaptionDeletion([
+    { id: 'partial-block', trackId: 'caption-a', ownerClipId: 'clip-a', text: 'keep this', start: 0.5, end: 1.5 },
+  ], [selectedReview]);
+  requireBuildCheck(ambiguous.ambiguousCaptionIds.has('partial-block') && ambiguous.captions.length === 1,
+    '缺少逐词时间信息且只部分重叠的字幕必须保留并阻止删除。');
+  const batchStart = reviewScript.indexOf('      function batchReviewAction(ids, mode) {');
+  const batchEnd = reviewScript.indexOf('      async function manuallyEditReviewCaption(', batchStart);
+  requireBuildCheck(batchStart >= 0 && batchEnd > batchStart,
+    '批量删除字幕入口缺失，无法运行 P0 删除回归。');
+  const batchSource = reviewScript.slice(batchStart, batchEnd);
+  const batchReview = { ...selectedReview };
+  const laterReview = { id: 'review-b', issueId: 'shared-issue', captionTrackId: 'caption-a', ownerClipId: 'clip-a', start: 5, end: 6 };
+  const batchState = {
+    trackLocks: {}, reviewCaptions: [batchReview, laterReview],
+    captions: JSON.parse(JSON.stringify(reviewDeleteCaptions)), captionRecoveryArchive: [],
+    issues: [{ id: 'shared-issue' }], matchIssues: [{ id: 'shared-issue' }],
+  };
+  const effects = { snapshots: 0, renders: 0, saves: 0, toast: '' };
+  const batchAction = vm.runInNewContext(`${batchSource}\nbatchReviewAction;`, {
+    state: batchState,
+    planReviewCaptionDeletion,
+    reviewCaptionWordMatches,
+    reviewCaptionBlockIsCovered,
+    isTrackLocked: () => false,
+    joinCaptionWords: words => words.map(word => word.display || word.text || '').filter(Boolean).join(' '),
+    snapshot: () => { effects.snapshots += 1; },
+    renderAll: () => { effects.renders += 1; },
+    queueAutosave: () => { effects.saves += 1; },
+    toast: message => { effects.toast = message; },
+  });
+  batchAction(['review-a'], 'deleteCaptions');
+  const batchGrouped = batchState.captions.find(caption => caption.id === 'grouped');
+  requireBuildCheck(
+    effects.snapshots === 1 && effects.renders === 1 && effects.saves === 1 &&
+      batchGrouped?.words.map(word => word.display).join(' ') === 'before after' &&
+      batchState.reviewCaptions.length === 1 && batchState.reviewCaptions[0].id === 'review-b' &&
+      batchState.issues.length === 1 && batchState.matchIssues.length === 1 &&
+      batchState.captions.length === reviewDeleteCaptions.length,
+    '批量删除入口集成回归失败：删除一个提示不能清空字幕组或同 issue ID 的其他时段。',
+  );
+  const blockedState = {
+    trackLocks: {}, reviewCaptions: [batchReview],
+    captions: [{ id: 'partial-block', trackId: 'caption-a', ownerClipId: 'clip-a', text: 'keep this', start: 0.5, end: 1.5 }],
+    captionRecoveryArchive: [], issues: [], matchIssues: [],
+  };
+  const blockedEffects = { snapshots: 0, toast: '' };
+  const blockedAction = vm.runInNewContext(`${batchSource}\nbatchReviewAction;`, {
+    state: blockedState,
+    planReviewCaptionDeletion,
+    reviewCaptionWordMatches,
+    reviewCaptionBlockIsCovered,
+    isTrackLocked: () => false,
+    joinCaptionWords: words => words.map(word => word.display || word.text || '').join(' '),
+    snapshot: () => { blockedEffects.snapshots += 1; },
+    renderAll: () => {}, queueAutosave: () => {},
+    toast: message => { blockedEffects.toast = message; },
+  });
+  blockedAction(['review-a'], 'deleteCaptions');
+  requireBuildCheck(blockedEffects.snapshots === 0 && blockedState.captions.length === 1 &&
+      blockedState.captions[0].text === 'keep this' && blockedEffects.toast.includes('整次操作已取消'),
+    '逐词范围不明时必须在写入撤销记录前取消整个删除操作。');
 }
 
 export function buildUiHtml() {
@@ -320,10 +545,11 @@ export function buildUiHtml() {
   const comparisonKernel=fs.readFileSync(path.join(uiDir,'../caption-comparison.mjs'),'utf8').replaceAll('export function ','function ');
   const nestedKernel=fs.readFileSync(path.join(uiDir,'../nested-timeline.mjs'),'utf8').replaceAll('export function ','function ');
   const numericKernel=fs.readFileSync(path.join(uiDir,'../numeric-caption-correction.mjs'),'utf8').replaceAll('export function ','function ');
+  const reviewDeletionKernel=fs.readFileSync(path.join(uiDir,'../review-caption-deletion.mjs'),'utf8').replaceAll('export function ','function ');
   const meaningContext=fs.readFileSync(path.join(uiDir,'../caption-meaning-review.mjs'),'utf8').split('export function captionMeaningContext')[1].split('export function parseCaptionMeanings')[0];
   const phraseKernel=fs.readFileSync(path.join(uiDir,'../caption-phrase-reviews.mjs'),'utf8').replaceAll('export function ','function ');
   const mildKernel=fs.readFileSync(path.join(uiDir,'../harmless-caption-correction.mjs'),'utf8').replaceAll('export function ','function ');
-  const combinedJs = mildKernel + phraseKernel + editKernel + comparisonKernel + nestedKernel + numericKernel + 'function captionMeaningContext'+meaningContext + scriptFiles
+  const combinedJs = reviewDeletionKernel + mildKernel + phraseKernel + editKernel + comparisonKernel + nestedKernel + numericKernel + 'function captionMeaningContext'+meaningContext + scriptFiles
     .map(f => fs.readFileSync(path.join(uiDir, 'scripts', f), 'utf8'))
     .join('');
 

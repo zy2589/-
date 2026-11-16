@@ -327,17 +327,18 @@
         z-index: 6;
         max-width: calc(100% - 26px);
         overflow: hidden;
-        padding: 1px 4px;
-        border-radius: 3px;
-        background: rgba(10, 16, 20, .34);
+        padding: 0;
+        border-radius: 0;
+        background: transparent;
         color: rgba(255, 255, 255, .92);
         font: 600 10px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         font-variant-numeric: tabular-nums;
-          white-space: nowrap;
+        white-space: nowrap;
         text-overflow: ellipsis;
+        text-shadow: 0 1px 2px rgba(0,0,0,.9), 0 0 3px rgba(0,0,0,.8);
         pointer-events: none;
       }
-      .clip.audio .clip-duration { left: auto; right: 16px; bottom: 3px; background: rgba(8, 39, 29, .9); }
+      .clip.audio .clip-duration { left: auto; right: 16px; bottom: 3px; background: transparent; }
       .clip:hover { z-index: 18; }
       .clip.narrow:hover { overflow: hidden; }
       .trim-handle {

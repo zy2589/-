@@ -722,9 +722,6 @@ class App:
         self.root = root
         self.host = host or root
         self.embedded = host is not None
-        if not self.embedded:
-            try:root.attributes('-topmost',True)
-            except tk.TclError:pass
         self.resource_dir = Path(resource_dir) if resource_dir else Path(
             getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[2])) / 'resources'
         self.editor_callback = editor_callback
@@ -821,6 +818,7 @@ class App:
         theme_pick.bind('<<ComboboxSelected>>',lambda _:messagebox.showinfo('配色说明','白天: 白色文字底板, 黑色文字, 橙色高亮.\n黑天: 黑色文字底板, 白色文字, 黄色高亮.\nPNG 画布外部保持透明.',parent=self.root))
         ttk.Combobox(template_row, textvariable=self.layout, values=['自动', '两行', '三行', '四行'], state='readonly', width=5).pack(side='left')
         ttk.Button(template_row, text='引流模板', width=7, command=self.open_page_data).pack(side='left', padx=4)
+        ttk.Button(template_row, text='抠图区域', width=8, command=self._open_cutout).pack(side='left', padx=(0, 4))
         noise_row = ttk.Frame(panel)
         noise_row.pack(fill='x', pady=(4, 6))
         ttk.Label(noise_row, text='全局降噪', style='Muted.TLabel', width=7).pack(side='left')
@@ -889,10 +887,12 @@ class App:
         ttk.Separator(row, orient='vertical').pack(side='left', fill='y', padx=10, pady=6)
         icon_button(row, 'undo', '撤销编辑', lambda: self.restore_edit(False)).pack(side='left')
         icon_button(row, 'redo', '重做编辑', lambda: self.restore_edit(True)).pack(side='left')
-        self.completion_actions = ttk.Frame(footer, style='Toolbar.TFrame')
+        # Keep post-download actions on the existing control row. Adding a
+        # second packed row only when the batch finishes resized the footer,
+        # forcing the large download form to repaint and look like a reset.
+        self.completion_actions = ttk.Frame(row, style='Toolbar.TFrame')
         ttk.Button(self.completion_actions, text='打开剪辑功能', command=self._open_editor,
                    style='Primary.TButton').pack(side='left', padx=(0, 6))
-        ttk.Button(self.completion_actions, text='打开抠图功能', command=self._open_cutout).pack(side='left')
         more, menu = icon_menu(topbar, 'more', '更多设置')
         more.pack(side='right')
         browser_login = DarkPopupMenu(menu, PALETTES['深色'])
@@ -915,7 +915,6 @@ class App:
         menu.add_cascade(label='竖版 PNG 分辨率', menu=sizes)
         self.popup_menus = (menu, browser_login, concurrent, sizes)
         self.exit_on_finish = tk.BooleanVar(value=False)
-        self.clear_on_finish = tk.BooleanVar(value=False)
         self.clear_button = icon_button(row, 'clear', '清空下载列表', self.clear_list)
         self.clear_button.pack(side='right')
         status_area=ttk.Frame(footer,height=34,style='Toolbar.TFrame')
@@ -1324,7 +1323,7 @@ class App:
         if popup is None or not popup.winfo_exists():
             popup=tk.Toplevel(self.root)
             popup.overrideredirect(True)
-            popup.attributes('-topmost',True)
+            popup.transient(self.root)
             popup.configure(background='#30343a')
             frame=tk.Frame(popup,background='#30343a',padx=8,pady=7,
                            highlightthickness=1,highlightbackground='#7c848e')
@@ -2041,13 +2040,10 @@ class App:
         self.active = True
         self.start_button.config(state='disabled')
         self.extract_button.config(state='disabled')
-        self.dir_button.config(state='disabled')
-        self.base_entry.config(state='disabled')
-        for entry in (*self.input_entries,*self.title_layout_picks,*self.denoise_picks):
-            entry.config(state='disabled')
-        self.denoise_scale.configure(state='disabled')
-        for checkbox in self.background_checks:checkbox.config(state='disabled')
-        for button in self.row_clear_buttons:button.config(state='disabled')
+        # Each job already owns an immutable snapshot of its row and settings.
+        # Leave the form widgets mapped and enabled while workers run; toggling
+        # every cell disabled/enabled at batch boundaries caused the whole
+        # twelve-row form to repaint like a page refresh.
         batch = []
         self.batch_keys = []
         for row_index, name, url, path in tasks:
@@ -2542,14 +2538,8 @@ class App:
                     self.active = False
                     self.start_button.config(state='normal')
                     self.extract_button.config(state='normal')
-                    self.dir_button.config(state='normal')
-                    self.base_entry.config(state='normal')
-                    self.denoise_scale.configure(state='normal')
-                    for button in self.row_clear_buttons:button.config(state='normal')
-                    for entry in (*self.input_entries,*getattr(self,'title_layout_picks',[]),
-                                  *getattr(self,'denoise_picks',[])):
-                        entry.config(state='normal')
-                    for checkbox in getattr(self,'background_checks',[]):checkbox.config(state='normal')
+                    if not self.history_paused:
+                        self.last_snapshot = self.snapshot()
                     resolved_states = ('完成', DENOISE_PRESERVED_STATE, COMPRESS_PRESERVED_STATE)
                     all_resolved = all(self.jobs[key]['state'] in resolved_states for key in self.batch_keys)
                     denoise_failed = [key for key in self.batch_keys
@@ -2567,8 +2557,6 @@ class App:
                             summary.append(f'{len(compression_failed)} 项压缩失败，源视频已保留')
                         self.status.config(text='下载处理已结束；'+'；'.join(summary)+'。可查看失败原因或重试。')
                     elif all_resolved:
-                        if hasattr(self, 'clear_on_finish') and self.clear_on_finish.get():
-                            self.clear_list()
                         if self.exit_on_finish.get():
                             if self.embedded:
                                 self.exit_on_finish.set(False)
@@ -2607,7 +2595,7 @@ class App:
                     if any(self.jobs[key].get('url') for key in self.batch_keys) and (all_resolved or any(
                             self.jobs[key]['state'] in ('完成', DENOISE_PRESERVED_STATE,
                                                         COMPRESS_PRESERVED_STATE) for key in self.batch_keys)):
-                        self.completion_actions.pack(side='right', anchor='e', pady=(0, 4))
+                        self.completion_actions.pack(side='right', padx=(8, 0))
                 else:
                     self.jobs[key]['state'] = state
                     if state in ('失败', DENOISE_PRESERVED_STATE, COMPRESS_PRESERVED_STATE):
@@ -2666,7 +2654,7 @@ if __name__ == '__main__':
         instance.rows[0][0].set('Test person');instance.rows[0][1].set('Long title '*40)
         instance.preview_folder(0);root.update()
         assert geometry==(root.winfo_reqwidth(),root.winfo_reqheight())
-        assert root.attributes('-topmost')
+        assert not root.attributes('-topmost')
         instance.rows[0][1].set('3 Quiet Signs Holy Spirit Is With You')
         instance.show_title_preview(0);root.update()
         assert instance.title_preview_photo is not None, instance.title_preview_image_label.cget('text')

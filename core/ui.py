@@ -43,6 +43,7 @@ COLORS = {
     "error": "#C66F73",
 }
 CUTOUT_PAGE_COUNT = 2
+MAX_CUTOUT_WINDOWS = 2
 
 
 def resource_root() -> Path:
@@ -153,6 +154,9 @@ class ClipAssistant:
         self.embedded_editor: EmbeddedEditor | None = None
         self.embedded_editor_frame = None
         self.editor_embed_error = None
+        self.editor_open_pending = False
+        self._editor_open_generation = 0
+        self._editor_open_started_at = 0.0
         self.user_settings = self._read_settings()
         self.default_output = self.user_settings.get("output", str(Path.home() / "Downloads"))
         try:
@@ -188,6 +192,7 @@ class ClipAssistant:
         self.rotoscope_import_ready = False
         self.rotoscope_import_error = None
         self.cutout_open_pending = False
+        self.pending_cutout_windows = 0
         self.current_page = "download"
         self.media_paths: list[str] = []
         self.preview_photo = None
@@ -393,8 +398,9 @@ class ClipAssistant:
         self.nav_download.pack(fill="x", padx=12, pady=(18, 5))
         self.nav_projects = self._nav_button(self.sidebar, "剪辑区域", self.show_projects)
         self.nav_projects.pack(fill="x", padx=12, pady=5)
+        # Cutout is launched from the downloader toolbar as independent windows;
+        # keep no visible third navigation entry in the sidebar.
         self.nav_cutout = self._nav_button(self.sidebar, "抠图区域", self.open_cutout)
-        self.nav_cutout.pack(fill="x", padx=12, pady=5)
         tk.Frame(self.sidebar, bg=COLORS["sidebar"]).pack(fill="both", expand=True)
         tk.Label(self.sidebar, text="本机处理", bg=COLORS["sidebar"], fg=COLORS["muted"],
                  font=("Microsoft YaHei UI", 10)).pack(anchor="w", padx=24, pady=20)
@@ -407,14 +413,17 @@ class ClipAssistant:
         self.page_stage.grid(row=0, column=0, sticky="nsew")
         self.page_stage.grid_rowconfigure(0, weight=1)
         self.page_stage.grid_columnconfigure(0, weight=1)
+        # Do not let an empty retained page collapse the stage to 1x1 when
+        # another page is unmapped; the active page must always fill the host.
+        self.page_stage.grid_propagate(False)
         self.page_frames = {
             "download": tk.Frame(self.page_stage, bg=COLORS["bg"], padx=4, pady=4),
             "projects": tk.Frame(self.page_stage, bg=COLORS["bg"]),
             "cutout": tk.Frame(self.page_stage, bg=COLORS["bg"], padx=12, pady=8),
         }
-        # Keep all primary pages mapped for the lifetime of the shell. Page
-        # navigation only changes stacking order, avoiding unmap/remap flashes
-        # when returning from the editor or cutout workspace.
+        # Map each page exactly once for the lifetime of the shell. Switching
+        # pages only changes Tk stacking order; unmapping and remapping a page
+        # exposed a blank stage while Windows delivered the next Map/Configure.
         for frame in self.page_frames.values():
             frame.grid(row=0, column=0, sticky="nsew")
         self._watch_page_widget(self.main, "main")
@@ -497,7 +506,6 @@ class ClipAssistant:
             try:
                 editor_state = (
                     f"running={int(self.embedded_editor.is_running())},"
-                    f"active={int(bool(self.embedded_editor._page_active))},"
                     f"starting={int(bool(self.embedded_editor.starting))}"
                 )
             except Exception:
@@ -534,13 +542,18 @@ class ClipAssistant:
     def _show_page(self, name: str, nav) -> None:
         target = self.page_frames[name]
         page_changed = self.current_page != name
+        if name != "projects" and self.editor_open_pending:
+            # A different navigation choice cancels the delayed first-open
+            # handoff, while the editor may finish initializing underneath.
+            self.editor_open_pending = False
+            self._editor_open_generation += 1
         if name != "cutout":
             self.cutout_open_pending = False
         if page_changed:
             self._begin_page_diagnostics(self.current_page, name)
         if (name != "projects" and page_changed and self.embedded_editor
                 and self.embedded_editor.is_running()):
-            # Release keyboard focus, but keep WebView2 visible and warm.
+            # Release keyboard focus while retaining the initialized WebView2.
             try:
                 nav.focus_set()
             except tk.TclError:
@@ -552,18 +565,15 @@ class ClipAssistant:
             if name != "download":
                 self.downloader_app.hide_title_preview()
             self.downloader_app.set_view_active(name == "download")
-        # Finish view state and popup cleanup before exposing the destination
-        # frame; this avoids painting an intermediate, partially updated page.
+        # All page frames stay mapped and retain their native geometry. A z-order
+        # change is enough; Map/Unmap cycles caused a blank frame followed by a
+        # second full-size paint on every navigation.
         if page_changed:
             target.tkraise()
-            if self.embedded_editor and self.embedded_editor.is_running():
-                # The native editor HWND shares page_stage's parent with the
-                # Tk page frames; move it within that local Z order so it is
-                # above Projects and behind Download/Cutout without hide/show.
-                self.embedded_editor.set_page_active(name == "projects")
-            # Let Tk coalesce normal paint work after raising the destination.
-            # Do not synchronously flush the widget tree or change top-level
-            # Z order during workspace navigation.
+            # The native editor surface is parented by the Projects host
+            # itself, so the page frame owns its clipping and stacking. Do not
+            # reorder a second, sibling HWND here: that caused a second paint
+            # pass during each page transition.
             for index, item in enumerate(self.cutout_pages):
                 editor = item.get("editor")
                 if editor is not None:
@@ -902,41 +912,71 @@ class ClipAssistant:
         self._open_editor_workspace(self.nav_projects, "edit")
 
     def _open_editor_workspace(self, nav_button, mode="edit"):
-        self._show_page("projects", nav_button)
-        self.page_body.grid_rowconfigure(0, weight=1)
-        self.page_body.grid_columnconfigure(0, weight=1)
+        project_page = self.page_frames["projects"]
+        project_page.grid_rowconfigure(0, weight=1)
+        project_page.grid_columnconfigure(0, weight=1)
         if self.embedded_editor is None:
-            self._clear_body()
-            host = tk.Frame(self.page_body, bg=COLORS["bg"], bd=0, highlightthickness=0)
+            for child in project_page.winfo_children():
+                child.destroy()
+            host = tk.Frame(project_page, bg=COLORS["bg"], bd=0, highlightthickness=0)
             host.grid(row=0, column=0, sticky="nsew")
             self.embedded_editor_frame = host
             self.embedded_editor = EmbeddedEditor(
                 self.root, host, self.editor_engine_dir, data_root(),
                 self.editor_engine_dir / "runtime" / "node" / "node.exe", self._editor_embed_failed,
-                native_parent=self.page_stage,
+                native_parent=host,
             )
         self.embedded_editor.set_workspace_mode(mode)
-        if self.embedded_editor.is_running():
-            # Keep the WebView2 surface warm; page-level Z order is managed by
-            # _show_page, while this updates the child bounds if needed.
+        if self.embedded_editor.is_ready():
+            self.editor_open_pending = False
+            self._show_page("projects", nav_button)
             self.embedded_editor.resize()
-        else:
-            self.root.after_idle(self._show_editor_when_mapped)
+            return
 
-    def _show_editor_when_mapped(self):
-        """Wait until Tk has mapped the page before showing its native child HWND."""
-        if self.current_page != "projects" or not self.embedded_editor or not self.embedded_editor_frame:
+        # Keep the current page visible while the local WebView2 first loads.
+        # The blank native child followed by its completed page was the second
+        # visible redraw users reported as a duplicate refresh.
+        self.editor_open_pending = True
+        self._editor_open_generation += 1
+        generation = self._editor_open_generation
+        self._editor_open_started_at = time.monotonic()
+        self.root.after_idle(lambda g=generation: self._start_editor_when_mapped(g))
+
+    def _start_editor_when_mapped(self, generation):
+        """Warm the editor behind the current page and reveal only when ready."""
+        if (not self.editor_open_pending or generation != self._editor_open_generation
+                or not self.embedded_editor or not self.embedded_editor_frame):
             return
         if not self.embedded_editor_frame.winfo_exists():
             return
         if not self.embedded_editor_frame.winfo_ismapped():
-            # grid()/tkraise() are applied synchronously, but Windows maps the
-            # page HWND on the next event-loop turn. Showing the WebView2 host
-            # before then leaves its child surface hidden under the ancestor.
-            self.root.after(16, self._show_editor_when_mapped)
+            self.root.after(16, lambda g=generation: self._start_editor_when_mapped(g))
             return
-        shown = self.embedded_editor.show()
-        if shown and self.editor_embed_error is not None:
+        if not self.embedded_editor.is_running():
+            shown = self.embedded_editor.show()
+            if not shown:
+                self._finish_editor_open(generation)
+                return
+        if self.embedded_editor.is_ready():
+            self._finish_editor_open(generation)
+            return
+        if self.embedded_editor.has_failed():
+            self._finish_editor_open(generation)
+            return
+        if time.monotonic() - self._editor_open_started_at >= 30:
+            self._editor_embed_failed("剪辑工作区启动超时，请重试。")
+            self._finish_editor_open(generation)
+            return
+        self.root.after(50, lambda g=generation: self._start_editor_when_mapped(g))
+
+    def _finish_editor_open(self, generation):
+        if not self.editor_open_pending or generation != self._editor_open_generation:
+            return
+        self.editor_open_pending = False
+        self._show_page("projects", self.nav_projects)
+        if self.embedded_editor and self.embedded_editor.is_running():
+            self.embedded_editor.resize()
+        if self.editor_embed_error is not None and self.embedded_editor and self.embedded_editor.is_ready():
             try:
                 self.editor_embed_error.destroy()
             except tk.TclError:
@@ -956,28 +996,51 @@ class ClipAssistant:
         else:
             self.editor_embed_error.configure(text=message)
     def open_cutout(self):
-        if not self.cutout_page_built:
-            self._build_cutout_page()
-        if self.current_page == "cutout":
-            self._activate_nav(self.nav_cutout)
+        alive = []
+        for editor in self.matting_windows:
+            try:
+                if editor.window.winfo_exists():
+                    alive.append(editor)
+            except (AttributeError, tk.TclError):
+                continue
+        self.matting_windows = alive
+        if len(alive) + self.pending_cutout_windows >= MAX_CUTOUT_WINDOWS:
+            if alive:
+                try:
+                    alive[-1].window.lift()
+                except tk.TclError:
+                    pass
+            messagebox.showinfo("抠图窗口", "最多同时打开两个抠图窗口，请先关闭一个。", parent=self.root)
             return
-        if self.cutout_pages[self.current_cutout_page]["editor"] is None:
-            if self.rotoscope_import_error is not None:
-                self._show_rotoscope_import_error(self.current_cutout_page, self.rotoscope_import_error)
-                self._select_cutout_page(self.current_cutout_page)
-                self._show_page("cutout", self.nav_cutout)
-                return
-            # Keep the current page visible until the cutout controls are ready.
-            # This avoids showing a blank destination during a first-time load.
-            self.cutout_open_pending = True
-            self._load_cutout_module()
-            if self.rotoscope_module is not None:
-                self._create_cutout_editor(self.current_cutout_page, allow_hidden=True)
-            if self.cutout_pages[self.current_cutout_page]["editor"] is None:
-                return
-            self.cutout_open_pending = False
-        self._select_cutout_page(self.current_cutout_page)
-        self._show_page("cutout", self.nav_cutout)
+        if self.rotoscope_import_error is not None:
+            messagebox.showerror("抠图模块加载失败", str(self.rotoscope_import_error), parent=self.root)
+            return
+        if self.rotoscope_module is not None:
+            self._create_cutout_window()
+            return
+        self.pending_cutout_windows += 1
+        self._load_cutout_module()
+
+    def _create_cutout_window(self):
+        if self.rotoscope_module is None:
+            return None
+        started_at = time.monotonic()
+        try:
+            editor = self.rotoscope_module.RotoscopeWindow(self)
+            self.matting_windows.append(editor)
+            self.matting_window = editor
+            editor.window.lift()
+            self._write_ui_log(
+                f"CUTOUT_WINDOW_CREATE_COMPLETE count={len(self.matting_windows)} "
+                f"elapsed_ms={round((time.monotonic() - started_at) * 1000)}"
+            )
+            return editor
+        except Exception as exc:
+            self._write_ui_log(
+                f"CUTOUT_WINDOW_CREATE_FAILED elapsed_ms={round((time.monotonic() - started_at) * 1000)}"
+            )
+            messagebox.showerror("无法打开抠图窗口", str(exc), parent=self.root)
+            return None
 
     def _load_cutout_module(self):
         """Import the cutout code on demand without constructing hidden widgets."""
@@ -1029,8 +1092,7 @@ class ClipAssistant:
         self.cutout_pages = []
         for index in range(CUTOUT_PAGE_COUNT):
             host = tk.Frame(self.cutout_editor_stack, bg=COLORS["bg"])
-            if index == self.current_cutout_page:
-                host.grid(row=0, column=0, sticky="nsew")
+            host.grid(row=0, column=0, sticky="nsew")
             placeholder = tk.Label(host, text="本页尚未导入视频", bg=COLORS["bg"],
                                    fg=COLORS["muted"], font=("Microsoft YaHei UI", 11))
             placeholder.place(relx=0.5, rely=0.5, anchor="center")
@@ -1053,7 +1115,6 @@ class ClipAssistant:
                 f"cutout-{previous_index + 1}", f"cutout-{self.current_cutout_page + 1}"
             )
         page = self.cutout_pages[self.current_cutout_page]
-        page["host"].grid(row=0, column=0, sticky="nsew")
         page["host"].tkraise()
         for page_index, item in enumerate(self.cutout_pages):
             editor = item.get("editor")
@@ -1061,8 +1122,6 @@ class ClipAssistant:
                 editor.set_background_active(
                     self.current_page == "cutout" and page_index == self.current_cutout_page
                 )
-        if previous_index != self.current_cutout_page:
-            self.cutout_pages[previous_index]["host"].grid_remove()
         self.matting_window = page["editor"]
         self._refresh_cutout_tabs()
         self._update_cutout_page_label()
@@ -1154,18 +1213,19 @@ class ClipAssistant:
         )
         self._rotoscope_import_started_at = None
         if self.rotoscope_import_error is not None:
-            index = self.current_cutout_page
             exc = self.rotoscope_import_error
             self.rotoscope_import_error = None
             self._write_ui_log(f"ROTOSCOPE_IMPORT_FAILED elapsed_ms={import_ms}")
-            if self.current_page == "cutout" or self.cutout_open_pending:
-                self.cutout_open_pending = False
-                if self.current_page != "cutout":
-                    self._select_cutout_page(index)
-                    self._show_page("cutout", self.nav_cutout)
-                self._show_rotoscope_import_error(index, exc)
+            pending = self.pending_cutout_windows
+            self.pending_cutout_windows = 0
+            if pending:
+                messagebox.showerror("抠图模块加载失败", str(exc), parent=self.root)
             return
         self._write_ui_log(f"ROTOSCOPE_IMPORT_COMPLETE elapsed_ms={import_ms}")
+        pending = self.pending_cutout_windows
+        self.pending_cutout_windows = 0
+        for _ in range(pending):
+            self._create_cutout_window()
         if self.cutout_open_pending:
             index = self.current_cutout_page
             self.cutout_editor_pending.add(index)
@@ -1264,8 +1324,7 @@ class ClipAssistant:
             if page["editor"] is window:
                 page["editor"] = None
         if self.matting_window is window:
-            current = self.cutout_pages[self.current_cutout_page] if self.cutout_pages else None
-            self.matting_window = current["editor"] if current else None
+            self.matting_window = self.matting_windows[-1] if self.matting_windows else None
 
     def _active_cutout_windows(self):
         return [window for window in self.matting_windows if getattr(window, "is_exporting", False)]

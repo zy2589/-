@@ -1311,14 +1311,15 @@ function persistedMediaItem(item, preserveWaveform = false) {
             try {
               await nativeCall("releaseProjectAssets", projectId);
             } catch {}
-            await new Promise((resolve) => setTimeout(resolve, 80));
             const result = await nativeCall("deleteProject", projectId, {permanent:true});
             if (!result) throw new Error("工程不存在或已删除");
             if (state.projectId === projectId) {
               resetEditorState();
               state.projectId = "";
             }
-            toast(result.cacheCleanupFailures
+            toast(result.cleanupPending
+              ? "工程已从列表移除，正在后台清理工程文件"
+              : result.cacheCleanupFailures
               ? `工程已永久删除；${result.cacheCleanupFailures} 个被占用的缓存文件暂未清理`
               : "工程、工程内文件和未被其他工程共用的缓存已永久删除");
             } finally {

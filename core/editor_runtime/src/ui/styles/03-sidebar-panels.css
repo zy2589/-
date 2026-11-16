@@ -504,7 +504,7 @@
         min-height: 0;
         background: #0e1011;
         display: grid;
-        grid-template-rows: minmax(0, 1fr) 43px 36px;
+        grid-template-rows: minmax(36px, auto) minmax(0, 1fr) 43px;
         position: relative;
         overflow: hidden;
       }

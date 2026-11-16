@@ -22,7 +22,7 @@ class PageLibrary:
         width=min(1160,max(820,screen_w-64));height=min(900,max(620,screen_h-80))
         self.window.geometry(f'{width}x{height}+{max(0,(screen_w-width)//2)}+{max(0,(screen_h-height)//2)}')
         self.window.minsize(min(820,width),min(620,height))
-        self.window.attributes('-topmost',True)
+        self.window.transient(app.root)
         apply_appearance(self.window, '深色')
         colors=PALETTES['深色']
         self.window.bind('<Destroy>',self.close_library,add='+')

@@ -39,7 +39,7 @@ def _remember_color(color):
 
 def askcolor(color=None, parent=None, **kwargs):
     """Compact in-app color picker with RGB controls and screen sampling."""
-    window=tk.Toplevel(parent);window.title('颜色');window.attributes('-topmost',True)
+    window=tk.Toplevel(parent);window.title('颜色')
     window.resizable(False,False);apply_appearance(window,'深色')
     if parent is not None:
         window.transient(parent)
@@ -137,7 +137,9 @@ def pick_screen_color(parent,on_pick,on_cancel=None):
         user32.GetAncestor.argtypes=[wintypes.HWND,wintypes.UINT];user32.GetAncestor.restype=wintypes.HWND
         user32.SetWindowPos.argtypes=[wintypes.HWND,wintypes.HWND,ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_int,wintypes.UINT]
         origin_x=user32.GetSystemMetrics(76);origin_y=user32.GetSystemMetrics(77)
-        window=tk.Toplevel(parent);window.overrideredirect(True);window.attributes('-topmost',True)
+        window=tk.Toplevel(parent);window.overrideredirect(True)
+        if parent is not None:
+            window.transient(parent)
         width,height=screenshot.size;window.geometry(f'{width}x{height}+0+0')
         canvas=tk.Canvas(window,highlightthickness=0,cursor='crosshair');canvas.pack(fill='both',expand=True)
         photo=ImageTk.PhotoImage(screenshot,master=window);canvas.create_image(0,0,anchor='nw',image=photo)
@@ -164,7 +166,9 @@ def pick_screen_color(parent,on_pick,on_cancel=None):
         canvas.bind('<Motion>',magnify)
         window.update_idletasks()
         handle=user32.GetAncestor(window.winfo_id(),2)
-        user32.SetWindowPos(handle,-1,origin_x,origin_y,width,height,0)
+        # Put the temporary eyedropper overlay above normal windows without
+        # marking it as globally always-on-top.
+        user32.SetWindowPos(handle,wintypes.HWND(0),origin_x,origin_y,width,height,0)
         def choose(event):
             color=pixel_color(screenshot,event.x-origin_x,event.y-origin_y)
             _remember_color(color)

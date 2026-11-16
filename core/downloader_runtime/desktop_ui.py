@@ -46,7 +46,7 @@ class ToolTip:
             return
         self.window = tk.Toplevel(self.widget)
         self.window.overrideredirect(True)
-        self.window.attributes('-topmost', True)
+        self.window.transient(self.widget.winfo_toplevel())
         self.window.geometry(f'+{self.widget.winfo_rootx()}+{self.widget.winfo_rooty() + self.widget.winfo_height() + 6}')
         text = self.text() if callable(self.text) else self.text
         tk.Label(self.window, text=text, bg='#1e2023', fg='#ffffff', font=UI_FONT,
@@ -81,7 +81,7 @@ class DarkPopupMenu:
     """Borderless, dark popup menu for the downloader's overflow control."""
     def __init__(self, owner, colors):
         self.owner = owner
-        self.root_widget = owner.root_widget if isinstance(owner, DarkPopupMenu) else owner
+        self.root_widget = owner.root_widget if isinstance(owner, DarkPopupMenu) else owner.winfo_toplevel()
         self.colors = colors
         self.items = []
         self.popup = None
@@ -121,7 +121,7 @@ class DarkPopupMenu:
         root = self._root_menu
         popup = tk.Toplevel(self.root_widget)
         popup.overrideredirect(True)
-        popup.attributes('-topmost', True)
+        popup.transient(self.root_widget)
         popup.configure(bg=self.colors['bg'])
         self.popup = popup
         self.rows = []
@@ -168,8 +168,13 @@ class DarkPopupMenu:
         if parent_row is not None and x + width > screen_w:
             x = parent_row.winfo_rootx() - width
         x = max(0, min(x, screen_w - width))
-        y = max(0, min(int(y), screen_h - height))
+        y = int(y)
+        if parent_row is not None and y + height > screen_h:
+            y = parent_row.winfo_rooty() - height
+        y = max(0, min(y, screen_h - height))
         popup.geometry(f'{width}x{height}+{x}+{y}')
+        popup.update_idletasks()
+        popup.lift()
 
     def _hover(self, index):
         root = self._root_menu
@@ -203,8 +208,12 @@ class DarkPopupMenu:
         menu.colors = self.colors
         self.popup.update_idletasks()
         row.update_idletasks()
-        x = self.popup.winfo_rootx() + self.popup.winfo_width() - 1
-        y = self.popup.winfo_rooty() + row.winfo_y()
+        # Keep settings cascades attached to their row and expand below it.
+        # Right-side cascades were clipped by narrow windows and could appear
+        # underneath another application window.
+        root_popup = self._root_menu.popup
+        x = root_popup.winfo_rootx() if root_popup and root_popup.winfo_exists() else self.popup.winfo_rootx()
+        y = row.winfo_rooty() + row.winfo_height()
         menu._show_at(x, y, row)
 
     def _activate(self, index):

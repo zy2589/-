@@ -992,21 +992,34 @@ function polishSectionHtml(title, rows, emptyText) {
         if(!selected.length)return;
         if(isTrackLocked('review'))return toast('待处理轨道已锁定');
         if(mode==='deleteCaptions'){
-          const captions=state.captions.filter(c=>!isTrackLocked(c.trackId||'caption') && selected.some(r=>
-            (!r.captionTrackId || r.captionTrackId===(c.trackId||'caption')) && (!r.ownerClipId || r.ownerClipId===c.ownerClipId) &&
-            (c.words||[]).some(w=>w.issueId===(r.issueId||r.id) && w.start<r.end && w.end>r.start)));
-          if(!captions.length)return toast('没有可删除的对应字幕，或字幕轨道已锁定');
+          const deletion=planReviewCaptionDeletion(state.captions,selected,{
+            lockedTracks:state.trackLocks||{},joinWords:words=>joinCaptionWords(words),
+          });
+          if(deletion.ambiguousCaptionIds.size)return toast('有字幕缺少逐词时间信息，无法只删对应文案；为避免误删，整次操作已取消');
+          if(!deletion.removedWords.length&&!deletion.removedCaptionIds.size)return toast('没有可删除的对应字幕，或字幕轨道已锁定');
+          const hasCaptions=state.captions.some(c=>(c.words||[]).length||String(c.text||'').trim());
+          const hasRemainingCaptions=deletion.captions.some(c=>(c.words||[]).length||String(c.text||'').trim());
+          if(hasCaptions&&!hasRemainingCaptions)return toast('此次删除会清空全部文案，已取消操作以保护字幕');
           snapshot();
-          const removed=new Set(captions),captionIds=new Set(captions.map(c=>c.id));
-          const issues=new Set(captions.flatMap(c=>(c.words||[]).map(w=>w.issueId).filter(Boolean)));
-          const reviews=state.reviewCaptions.filter(r=>issues.has(r.issueId||r.id) || captions.some(c=>
-            (!r.ownerClipId || r.ownerClipId===c.ownerClipId) && (!r.captionTrackId || r.captionTrackId===(c.trackId||'caption')) && r.start<c.end && r.end>c.start));
-          const reviewIds=new Set(reviews.map(r=>r.id));
-          state.captions=state.captions.filter(c=>!removed.has(c));
-          state.captionRecoveryArchive=(state.captionRecoveryArchive||[]).filter(r=>!captionIds.has(r.caption?.id));
-          state.reviewCaptions=state.reviewCaptions.filter(r=>!reviewIds.has(r.id));
-          for(const field of ['issues','matchIssues'])state[field]=(state[field]||[]).filter(r=>!issues.has(r.issueId||r.id)&&!reviewIds.has(r.id));
-          renderAll();queueAutosave();toast('已删除 '+captions.length+' 条对应字幕，音视频保留');return;
+          state.captions=deletion.captions;
+          state.captionRecoveryArchive=(state.captionRecoveryArchive||[]).filter(record=>{
+            const caption=record?.caption;
+            if(deletion.removedCaptionIds.has(caption?.id))return false;
+            if(record?.word)return !selected.some(review=>reviewCaptionWordMatches(review,caption,record.word));
+            return !selected.some(review=>reviewCaptionBlockIsCovered(review,caption));
+          });
+          state.reviewCaptions=state.reviewCaptions.filter(r=>!deletion.removedReviewIds.has(r.id));
+          const remainingIssueIds=new Set([
+            ...state.reviewCaptions.map(r=>String(r.issueId||r.id||'')),
+            ...state.captions.flatMap(c=>(c.words||[]).map(w=>String(w.issueId||''))),
+          ]);
+          for(const field of ['issues','matchIssues'])state[field]=(state[field]||[]).filter(r=>{
+            const issueId=String(r.issueId||r.id||'');
+            return !deletion.removedIssueIds.has(issueId)||remainingIssueIds.has(issueId);
+          });
+          const deletedCount=deletion.removedWords.length+
+            [...deletion.removedCaptionIds].filter(id=>!deletion.removedWords.some(item=>item.captionId===id)).length;
+          renderAll();queueAutosave();toast('已删除 '+deletedCount+' 个对应字幕词句；其他文案和音视频保留');return;
         }
         const eligible=selected.filter(r=>r.type!=='missing' && r.action!=='missing' && (mode!=='expected' || r.type==='mismatch') &&
           !isTrackLocked(r.captionTrackId||'caption') && String(mode==='spoken'?r.spokenText:r.expectedText||'').trim());
@@ -1067,7 +1080,7 @@ function polishSectionHtml(title, rows, emptyText) {
           toast("这一处没有可剪掉的音频范围");
           return;
         }
-        removeIssueWords(issueId, start, end);
+        removeIssueWords(issueId, start, end, review);
         state.removals.push({
           start: sourceStart,
           end: sourceEnd,
@@ -1356,6 +1369,139 @@ function polishSectionHtml(title, rows, emptyText) {
         };
         requestAnimationFrame(finish);
       }
+      function repeatCutPreservesCaptionText(start,end) {
+        const captions = state.captions || [];
+        const hasText = captions.some(caption =>
+          (caption.words || []).length || String(caption.text || '').trim());
+        if (!hasText) return true;
+        const margin = .005;
+        return captions.some(caption => {
+          const words = caption.words || [];
+          if (words.length) return words.some(word => {
+            const wordStart = Number(word.start), wordEnd = Number(word.end);
+            return Number.isFinite(wordStart) && Number.isFinite(wordEnd) &&
+              (wordEnd <= start + margin || wordStart >= end - margin);
+          });
+          const captionStart = Number(caption.start), captionEnd = Number(caption.end);
+          return Number.isFinite(captionStart) && Number.isFinite(captionEnd) &&
+            (captionEnd <= start + margin || captionStart >= end - margin);
+        });
+      }
+      function captionTextKey(caption,text,start,end,word=null) {
+        const track = caption.trackId || 'caption';
+        const sourceMediaId = caption.sourceMediaId || '';
+        const sourceStart = Number(word ? word.sourceStart : caption.sourceStart);
+        const sourceEnd = Number(word ? word.sourceEnd : caption.sourceEnd);
+        const hasSourceRange = Number.isFinite(sourceStart) && Number.isFinite(sourceEnd) && sourceEnd > sourceStart;
+        const position = hasSourceRange
+          ? `source:${sourceStart.toFixed(5)}:${sourceEnd.toFixed(5)}`
+          : `timeline:${Number(start).toFixed(5)}:${Number(end).toFixed(5)}`;
+        return `${track}|${sourceMediaId}|${String(text || '').trim()}|${position}`;
+      }
+      function addCaptionWordCount(counts,key) {
+        if (!key) return;
+        counts.set(key,(counts.get(key)||0)+1);
+      }
+      function preservedCaptionWordCounts(start,end) {
+        const counts = new Map(), length = end - start, margin = .005;
+        for (const caption of state.captions || []) {
+          const track = caption.trackId || 'caption';
+          const shouldShift = !state.trackLocks?.[track] && state.trackSyncLocks?.[track] !== false;
+          const words = caption.words || [];
+          if (words.length) {
+            for (const word of words) {
+              const wordStart = Number(word.start), wordEnd = Number(word.end);
+              if (!Number.isFinite(wordStart) || !Number.isFinite(wordEnd)) continue;
+              const before = wordEnd <= start + margin, after = wordStart >= end - margin;
+              if (!before && !after) continue;
+              const shift = after && shouldShift ? length : 0;
+              addCaptionWordCount(counts,captionTextKey(caption,word.display || word.text,
+                wordStart-shift,wordEnd-shift,word));
+            }
+          } else {
+            const captionStart = Number(caption.start), captionEnd = Number(caption.end);
+            if (!Number.isFinite(captionStart) || !Number.isFinite(captionEnd)) continue;
+            const before = captionEnd <= start + margin, after = captionStart >= end - margin;
+            if (!before && !after) continue;
+            const shift = after && shouldShift ? length : 0;
+            addCaptionWordCount(counts,captionTextKey(caption,caption.text,
+              captionStart-shift,captionEnd-shift));
+          }
+        }
+        return counts;
+      }
+      function captionWordsRemain(required) {
+        const counts = new Map();
+        for (const caption of state.captions || []) {
+          const words = caption.words || [];
+          if (words.length) {
+            for (const word of words) addCaptionWordCount(counts,captionTextKey(caption,
+              word.display || word.text,word.start,word.end,word));
+          } else if (String(caption.text || '').trim()) {
+            addCaptionWordCount(counts,captionTextKey(caption,caption.text,caption.start,caption.end));
+          }
+        }
+        return [...required].every(([key,count]) => (counts.get(key)||0) >= count);
+      }
+      function captionsAfterRepeatCut(captions,start,end) {
+        const length=end-start, margin=.005;
+        const shiftTrack=track=>!state.trackLocks?.[track] && state.trackSyncLocks?.[track]!==false;
+        const shiftItem=(item,track)=>{
+          if(!shiftTrack(track))return item;
+          const itemStart=Number(item.start),itemEnd=Number(item.end);
+          if(!Number.isFinite(itemStart)||!Number.isFinite(itemEnd))return item;
+          if(itemEnd<=start+margin)return item;
+          if(itemStart>=end-margin){item.start=Math.max(0,itemStart-length);item.end=Math.max(item.start+.04,itemEnd-length);return item;}
+          if(itemStart>=start-margin&&itemEnd<=end+margin)return null;
+          if(itemStart<start&&itemEnd>end){item.end=Math.max(itemStart+.04,itemEnd-length);return item;}
+          if(itemStart<start){item.end=Math.max(itemStart+.04,start);return item;}
+          item.start=start;item.end=Math.max(start+.04,itemEnd-length);return item;
+        };
+        return (captions||[]).filter(Boolean).flatMap(original=>{
+          const caption=JSON.parse(JSON.stringify(original));
+          const track=caption.trackId||'caption';
+          if(!shiftTrack(track))return [caption];
+          if(!Array.isArray(caption.words)||!caption.words.length){
+            const shifted=shiftItem(caption,track);return shifted?[shifted]:[];
+          }
+          const words=[];
+          for(const originalWord of caption.words){
+            const word={...originalWord},wordStart=Number(word.start),wordEnd=Number(word.end);
+            if(!Number.isFinite(wordStart)||!Number.isFinite(wordEnd)){words.push(word);continue;}
+            const center=(wordStart+wordEnd)/2;
+            if(center>=start&&center<end)continue;
+            if(wordEnd<=start+margin)words.push(word);
+            else if(wordStart>=end-margin){word.start=Math.max(0,wordStart-length);word.end=Math.max(word.start+.01,wordEnd-length);words.push(word);}
+            else if(wordStart<start&&wordEnd>end){word.end=Math.max(wordStart+.01,wordEnd-length);words.push(word);}
+            else if(wordStart<start){word.end=Math.max(wordStart+.01,start);words.push(word);}
+            else{word.start=start;word.end=Math.max(start+.01,wordEnd-length);words.push(word);}
+          }
+          if(!words.length)return [];
+          words.sort((a,b)=>Number(a.start)-Number(b.start));
+          caption.words=words;caption.start=Number(words[0].start);
+          caption.end=Math.max(caption.start+.04,Number(words.at(-1).end));
+          caption.text=joinCaptionWords(words);
+          return [caption];
+        });
+      }
+      function captionArchiveAfterRepeatCut(records,start,end) {
+        const length=end-start, margin=.005;
+        const shiftTrack=track=>!state.trackLocks?.[track] && state.trackSyncLocks?.[track]!==false;
+        return (records||[]).filter(Boolean).flatMap(original=>{
+          const record=JSON.parse(JSON.stringify(original));
+          const caption=record.caption||{},track=caption.trackId||'caption';
+          if(!shiftTrack(track))return [record];
+          const item=record.word||caption;
+          const itemStart=Number(item.start),itemEnd=Number(item.end);
+          if(!Number.isFinite(itemStart)||!Number.isFinite(itemEnd))return [record];
+          if(itemEnd<=start+margin)return [record];
+          if(itemStart>=end-margin){item.start=Math.max(0,itemStart-length);item.end=Math.max(item.start+.01,itemEnd-length);return [record];}
+          if(itemStart>=start-margin&&itemEnd<=end+margin)return [];
+          if(itemStart<start&&itemEnd>end){item.end=Math.max(itemStart+.01,itemEnd-length);return [record];}
+          if(itemStart<start){item.end=Math.max(itemStart+.01,start);return [record];}
+          item.start=start;item.end=Math.max(start+.01,itemEnd-length);return [record];
+        });
+      }
       function deleteRepeatedReview(id) {
         const review = state.reviewCaptions.find(r => r.id === id || r.issueId === id);
         if (!review || review.type !== 'repeat') return;
@@ -1363,6 +1509,10 @@ function polishSectionHtml(title, rows, emptyText) {
         const start = Math.floor((Math.max(0, Number(review.start)) + 1e-7) / frame) * frame;
         const end = Math.min(state.duration, Math.ceil((Number(review.end) - 1e-7) / frame) * frame);
         if (end <= start + .001) return;
+        if (!repeatCutPreservesCaptionText(start,end)) return toast('疑似重复范围覆盖了全部文案，已取消删除以保护工程');
+        const originalCaptions=JSON.parse(JSON.stringify(state.captions||[]));
+        const originalCaptionArchive=JSON.parse(JSON.stringify(state.captionRecoveryArchive||[]));
+        const preservedCaptionWords=preservedCaptionWordCounts(start,end);
         const media = editMediaItems().filter(entry => entry.obj.start <= start + .002 && entry.obj.end >= end - .002);
         let owners = review.ownerClipId ? media.filter(entry => entry.obj.id === review.ownerClipId && (review.ownerClipType ? entry.type === review.ownerClipType : ['video','videolayer'].includes(entry.type))) : [];
         if (!owners.length && !review.ownerClipId) {
@@ -1377,18 +1527,73 @@ function polishSectionHtml(title, rows, emptyText) {
         if ([anchor,...partners].some(item => selectionIsLocked(item.type,item.id)) ||
             isTrackLocked('review') || isTrackLocked(review.captionTrackId || 'caption') ||
             state.avLinked && ['video','audio'].includes(anchor.type) && (isTrackLocked('video') || isTrackLocked('audio'))) return toast('相关轨道已锁定，请先解锁');
+        const historyBefore = JSON.stringify(projectData(true));
         snapshot();
         state.timelineRange = null;
         state.selected = anchor; state.selectedItems = [anchor];
-        if (['video','audio'].includes(anchor.type)) anchor = materializeMainSegment(anchor.type,anchor.id) || anchor;
+        if (['video','audio'].includes(anchor.type)) {
+          const materialized = materializeMainSegment(anchor.type,anchor.id);
+          if (!materialized) {
+            if (state.undo.at(-1) === historyBefore) state.undo.pop();
+            applyHistoryState(JSON.parse(historyBefore));
+            renderAll();
+            return toast('无法安全定位重复片段，已取消删除');
+          }
+          anchor = materialized;
+        }
         review.ownerClipId = anchor.id;
         const targets = () => [{...anchor},...linkedTimelineObjects(anchor.type,anchor.id)];
+        const rollback = message => {
+          if (state.undo.at(-1) === historyBefore) state.undo.pop();
+          applyHistoryState(JSON.parse(historyBefore));
+          renderAll();
+          toast(message);
+        };
+        const tolerance = Math.max(.002,frame*.51);
         splitClipsAt(start, targets(), {record:false,quiet:true});
         // Bound reviews follow the right-hand piece when the first split moves it.
         anchor = {type:anchor.type,id:review.ownerClipId};
+        const startPiece = timelineObjectFor(anchor.type,anchor.id);
+        if (!startPiece || Number(startPiece.start) > start + tolerance || Number(startPiece.end) < end - tolerance) {
+          rollback('无法准确切出重复范围，已取消删除以保护其他文案');
+          return;
+        }
         splitClipsAt(end, targets(), {record:false,quiet:true});
+        const exactPiece = timelineObjectFor(anchor.type,anchor.id);
+        if (!exactPiece || Math.abs(Number(exactPiece.start) - start) > tolerance ||
+            Math.abs(Number(exactPiece.end) - end) > tolerance) {
+          rollback('重复范围没有被准确切开，已取消删除以保护其他文案');
+          return;
+        }
         state.selected = anchor; state.selectedItems = targets();
         deleteSelected(true, {record:false});
+        // Rebuild visible captions from the pre-edit snapshot. Generic ripple
+        // deletion can remap a whole source-backed caption group through an
+        // owner clip that was just removed, dropping unrelated words as well.
+        state.captions=captionsAfterRepeatCut(originalCaptions,start,end);
+        state.captionRecoveryArchive=captionArchiveAfterRepeatCut(originalCaptionArchive,start,end);
+        if (!captionWordsRemain(preservedCaptionWords)) {
+          rollback('检测到非重复文案可能受影响，删除已撤销');
+          return;
+        }
+        const liveMedia=editMediaItems();
+        for(const caption of state.captions){
+          if(!caption.ownerClipId)continue;
+          const captionStart=Number(caption.start),captionEnd=Number(caption.end);
+          const sourceId=caption.sourceMediaId||'';
+          const matches=liveMedia.filter(entry=>{
+            const item=entry.obj,itemSource=item.sourceMediaId||item.path||'';
+            return Number(item.start)<=captionStart+.02&&Number(item.end)>=captionEnd-.02&&
+              (!sourceId||!itemSource||sourceId===itemSource);
+          });
+          const owner=matches.find(entry=>entry.obj.id===caption.ownerClipId)||matches[0];
+          if(owner){caption.ownerClipId=owner.obj.id;caption.ownerClipType=owner.type;continue;}
+          caption.ownerClipId='';caption.ownerClipType='';
+          delete caption.sourceStart;delete caption.sourceEnd;
+          for(const word of caption.words||[]){delete word.sourceStart;delete word.sourceEnd;}
+        }
+        recomputeContentDuration();
+        renderAll();
         queueAutosave();
         toast('已删除重复片段及对应字幕、音视频');
       }
@@ -1405,19 +1610,31 @@ function polishSectionHtml(title, rows, emptyText) {
         renderAll();
         toast("已把这段口语补充插入正确字幕");
       }
-      function removeIssueWords(issueId, start, end) {
+      function removeIssueWords(issueId, start, end, scope = {}) {
+        const scopedIssueId = String(issueId || '');
+        const cutStart = Number(start), cutEnd = Number(end);
+        if (!scopedIssueId || !Number.isFinite(cutStart) || !Number.isFinite(cutEnd) || cutEnd <= cutStart) return;
+        const overlapsRange = word => {
+          const wordStart = Number(word?.start), wordEnd = Number(word?.end);
+          return Number.isFinite(wordStart) && Number.isFinite(wordEnd) &&
+            Math.min(wordEnd,cutEnd) - Math.max(wordStart,cutStart) > .005;
+        };
+        const belongsToIssueScope = caption => {
+          if (scope?.ownerClipId && caption.ownerClipId && caption.ownerClipId !== scope.ownerClipId) return false;
+          if (scope?.sourceMediaId && caption.sourceMediaId && caption.sourceMediaId !== scope.sourceMediaId) return false;
+          return !scope?.captionTrackId || (caption.trackId || 'caption') === scope.captionTrackId;
+        };
         state.captions = state.captions
           .map((caption) => {
             if (!Array.isArray(caption.words) || !caption.words.length)
               return caption;
             const words = caption.words.filter((word) => {
-              if (word.issueId === issueId) return false;
+              if (!belongsToIssueScope(caption)) return true;
+              const overlaps = overlapsRange(word);
+              if (word.issueId === scopedIssueId) return !overlaps;
               if (word.issueId) return true;
-              const overlap =
-                Math.min(Number(word.end || 0), end) -
-                Math.max(Number(word.start || 0), start);
               return !(
-                overlap > 0.005 &&
+                overlaps &&
                 word.matchType === "error" &&
                 ["extra", "repeat"].includes(word.issueType)
               );
@@ -1621,10 +1838,14 @@ function polishSectionHtml(title, rows, emptyText) {
           state.duration,
           Math.max(start + 0.04, Number(issue.end || 0)),
         );
+        if (issue.type === 'repeat' && !repeatCutPreservesCaptionText(start,end)) {
+          if (!quiet) toast('疑似重复范围覆盖了全部文案，已取消删除以保护工程');
+          return;
+        }
         if (!mainAudioClips().some(c=>c.start<end&&c.end>start) &&
             state.audioAssets.some(c=>c.start<end&&c.end>start)) {
           if (record) snapshot();
-          removeIssueWords(id,start,end);
+          removeIssueWords(id,start,end,issue);
           dismissTrimmedIssues(start,end);
           // Independent clips already own their source ranges. Cut the placed
           // timeline directly; mapping through removed main media is invalid.
@@ -1640,7 +1861,7 @@ function polishSectionHtml(title, rows, emptyText) {
           return;
         }
         if (record) snapshot();
-        removeIssueWords(id, start, end);
+        removeIssueWords(id, start, end, issue);
         state.removals.push({
           start: sourceStart,
           end: sourceEnd,

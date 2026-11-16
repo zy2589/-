@@ -2,6 +2,7 @@ import {readLargeJson,writeLargeJson} from './large-json-file.mjs';
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { Worker } from "node:worker_threads";
 import { notifyCacheActivity } from './cache-service.mjs';
 import { writeProjectMetadata, queryProjectCatalog } from './project-catalog.mjs';
 import { supportRoot } from "./media.mjs";
@@ -36,6 +37,7 @@ const HISTORY_LIMIT = 20;
 const HISTORY_INTERVAL_MS = 60_000;
 const permanentlyDeletedProjectIds = new Set();
 const deletingProjectIds = new Set();
+const projectTrashCleanupJobs = new Set();
 let legacyDeletionIndexLoaded = false;
 
 function loadLegacyDeletedProjects() {
@@ -47,7 +49,10 @@ function loadLegacyDeletedProjects() {
       const tombstone = entry.name.match(/^([a-f0-9-]{24,64})\.deleted$/i);
       if (entry.isFile() && tombstone) permanentlyDeletedProjectIds.add(tombstone[1]);
       const match = entry.name.match(/^([a-f0-9-]{24,64})-\d{10,16}$/i);
-      if (entry.isDirectory() && match) permanentlyDeletedProjectIds.add(match[1]);
+      if (entry.isDirectory() && match) {
+        permanentlyDeletedProjectIds.add(match[1]);
+        removeProjectTrashInBackground(path.join(trashRoot, entry.name));
+      }
     }
   } catch {}
   for (const root of projectRoots()) {
@@ -287,69 +292,21 @@ function projectFolderHidden(directory) {
   );
 }
 
-function collectProjectCachePaths(value, output = new Set()) {
-  if (!value || typeof value !== "object") return output;
-  if (Array.isArray(value)) {
-    for (const child of value) collectProjectCachePaths(child, output);
-    return output;
+function removeProjectTrashInBackground(directory) {
+  if (projectTrashCleanupJobs.has(directory)) return;
+  projectTrashCleanupJobs.add(directory);
+  const match = path.basename(directory).match(/^([a-f0-9-]{24,64})-\d{10,16}$/i);
+  if (!match) {
+    projectTrashCleanupJobs.delete(directory);
+    return;
   }
-  for (const [key, child] of Object.entries(value)) {
-    if (["previewPath", "projectCoverPath", "thumbnailPath"].includes(key) &&
-        typeof child === "string" && child) output.add(path.resolve(child).toLowerCase());
-    else if (child && typeof child === "object") collectProjectCachePaths(child, output);
-  }
-  return output;
-}
-
-function projectCachePathsInDirectory(id, directory) {
-  const paths = new Set();
-  const files = [path.join(directory, "project.json"),
-    ...historyFiles(id).map(name => path.join(directory, "autosave-history", name))];
-  for (const file of files) {
-    try {
-      if (fs.existsSync(file)) collectProjectCachePaths(readLargeJson(file), paths);
-    } catch {}
-  }
-  return paths;
-}
-
-function isInsideCacheRoot(file, roots) {
-  return roots.some(root => inside(root, file));
-}
-
-function cachePathHasSymlink(file, root) {
-  for (let current = path.resolve(file); ; current = path.dirname(current)) {
-    try {
-      if (fs.lstatSync(current).isSymbolicLink()) return true;
-    } catch {
-      return false;
-    }
-    if (current === path.resolve(root)) return false;
-    if (!inside(root, current)) return true;
-  }
-}
-
-function otherProjectCacheReferences(projectId) {
-  const refs = new Set();
-  for (const root of projectRoots()) {
-    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-      if (!entry.isDirectory() || entry.name === projectId ||
-          !/^[a-f0-9-]{24,64}$/i.test(entry.name)) continue;
-      const directory = path.join(root, entry.name);
-      if (fs.existsSync(path.join(directory, ".deleted"))) continue;
-      for (const file of projectCachePathsInDirectory(entry.name, directory)) refs.add(file);
-    }
-  }
-  return refs;
-}
-
-function oldProjectTrashPaths(id) {
-  const trashRoot = path.join(supportRoot(), "deleted-projects");
-  try {
-    return fs.readdirSync(trashRoot, { withFileTypes: true })
-      .filter(entry => entry.isDirectory() && entry.name.startsWith(`${id}-`))
-      .map(entry => path.join(trashRoot, entry.name));
-  } catch { return []; }
+  const worker = new Worker(new URL("./project-trash-cleaner.mjs", import.meta.url), {
+    workerData: { projectId: match[1], directory, root: supportRoot() },
+    execArgv: process.execArgv.filter(arg => !arg.startsWith("--input-type")),
+  });
+  worker.on("error", () => {});
+  worker.on("exit", () => projectTrashCleanupJobs.delete(directory));
+  worker.unref();
 }
 
 export async function deleteProject(id, options = {}) {
@@ -371,64 +328,43 @@ export async function deleteProject(id, options = {}) {
   let tombstonePath = "";
   let tombstoneTemp = "";
   try {
-    const checkTree = async directory => {
-      if ((await fs.promises.lstat(directory)).isSymbolicLink()) throw new Error("工程包含链接，已跳过删除");
-      for (const entry of await fs.promises.readdir(directory, { withFileTypes: true })) {
-        if (entry.isSymbolicLink()) throw new Error("工程包含链接，已跳过删除");
-        if (entry.isDirectory()) await checkTree(path.join(directory, entry.name));
-      }
-    };
-    await checkTree(source);
-    if (options.updatedAt && loadProject(id).updatedAt !== options.updatedAt)
-      throw new Error("工程已更新，已跳过删除，请刷新后重新选择");
-
-    const cachePaths = projectCachePathsInDirectory(id, source);
-    const cacheRoots = [path.join(supportRoot(), "previews"), path.join(supportRoot(), "temp")];
-    const externalCaches = [...cachePaths].filter(file => isInsideCacheRoot(file, cacheRoots));
-    const sharedReferences = otherProjectCacheReferences(id);
-
     const deletionIndex = path.join(supportRoot(), "deleted-projects");
     await fs.promises.mkdir(deletionIndex, { recursive: true, mode: 0o700 });
     const indexStat = await fs.promises.lstat(deletionIndex);
     if (!indexStat.isDirectory() || indexStat.isSymbolicLink())
       throw new Error("工程删除索引目录无效，已停止删除。");
+    if (options.updatedAt && loadProject(id).updatedAt !== options.updatedAt)
+      throw new Error("工程已更新，已跳过删除，请刷新后重新选择");
+    if ((await fs.promises.lstat(source)).isSymbolicLink())
+      throw new Error("不能删除链接工程目录");
+    const trashDirectory = path.join(deletionIndex, `${id}-${Date.now()}`);
     tombstonePath = path.join(deletionIndex, `${id}.deleted`);
     tombstoneTemp = `${tombstonePath}.${crypto.randomUUID()}.tmp`;
     await fs.promises.writeFile(tombstoneTemp, `${new Date().toISOString()}\n`, { flag: "wx", mode: 0o600 });
-    await fs.promises.rename(tombstoneTemp, tombstonePath);
-    tombstoneTemp = "";
-    permanentlyDeletedProjectIds.add(id);
-    deletionStarted = true;
     try {
-      await fs.promises.rm(source, { recursive: true, force: false, maxRetries: 8, retryDelay: 100 });
+      // Both paths live under supportRoot, so this rename is a quick same-volume
+      // operation. Recursive removal can then run without blocking the UI.
+      await fs.promises.rename(source, trashDirectory);
+      permanentlyDeletedProjectIds.add(id);
+      deletionStarted = true;
+      try {
+        await fs.promises.rename(tombstoneTemp, tombstonePath);
+        tombstoneTemp = "";
+      } catch {
+        // The timestamped trash directory also marks the project as deleted.
+      }
+      removeProjectTrashInBackground(trashDirectory);
+      notifyCacheActivity();
+      return { deleted: true, cleanupPending: true, cacheFilesRemoved: 0, cacheCleanupFailures: 0 };
     } catch (error) {
-      if (fs.existsSync(path.join(source, "project.json"))) {
-        permanentlyDeletedProjectIds.delete(id);
-        deletionStarted = false;
-        await fs.promises.rm(tombstonePath, { force: true }).catch(() => {});
-        tombstonePath = "";
+      await fs.promises.rm(tombstonePath, { force: true }).catch(() => {});
+      tombstonePath = "";
+      if (!fs.existsSync(source)) {
+        permanentlyDeletedProjectIds.add(id);
+        deletionStarted = true;
       }
       throw new Error("工程永久删除失败：" + error.message);
     }
-
-    let cacheFilesRemoved = 0;
-    let cacheCleanupFailures = 0;
-    for (const file of externalCaches) {
-      if (sharedReferences.has(file) || !fs.existsSync(file)) continue;
-      const root = cacheRoots.find(candidate => inside(candidate, file));
-      if (!root || cachePathHasSymlink(file, root)) { cacheCleanupFailures++; continue; }
-      try {
-        const stat = await fs.promises.lstat(file);
-        if (!stat.isFile() || stat.isSymbolicLink()) { cacheCleanupFailures++; continue; }
-        await fs.promises.rm(file, { force: true, maxRetries: 5, retryDelay: 100 });
-        cacheFilesRemoved++;
-      } catch { cacheCleanupFailures++; }
-    }
-    for (const oldTrash of oldProjectTrashPaths(id)) {
-      try { await fs.promises.rm(oldTrash, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
-      catch { cacheCleanupFailures++; }
-    }
-    return { deleted: true, cacheFilesRemoved, cacheCleanupFailures };
   } finally {
     deletingProjectIds.delete(id);
     if (tombstoneTemp) await fs.promises.rm(tombstoneTemp, { force: true }).catch(() => {});

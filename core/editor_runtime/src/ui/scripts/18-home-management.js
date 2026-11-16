@@ -38,7 +38,7 @@
         const chosen = [...homeSelected].map(([id,updatedAt])=>({id,updatedAt}));
         askConfirm(`确定永久删除选中的 ${chosen.length} 个工程吗？工程文件、媒体副本、自动保存历史和工程专属缓存都会删除，无法恢复。`,async () => {
           homeBusy = true; updateHomeSelection();
-          let succeeded=0, cleanupFailures=0; const failed=[];
+          let succeeded=0, cleanupFailures=0, cleanupPending=0; const failed=[];
           try {
             for (const item of chosen) {
               try {
@@ -46,12 +46,13 @@
                 const result = await nativeCall('deleteSelectedProject',{...item,permanent:true});
                 if (!result) throw Error('工程不存在或已删除');
                 cleanupFailures += Number(result.cacheCleanupFailures || 0);
+                cleanupPending += Number(result.cleanupPending === true);
                 succeeded++; homeSelected.delete(item.id);
               } catch(error) { failed.push(error.message); }
               $('homeSelectedCount').textContent = '正在删除 '+(succeeded+failed.length)+' / '+chosen.length;
             }
           } finally { homeBusy=false; updateHomeSelection(); await refreshHome(); }
-          toast('已永久删除 '+succeeded+' 个工程；缓存未清理 '+cleanupFailures+' 个；失败 '+failed.length+' 个'+(failed.length?'：'+[...new Set(failed)].join('；'):''));
+          toast('已从列表移除 '+succeeded+' 个工程，后台清理 '+cleanupPending+' 个；缓存未清理 '+cleanupFailures+' 个；失败 '+failed.length+' 个'+(failed.length?'：'+[...new Set(failed)].join('；'):''));
         },'永久删除工程');
       };
       let homeCacheTicket = null;

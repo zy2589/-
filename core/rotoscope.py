@@ -17,7 +17,7 @@ from tkinter import filedialog, messagebox, ttk
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageTk
 from tkinterdnd2 import DND_FILES
-from .downloader_runtime.desktop_ui import bind_scale_wheel
+from .downloader_runtime.desktop_ui import PALETTES, bind_scale_wheel, native_caption
 
 
 MAX_PREVIEW_MASKS = 1200
@@ -97,7 +97,9 @@ def _predict_person_probability(rgb, session):
     if input_info.name == 'image':
         model_mean = np.array([143.55267075, 132.96705975, 126.94924335], dtype=np.float32)
         model_std = np.array([60.2625333, 60.32740275, 59.30988645], dtype=np.float32)
-        pad_color = tuple(int(x) for x in model_mean)
+        # Pixels are RGB here and converted to BGR below. Reverse the mean
+        # before filling the letterbox so padding normalizes to zero.
+        pad_color = tuple(int(x) for x in model_mean[::-1])
     else:
         # Compatibility with the previous PP-HumanSeg ONNX model.
         model_mean = np.array([127.5, 127.5, 127.5], dtype=np.float32)
@@ -126,6 +128,12 @@ def _predict_person_probability(rgb, session):
     if probability.min() < 0 or probability.max() > 1:
         probability = 1.0 / (1.0 + np.exp(-np.clip(probability, -30, 30)))
     probability = np.clip(probability, 0, 1).astype(np.float32, copy=False)
+    # Compatible model exports may emit a lower-resolution logits grid. Bring
+    # it back to input coordinates before cropping the letterbox; otherwise
+    # the input-sized padding offsets shift the preview mask.
+    if probability.shape != (person_h, person_w):
+        probability = np.asarray(Image.fromarray(probability, mode='F').resize(
+            (person_w, person_h), Image.Resampling.BILINEAR), dtype=np.float32)
     unpadded = probability[pad_y:pad_y + resized_h, pad_x:pad_x + resized_w]
     return np.asarray(Image.fromarray(unpadded, mode='F').resize(
         (person_w, person_h), Image.Resampling.BILINEAR), dtype=np.float32)
@@ -388,6 +396,13 @@ def _render_smart_corrections(strokes, reference_bbox, person_probability, frame
 
 def _create_ort_session(ort, model_path, session_options):
     """Prefer CUDA, then DirectML, then CPU; report the backend actually used."""
+    # Load the CUDA wheel's bundled DLL dependencies before constructing any
+    # session, including person selection and timeline preview.
+    if hasattr(ort, 'preload_dlls'):
+        try:
+            ort.preload_dlls()
+        except Exception:
+            pass
     available = set(ort.get_available_providers())
     failures = []
     for provider in ('CUDAExecutionProvider', 'DmlExecutionProvider', 'CPUExecutionProvider'):
@@ -437,6 +452,7 @@ class RotoscopeWindow:
             initial_h = min(900, max(640, screen_h - 120))
             self.window.geometry(f'{initial_w}x{initial_h}')
             self.window.minsize(min(760, screen_w), min(560, screen_h))
+            self.window.after_idle(lambda: native_caption(self.window, PALETTES['深色'], True))
         self.video = tk.StringVar()
         self.sample_time = tk.StringVar(value='1')
         self.video_fps = 30.0
@@ -483,6 +499,7 @@ class RotoscopeWindow:
         self.provider_name = 'CPU'
         self.progress_started_at = None
         self.progress_started_count = 0
+        self.progress_last_label_update = 0.0
         self.export_started_at = None
         self.active_export_repair_alpha = False
         self.active_export_format = ''
@@ -626,9 +643,14 @@ class RotoscopeWindow:
         progress_row = ttk.Frame(controls)
         progress_row.pack(fill='x', pady=(5, 0))
         ttk.Label(progress_row, textvariable=self.status, wraplength=700).pack(side='left', fill='x', expand=True)
-        self.progress = ttk.Progressbar(progress_row, mode='determinate', maximum=100, length=180)
+        ttk.Style(self.window).configure(
+            'Cutout.Horizontal.TProgressbar', background='#29c98a', troughcolor='#25282c',
+            bordercolor='#25282c', lightcolor='#29c98a', darkcolor='#29c98a',
+        )
+        self.progress = ttk.Progressbar(progress_row, style='Cutout.Horizontal.TProgressbar',
+                                         mode='determinate', maximum=100, length=180)
         self.progress.pack(side='right', padx=(8, 0), fill='x', expand=True)
-        ttk.Label(progress_row, textvariable=self.progress_text, width=35, anchor='e').pack(side='right', padx=(8, 4))
+        ttk.Label(progress_row, textvariable=self.progress_text, width=52, anchor='e').pack(side='right', padx=(8, 4))
 
     def _enable_drop(self):
         for widget in (self.window, self.path_entry, self.canvas):
@@ -682,7 +704,7 @@ class RotoscopeWindow:
         self.active_contour = None
         self.active_background_stroke = None
         self.bounds = None
-        self._sync_job_controls()
+        self._sync_job_controls(reset_progress=True)
         self.sample_time.set('1')
         self.total_frames = 0
         self.timeline_value.set(0)
@@ -1352,11 +1374,7 @@ class RotoscopeWindow:
             if not model.is_file():
                 raise RuntimeError(f'找不到人物识别模型：{model}')
             options = ort.SessionOptions()
-            providers = ['DmlExecutionProvider', 'CPUExecutionProvider'] if 'DmlExecutionProvider' in ort.get_available_providers() else ['CPUExecutionProvider']
-            if providers[0] == 'DmlExecutionProvider':
-                options.enable_mem_pattern = False
-                options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-            session = ort.InferenceSession(str(model), sess_options=options, providers=providers)
+            session, _provider = _create_ort_session(ort, model, options)
             probability = _predict_person_probability(np.asarray(image, dtype=np.uint8), session)
             px = point[0] * probability.shape[1] / image.width
             py = point[1] * probability.shape[0] / image.height
@@ -1399,11 +1417,7 @@ class RotoscopeWindow:
                 raise RuntimeError('找不到 FFmpeg，无法生成逐帧人物预览。')
             model = self._person_model_path()
             options = ort.SessionOptions()
-            providers = ['DmlExecutionProvider', 'CPUExecutionProvider'] if 'DmlExecutionProvider' in ort.get_available_providers() else ['CPUExecutionProvider']
-            if providers[0] == 'DmlExecutionProvider':
-                options.enable_mem_pattern = False
-                options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-            session = ort.InferenceSession(str(model), sess_options=options, providers=providers)
+            session, _provider = _create_ort_session(ort, model, options)
             with self._mask_scan_lock:
                 if scan_generation != self.mask_scan_generation:
                     return
@@ -1485,6 +1499,9 @@ class RotoscopeWindow:
             messagebox.showwarning('先点选人物', '请先在预览画面中点击要保留的人物，看到绿色识别预览后再导出。', parent=self.window)
             return
         repair_alpha = bool(self.repair_alpha_mode.get())
+        if not repair_alpha and not self.smart_select_mode.get() and not (self.bounds or self.contour_points):
+            messagebox.showwarning('先标出抠图范围', '请先点击“智能选人”并点选人物，或切换到“粗略人物范围”标出要保留的区域，再导出。', parent=self.window)
+            return
         if repair_alpha and (self.loaded_repair_mode is not True or self.repair_alpha is None):
             messagebox.showwarning('重新读取透明成片', '请在勾选成片修复模式后重新读取带 Alpha 通道的视频。', parent=self.window)
             return
@@ -1503,7 +1520,7 @@ class RotoscopeWindow:
         if not source.is_file():
             messagebox.showwarning('重新读取视频', '只能处理本地视频文件，请重新选择并读取视频。', parent=self.window)
             return
-        source_key = str(source)
+        source_key = self._source_key(source)
         if source_key in self.export_jobs:
             self.status.set('这个视频已经在抠图任务中。')
             return
@@ -1533,6 +1550,10 @@ class RotoscopeWindow:
             return
         if output_path.exists() and not messagebox.askyesno('覆盖文件', f'文件已存在，是否覆盖？\n{output_path}', parent=self.window):
             return
+        # The subject-guided timeline preview can still be scanning sampled
+        # frames. Pause it before export so it cannot compete with RVM for GPU
+        # memory or CPU time; cached preview masks remain available.
+        self._cancel_mask_scan(clear_cache=False)
         width, height = self.image.size
         preview_w, preview_h, offset_x, offset_y = self.photo_size
         if self.bounds and not self.smart_select_mode.get():
@@ -1584,7 +1605,10 @@ class RotoscopeWindow:
         job.cancel_event = threading.Event()
         job.provider_name = 'CPU'
         self.export_jobs[source_key] = {'engine': job, 'cancel_event': job.cancel_event,
-                                        'progress': 0.0, 'state': '排队中'}
+                                        'progress': 0.0, 'state': '排队中',
+                                        'started_at': None, 'progress_started_at': None,
+                                        'progress_started_count': 0,
+                                        'progress_last_label_update': 0.0}
         self.is_exporting = True
         self.cancel_button.configure(state='normal')
         self.status.set('任务已加入后台队列。')
@@ -1598,30 +1622,37 @@ class RotoscopeWindow:
 
         def run_job():
             semaphore = getattr(self.app, 'cutout_semaphore', None)
-            if semaphore:
-                semaphore.acquire()
-            if job.cancel_event.is_set():
-                self.events.put(('job_done', source_key, None, '', True, 0.0))
-                if semaphore:
-                    semaphore.release()
-                return
-            started = time.monotonic()
-            self.events.put(('job_started', source_key))
-            worker = threading.Thread(target=job._export_worker, args=args, daemon=True)
-            worker.start()
+            acquired = False
             try:
+                if semaphore:
+                    while not job.cancel_event.is_set():
+                        acquired = semaphore.acquire(timeout=0.2)
+                        if acquired:
+                            break
+                if job.cancel_event.is_set():
+                    self.events.put(('job_done', source_key, None, '', True, 0.0))
+                    return
+                started = time.monotonic()
+                self.events.put(('job_started', source_key, started))
+                worker = threading.Thread(target=job._export_worker, args=args, daemon=True)
+                worker.start()
                 while True:
                     event = job.events.get()
                     if event[0] == 'progress':
                         _, count, total, provider = event
                         self.events.put(('job_progress', source_key, count, total, provider))
+                    elif event[0] == 'phase':
+                        self.events.put(('job_phase', source_key, event[1]))
                     elif event[0] == 'done':
                         _, error, output, cancelled = event
                         self.events.put(('job_done', source_key, error, output, cancelled,
                                          time.monotonic() - started))
                         break
+            except Exception as exc:
+                self.events.put(('job_done', source_key, str(exc), str(output_path), False,
+                                 0.0))
             finally:
-                if semaphore:
+                if semaphore and acquired:
                     semaphore.release()
 
         threading.Thread(target=run_job, daemon=True).start()
@@ -1724,7 +1755,7 @@ class RotoscopeWindow:
                             self._show_image()
                             self.status.set('透明成片已读取。点选人物建立逐帧跟踪，再用“减去保留”涂掉残留；只修改 Alpha。')
                         else:
-                            self.status.set('读取完成。点击“智能选人”后，在人物身体内部点一下；绿色区域为识别预览。')
+                            self.status.set('视频已读取，尚未开始抠图。点击人物身体内部一点后，才会识别人物并生成预览。')
                 elif event[0] == 'selection_preview':
                     _, generation, repair_mode, mask, error, scan_generation = event
                     if generation != self.selection_generation:
@@ -1767,12 +1798,12 @@ class RotoscopeWindow:
                 elif event[0] == 'mask_scan_progress':
                     _, scan_generation, count = event
                     if scan_generation == self.mask_scan_generation and self.mask_scan_running:
-                        self.status.set(f'后台识别全片人物轮廓：已完成 {count:,} 帧；时间轨可继续拖动预览。')
+                        self.status.set(f'后台生成时间轴预览蒙版（尚未导出）：{count:,} 帧；时间轨可继续拖动。')
                 elif event[0] == 'mask_scan_done':
                     _, scan_generation, count = event
                     if scan_generation == self.mask_scan_generation:
                         self.mask_scan_running = False
-                        self.status.set(f'全片人物轮廓已生成：{count:,} 帧。拖动时间轨可逐帧查看并用笔刷修正。')
+                        self.status.set(f'时间轴预览蒙版已就绪：{count:,} 帧。点击“导出透明视频”后才开始正式抠图。')
                 elif event[0] == 'mask_scan_error':
                     _, scan_generation, error = event
                     if scan_generation == self.mask_scan_generation:
@@ -1780,39 +1811,33 @@ class RotoscopeWindow:
                         self.status.set(f'全片蒙版后台识别失败：{error}')
                 elif event[0] == 'progress':
                     _, count, total, provider = event
-                    percent = min(100, count * 100 / total) if total else 0
+                    now = time.monotonic()
+                    if self.progress_started_at is None:
+                        self.progress_started_at = now
+                        self.progress_started_count = count
+                    percent, summary = self._progress_summary(
+                        count, total, self.export_started_at, self.progress_started_at,
+                        self.progress_started_count, now)
+                    percent = max(float(self.progress['value']), percent)
                     if self.embedded and self.app:
                         self.app.on_cutout_progress(self.video.get(), percent, count, total)
                     self.progress.configure(value=percent)
                     total_text = f'{total:,}' if total else '未知'
-                    percent_text = f'{percent:.1f}%' if total else '计算中'
-                    now = time.monotonic()
-                    elapsed = max(0.1, now - (self.export_started_at or now))
-                    if self.progress_started_at is None:
-                        self.progress_started_at = now
-                        self.progress_started_count = count
-                    measured_seconds = now - self.progress_started_at
-                    measured_frames = max(0, count - self.progress_started_count)
-                    current_fps = measured_frames / measured_seconds if measured_seconds > 0 else 0.0
-                    # Model/session initialization and first-frame GPU compilation
-                    # can take several seconds. Exclude that warm-up from ETA and
-                    # wait for enough real frames before showing a prediction.
-                    if total and count >= 90 and measured_seconds >= 10 and measured_frames:
-                        remaining = max(0, (total - count) * measured_seconds / measured_frames)
-                        eta_text = self._format_remaining(remaining)
-                    else:
-                        eta_text = '模型预热中' if count < 90 else '正在测算速度'
-                    speed_text = f'{current_fps:.1f}帧/秒' if current_fps else '测算速度中'
-                    self.progress_text.set(f'{percent_text} · {speed_text} · 已用 {self._format_remaining(elapsed)} · 预计剩余 {eta_text}')
+                    self.progress_text.set(summary)
                     action = '修复 Alpha' if self.active_export_repair_alpha else '抠像'
                     self.status.set(f'{action}中 {count:,}/{total_text} 帧 · {provider}')
                 elif event[0] == 'job_started':
-                    _, source = event
+                    _, source, started = event
                     job_state = self.export_jobs.get(source)
                     if job_state:
                         job_state['state'] = '处理中'
+                        job_state['started_at'] = started
+                        job_state['progress_last_label_update'] = 0.0
                     if self.embedded and self.app:
                         self.app.on_cutout_started(source)
+                    if self._is_current_source(source):
+                        self.progress_text.set('加载模型并准备视频…')
+                        self.status.set('正在加载模型并准备人物轮廓…')
                 elif event[0] == 'job_progress':
                     _, source, count, total, provider = event
                     job_state = self.export_jobs.get(source)
@@ -1821,17 +1846,40 @@ class RotoscopeWindow:
                         job_state['progress'] = percent
                     if self.embedded and self.app:
                         self.app.on_cutout_progress(source, percent, count, total)
-                    if source == self.video.get():
+                    if self._is_current_source(source):
+                        now = time.monotonic()
+                        if job_state and job_state['progress_started_at'] is None:
+                            job_state['progress_started_at'] = now
+                            job_state['progress_started_count'] = count
+                        percent, summary = self._progress_summary(
+                            count, total, (job_state or {}).get('started_at'),
+                            (job_state or {}).get('progress_started_at'),
+                            (job_state or {}).get('progress_started_count', count), now)
+                        percent = max(float(self.progress['value']), percent)
+                        if job_state:
+                            job_state['progress'] = percent
                         self.progress.configure(value=percent)
-                        self.progress_text.set(f'{percent:.1f}% · {count:,}/{total:,} 帧' if total else f'已处理 {count:,} 帧')
-                        self.status.set(f'抠图处理中 · {provider}')
+                        last_label_update = (job_state or {}).get('progress_last_label_update', 0.0)
+                        if not last_label_update or now - last_label_update >= 2.5 or percent >= 100:
+                            self.progress_text.set(summary)
+                            self.status.set(f'抠图处理中 {count:,}/{total:,} 帧 · {provider}' if total else f'抠图处理中 · {provider}')
+                            if job_state:
+                                job_state['progress_last_label_update'] = now
+                elif event[0] == 'job_phase':
+                    _, source, phase = event
+                    job_state = self.export_jobs.get(source)
+                    if job_state:
+                        job_state['state'] = '正在收尾'
+                    if self._is_current_source(source):
+                        self.progress_text.set(f'{self.progress["value"]:.1f}% · 正在收尾')
+                        self.status.set(phase)
                 elif event[0] == 'job_done':
                     _, source, error, output, cancelled, elapsed = event
                     self.export_jobs.pop(source, None)
                     self.is_exporting = bool(self.export_jobs)
                     if self.embedded and self.app:
                         self.app.on_cutout_done(source, error, output, cancelled)
-                    if source == self.video.get():
+                    if self._is_current_source(source):
                         if error or cancelled:
                             self.progress_text.set('已取消' if cancelled else '抠图失败')
                             self.status.set('已取消抠图' if cancelled else f'抠图失败：{error}')
@@ -1839,8 +1887,18 @@ class RotoscopeWindow:
                             self.progress.configure(value=100)
                             self.progress_text.set(f'100% · 完成 · 用时 {self._format_remaining(elapsed)}')
                             self.status.set(f'抠图完成：{Path(output).name}')
+                        if not self.embedded and not self.close_when_finished:
+                            if error and not cancelled:
+                                messagebox.showerror('人物抠像失败', error, parent=self.window)
+                            elif not error and not cancelled:
+                                messagebox.showinfo('导出完成', f'透明视频已保存：\n{output}', parent=self.window)
                     self._sync_job_controls()
+                    if self.close_when_finished and not self.is_exporting:
+                        self._destroy_window()
                 elif event[0] == 'status':
+                    self.status.set(event[1])
+                elif event[0] == 'phase':
+                    self.progress_text.set(f'{self.progress["value"]:.1f}% · 正在收尾')
                     self.status.set(event[1])
                 elif event[0] == 'done':
                     _, error, output, cancelled = event
@@ -1864,6 +1922,37 @@ class RotoscopeWindow:
         if minutes:
             return f'{minutes}分{seconds:02d}秒'
         return f'{seconds}秒'
+
+    @staticmethod
+    def _source_key(path):
+        """Normalize local paths so slash and case differences still match."""
+        return os.path.normcase(str(Path(path).expanduser().resolve(strict=False)))
+
+    def _is_current_source(self, path):
+        try:
+            return self._source_key(path) == self._source_key(self.video.get())
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return False
+
+    @classmethod
+    def _progress_summary(cls, count, total, started_at, sample_started_at,
+                          sample_started_count, now=None):
+        now = time.monotonic() if now is None else now
+        percent = min(100.0, count * 100 / total) if total else 0.0
+        if sample_started_at is None:
+            sample_started_at, sample_started_count = now, count
+        measured_seconds = now - sample_started_at
+        measured_frames = max(0, count - sample_started_count)
+        current_fps = measured_frames / measured_seconds if measured_seconds > 0 else 0.0
+        if total and count >= 90 and measured_seconds >= 10 and measured_frames:
+            eta = cls._format_remaining(max(0, (total - count) * measured_seconds / measured_frames))
+        else:
+            eta = '模型预热中' if count < 90 else '正在测算速度'
+        speed = f'{current_fps:.1f}帧/秒' if current_fps else '测算速度中'
+        elapsed = cls._format_remaining(now - started_at) if started_at else '0秒'
+        if total:
+            return percent, f'{percent:.1f}% · {speed} · 已用 {elapsed} · 预计剩余 {eta}'
+        return percent, f'已处理 {count:,} 帧 · {speed} · 已用 {elapsed}'
 
     def _export_done(self, error, output, cancelled=False):
         if not self.window.winfo_exists():
@@ -2321,6 +2410,7 @@ class RotoscopeWindow:
                 count += 1
                 if count % 3 == 0:
                     self.events.put(('progress', count, total_frames, self.provider_name))
+            self.events.put(('phase', '所有帧已处理，正在写入并封装视频…'))
         except Exception as exc:
             failure = exc
         finally:
@@ -2373,6 +2463,7 @@ class RotoscopeWindow:
             raise RuntimeError(f'源视频解码失败（退出码 {decoder.returncode}）：\n{decoder_error or ffmpeg}')
         if count == 0:
             raise RuntimeError('视频中没有可处理的视频帧。')
+        self.events.put(('phase', '视频已写入，正在校验透明通道…'))
         self._verify_output_alpha(ffmpeg, ffprobe, output, compact)
         self.events.put(('progress', count, total_frames or count, self.provider_name))
 
@@ -2439,7 +2530,7 @@ class RotoscopeWindow:
             sample.unlink(missing_ok=True)
 
     def cancel_export(self):
-        source = self.video.get()
+        source = self._source_key(self.video.get()) if self.video.get() else ''
         job = self.export_jobs.get(source)
         if job:
             job['cancel_event'].set()
@@ -2450,23 +2541,24 @@ class RotoscopeWindow:
         for job in self.export_jobs.values():
             job['cancel_event'].set()
 
-    def _sync_job_controls(self):
+    def _sync_job_controls(self, reset_progress=False):
         if not self.export_button or not self.export_button.winfo_exists():
             return
-        running = self.video.get() in self.export_jobs
+        source = self._source_key(self.video.get()) if self.video.get() else ''
+        running = source in self.export_jobs
         self.export_button.configure(state='disabled' if running else 'normal')
         self.cancel_button.configure(state='normal' if running else 'disabled')
-        job = self.export_jobs.get(self.video.get())
+        job = self.export_jobs.get(source)
         if job:
             self.progress.configure(value=job.get('progress', 0))
-            self.status.set('视频正在后台抠图…' if job.get('state') == '处理中' else '视频在等待处理…')
-        else:
+            self.status.set('视频正在后台抠图…' if job.get('state') in ('处理中', '正在收尾') else '视频在等待处理…')
+        elif reset_progress:
             self.progress.configure(value=0)
 
     def close(self):
         if self.is_exporting:
             self.close_when_finished = True
-            self.cancel_export()
+            self.cancel_all_exports()
             self.status.set('正在取消抠像，完成清理后关闭窗口…')
             return
         self._destroy_window()

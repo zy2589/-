@@ -108,9 +108,9 @@ class EmbeddedEditor:
                  native_parent: tk.Widget | None = None):
         self.root = root
         self.frame = frame
-        # Parent the WinForms/WebView2 HWND beside the stacked Tk area frames,
-        # not beneath the Projects frame. This lets us order it with the active
-        # page without hiding/recreating the browser surface on every switch.
+        # Parent the WinForms/WebView2 HWND directly to the Tk host that owns
+        # its display area. Tk then clips and stacks the whole editor with the
+        # Projects page, avoiding a separate sibling-HWND reorder on navigation.
         self.native_parent = native_parent or frame
         self.engine_dir = Path(engine_dir)
         self.storage_root = Path(storage_root)
@@ -124,7 +124,6 @@ class EmbeddedEditor:
         self._close_deadline = 0.0
         self._resize_after_id = None
         self._last_bounds = None
-        self._page_active = False
         self.workspace_mode = "edit"
         self.frame.bind("<Configure>", self._on_configure, add="+")
 
@@ -138,6 +137,25 @@ class EmbeddedEditor:
 
     def is_running(self) -> bool:
         return self.host is not None and not bool(self.host.IsClosed)
+
+    def is_ready(self) -> bool:
+        if not self.is_running():
+            return False
+        try:
+            ready = bool(self.host.IsReady)
+            if ready:
+                self.starting = False
+            return ready
+        except Exception:
+            return False
+
+    def has_failed(self) -> bool:
+        if not self.is_running():
+            return False
+        try:
+            return str(self.host.HostState).lower() == "error"
+        except Exception:
+            return False
 
     def show(self) -> bool:
         if self.closing:
@@ -162,7 +180,6 @@ class EmbeddedEditor:
                 self.starting = True
 
             self.host.ShowEmbedded()
-            self._page_active = True
             if not self.resize(force=True):
                 raise RuntimeError("剪辑工作区无法填满当前主窗口。")
             return True
@@ -227,19 +244,6 @@ class EmbeddedEditor:
             self._fail(f"剪辑工作区尺寸调整失败：{exc}")
             return False
 
-    def set_page_active(self, active: bool) -> None:
-        """Stack the native editor surface with its sibling Tk pages."""
-        active = bool(active)
-        if not self.is_running() or active == self._page_active:
-            return
-        try:
-            if active and not self.resize(force=True):
-                return
-            self.host.SetEmbeddedPageActive(active)
-            self._page_active = active
-        except Exception as exc:
-            self._fail(f"剪辑工作区层级调整失败：{exc}")
-
     def request_close(self, callback: Callable[[bool], None]) -> None:
         if self.close_in_progress:
             return
@@ -283,7 +287,6 @@ class EmbeddedEditor:
             self.host = None
             self.starting = False
             self.closing = False
-            self._page_active = False
         if error:
             self._fail(error)
         if callback:
@@ -300,7 +303,6 @@ class EmbeddedEditor:
                 pass
         self.host = None
         self.starting = False
-        self._page_active = False
 
     def _fail(self, message: str) -> None:
         if self.on_error:

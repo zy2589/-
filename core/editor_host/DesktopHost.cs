@@ -37,7 +37,7 @@ public class DesktopHost : Form
     const uint SWP_NOMOVE = 0x0002;
     const uint SWP_NOSIZE = 0x0001;
     const uint SWP_FRAMECHANGED = 0x0020;
-    readonly WebView2 view = new WebView2();
+    WebView2 view = new WebView2();
     readonly Label status = new Label { Text = "剪辑工作区正在启动…", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Color.White };
     readonly TaskCompletionSource<string> ready = new TaskCompletionSource<string>();
     Process backend;
@@ -134,17 +134,6 @@ public class DesktopHost : Form
     {
         if (!IsDisposed && Visible) Hide();
     }
-    public void SetEmbeddedPageActive(bool active)
-    {
-        if (IsDisposed || !IsHandleCreated) return;
-        // HWND_TOP/HWND_BOTTOM affect only sibling windows under page_stage;
-        // they do not set the application window's always-on-top flag.
-        IntPtr insertAfter = active ? IntPtr.Zero : new IntPtr(1);
-        if (!SetWindowPos(Handle, insertAfter, 0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE))
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "无法调整剪辑工作区页面层级。");
-        Log("EMBEDDED_PAGE_ACTIVE active=" + (active ? "1" : "0"));
-    }
     public void ResizeEmbedded(int x, int y, int width, int height)
     {
         if (IsDisposed || !IsHandleCreated) return;
@@ -216,6 +205,26 @@ public class DesktopHost : Form
             SWP_NOACTIVATE | SWP_FRAMECHANGED | 0x0040))
             throw new Win32Exception(Marshal.GetLastWin32Error(), "无法设置剪辑工作区窗口尺寸。");
     }
+    void ReplaceFailedWebViewControl()
+    {
+        var failed = view;
+        try { Controls.Remove(failed); failed.Dispose(); } catch { }
+        view = new WebView2 { TabStop = true, Dock = DockStyle.Fill };
+        Controls.Add(view);
+        view.CreateControl();
+        status.BringToFront();
+    }
+    async Task InitializeWebViewAsync(string profilePath, CoreWebView2EnvironmentOptions options)
+    {
+        Directory.CreateDirectory(profilePath);
+        var environmentTask = CoreWebView2Environment.CreateAsync(null, profilePath, options);
+        if (await Task.WhenAny(environmentTask, Task.Delay(60000)) != environmentTask)
+            throw new Exception("窗口初始化超时，请查看启动日志。");
+        var environment = await environmentTask;
+        if (closing || IsDisposed) return;
+        if (!view.IsHandleCreated) view.CreateControl();
+        await view.EnsureCoreWebView2Async(environment);
+    }
     void Log(string text) { try { lock(logLock) File.AppendAllText(log, DateTime.Now.ToString("s") + " " + text + Environment.NewLine); } catch {} }
     async Task StartEditor()
     {
@@ -272,11 +281,32 @@ public class DesktopHost : Form
             var options = new CoreWebView2EnvironmentOptions();
             status.Text = "数据准备完成，正在初始化窗口…";
             Log("WEBVIEW_INITIALIZING");
-            var environmentTask = CoreWebView2Environment.CreateAsync(null, Path.Combine(data, "desktop-profile"), options);
-            if (await Task.WhenAny(environmentTask, Task.Delay(60000)) != environmentTask) throw new Exception("窗口初始化超时，请查看启动日志。");
-            var environment = await environmentTask;
-            if (closing || IsDisposed) return;
-            await view.EnsureCoreWebView2Async(environment);
+            string recoveryFlag = Path.Combine(data, "webview-profile-recovery.flag");
+            bool preferRecoveryProfile = File.Exists(recoveryFlag);
+            string firstProfileName = preferRecoveryProfile ? "desktop-profile-recovery" : "desktop-profile";
+            string retryProfileName = preferRecoveryProfile ? "desktop-profile" : "desktop-profile-recovery";
+            Exception firstProfileError = null;
+            try {
+                await InitializeWebViewAsync(Path.Combine(data, firstProfileName), options);
+            } catch (Exception firstError) {
+                if (firstError.HResult != unchecked((int)0x8000FFFF) || closing || IsDisposed) throw;
+                firstProfileError = firstError;
+                Log("WEBVIEW_CONTROLLER_RETRY profile=" + firstProfileName + " hresult=0x8000FFFF");
+            }
+            if (firstProfileError != null) {
+                ReplaceFailedWebViewControl();
+                Exception retryProfileError = null;
+                try {
+                    await InitializeWebViewAsync(Path.Combine(data, retryProfileName), options);
+                } catch (Exception retryError) {
+                    retryProfileError = retryError;
+                }
+                if (retryProfileError != null)
+                    throw new Exception("WebView2 启动失败。主配置：" + firstProfileError.Message + "；恢复配置：" + retryProfileError.Message, retryProfileError);
+                if (retryProfileName == "desktop-profile-recovery") File.WriteAllText(recoveryFlag, DateTime.UtcNow.ToString("O"));
+                else if (File.Exists(recoveryFlag)) File.Delete(recoveryFlag);
+                Log("WEBVIEW_CONTROLLER_RECOVERED profile=" + retryProfileName);
+            }
             if (closing || IsDisposed) return;
             view.CoreWebView2.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
             view.CoreWebView2.WebResourceRequested += (s,e) => {

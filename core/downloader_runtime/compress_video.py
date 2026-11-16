@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import queue
 import subprocess
@@ -12,8 +13,6 @@ from pathlib import Path
 from typing import Callable
 
 
-WIDTH = 1080
-HEIGHT = 1920
 FPS = 30
 CRF = 23
 AUDIO_RATE = "128k"
@@ -93,6 +92,65 @@ def _probe(path: Path, ffprobe: Path, cancel=None) -> dict:
         "fps": fps,
         "audio_bitrate": _int_or_zero(audio.get("bit_rate")) if audio else 0,
     }
+
+
+def _sample_aspect_ratio(video: dict) -> float:
+    sample_aspect = str(video.get("sample_aspect_ratio") or "1:1")
+    try:
+        numerator, denominator = (float(part) for part in sample_aspect.replace("/", ":").split(":", 1))
+        if numerator > 0 and denominator > 0:
+            return numerator / denominator
+    except (TypeError, ValueError):
+        pass
+    return 1.0
+
+
+def _rotation_degrees(video: dict) -> int:
+    rotation = None
+    for side_data in video.get("side_data_list") or []:
+        if side_data.get("rotation") is not None:
+            rotation = _float_or_zero(side_data.get("rotation"))
+            break
+    if rotation is None:
+        try:
+            rotation = float((video.get("tags") or {}).get("rotate", 0))
+        except (TypeError, ValueError):
+            rotation = 0.0
+    return int(round(rotation)) % 360
+
+
+def _display_dimensions(video: dict) -> tuple[float, float]:
+    """Return display dimensions after sample aspect ratio and rotation."""
+    width = float(_int_or_zero(video.get("width")))
+    height = float(_int_or_zero(video.get("height")))
+    if width <= 0 or height <= 0:
+        raise RuntimeError("无法读取视频画面尺寸")
+    width *= _sample_aspect_ratio(video)
+    if _rotation_degrees(video) in (90, 270):
+        width, height = height, width
+    return width, height
+
+
+def _even_display_dimensions(video: dict) -> tuple[int, int]:
+    """Keep the source display size, trimming at most one odd edge pixel for 4:2:0."""
+    display_width, display_height = _display_dimensions(video)
+    width = max(2, math.floor(display_width / 2) * 2)
+    height = max(2, math.floor(display_height / 2) * 2)
+    return width, height
+
+
+def _video_filter(video: dict, output_width: int, output_height: int) -> str:
+    display_width, display_height = _display_dimensions(video)
+    filters = []
+    if (abs(display_width - output_width) > 0.01 or
+            abs(display_height - output_height) > 0.01 or
+            abs(_sample_aspect_ratio(video) - 1.0) > 0.001):
+        filters.append(f"scale={output_width}:{output_height}:flags=lanczos+accurate_rnd")
+    # The output dimensions already include any source pixel aspect ratio.
+    # Normalize to square pixels so players cannot reinterpret the frame shape.
+    filters.append("setsar=1")
+    filters.append(f"fps={FPS}")
+    return ",".join(filters)
 
 
 def _float_or_zero(value) -> float:
@@ -188,12 +246,13 @@ def _encode_once(command: list[str], duration: float, *, cancel=None,
 def transcode_mp4(video: Path, *, resource_dir: Path, cancel=None,
                   progress: Callable[[str], None] | None = None,
                   remove_source: bool = False, compress: bool = True) -> Path:
-    """Convert to MP4, optionally compressing to the standard delivery profile.
+    """Compress/convert to MP4 without imposing an output aspect ratio.
 
-    With compress=False, a source already matching the delivery profile is
-    stream-copied; otherwise it is encoded at visually lossless CRF 0 with the
-    delivery resolution/frame rate and no bitrate cap. The source remains
-    untouched until the staged MP4 passes validation.
+    Encoded dimensions follow the source display dimensions; scaling is only
+    used to normalize non-square pixels or trim an odd edge for 4:2:0. With
+    compress=False, a compatible source is stream-copied; otherwise it is
+    encoded at visually lossless CRF 0. The source remains untouched until the
+    staged MP4 passes validation.
     """
     video = Path(video)
     ffmpeg = Path(resource_dir) / "ffmpeg" / "ffmpeg.exe"
@@ -212,44 +271,40 @@ def transcode_mp4(video: Path, *, resource_dir: Path, cancel=None,
     staged = video.parent / f".clipassistant-transcode-{uuid.uuid4().hex}.mp4"
     source_video = source["video"]
     source_codec = (source_video.get("codec_name") or "").casefold()
+    expected_fps = FPS
+    source_width = int(source_video.get("width") or 0)
+    source_height = int(source_video.get("height") or 0)
+    display_width, display_height = _display_dimensions(source_video)
+    expected_width, expected_height = _even_display_dimensions(source_video)
+    stream_copy = False
     if compress:
         cap_mbps = _recommended_cap(video, source)
         maxrate = f"{cap_mbps * 1.2:.2f}M"
         bufsize = f"{cap_mbps * 2:.2f}M"
-        vf = (
-            f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease:"
-            "force_divisible_by=2:flags=lanczos+accurate_rnd,"
-            f"pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps={FPS}"
-        )
         video_args = [
-            "-vf", vf, "-fps_mode", "cfr", "-c:v", "libx264", "-preset", "veryfast",
+            "-vf", _video_filter(source_video, expected_width, expected_height),
+            "-fps_mode", "cfr", "-c:v", "libx264", "-preset", "veryfast",
             "-crf", str(CRF), "-maxrate", maxrate, "-bufsize", bufsize, "-pix_fmt", "yuv420p",
         ]
-        expected_width, expected_height, expected_fps = WIDTH, HEIGHT, FPS
         progress_label = f"H.264 压缩转码 CRF {CRF}"
     else:
-        source_width = int(source_video.get("width") or 0)
-        source_height = int(source_video.get("height") or 0)
         source_pixel_format = (source_video.get("pix_fmt") or "").casefold()
         source_matches_delivery_profile = (
-            source_codec == "h264" and source_width == WIDTH and source_height == HEIGHT and
+            source_codec == "h264" and source_width % 2 == 0 and source_height % 2 == 0 and
             source_pixel_format == "yuv420p" and abs(source["fps"] - FPS) <= 0.02
         )
         if source_matches_delivery_profile:
             video_args = ["-c:v", "copy"]
+            expected_width, expected_height = source_width, source_height
+            stream_copy = True
             progress_label = "MP4 转码封装（视频流直拷）"
         else:
-            vf = (
-                f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease:"
-                "force_divisible_by=2:flags=lanczos+accurate_rnd,"
-                f"pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps={FPS}"
-            )
             video_args = [
-                "-vf", vf, "-fps_mode", "cfr", "-c:v", "libx264", "-preset", "veryfast",
+                "-vf", _video_filter(source_video, expected_width, expected_height),
+                "-fps_mode", "cfr", "-c:v", "libx264", "-preset", "veryfast",
                 "-crf", "0", "-pix_fmt", "yuv420p",
             ]
             progress_label = "MP4 H.264 转码（跳过压缩）"
-        expected_width, expected_height, expected_fps = WIDTH, HEIGHT, FPS
         if source_width <= 0 or source_height <= 0 or source["fps"] <= 0:
             raise RuntimeError(f"无法读取视频规格，未压缩转码：{video.name}")
     command = [
@@ -257,6 +312,7 @@ def transcode_mp4(video: Path, *, resource_dir: Path, cancel=None,
         "-nostats", "-stats_period", "0.35", "-progress", "pipe:1", "-i", str(video),
         "-map", f"0:{source['video_stream_index']}", "-map", "0:a:0?", "-map_metadata", "0",
         *video_args,
+        *([] if stream_copy else ["-metadata:s:v:0", "rotate=0"]),
         "-c:a", "aac", "-b:a", AUDIO_RATE, "-ar", str(AUDIO_SAMPLE_RATE), "-ac", "2",
         "-movflags", "+faststart", "-f", "mp4", str(staged),
     ]
@@ -272,6 +328,13 @@ def transcode_mp4(video: Path, *, resource_dir: Path, cancel=None,
         if (int(video_stream.get("width") or 0) != expected_width or
                 int(video_stream.get("height") or 0) != expected_height):
             raise RuntimeError("转码分辨率校验失败，原视频未替换")
+        result_display_width, result_display_height = _display_dimensions(video_stream)
+        expected_display_width, expected_display_height = (
+            (display_width, display_height) if stream_copy else (expected_width, expected_height)
+        )
+        if (abs(result_display_width - expected_display_width) > 1.0 or
+                abs(result_display_height - expected_display_height) > 1.0):
+            raise RuntimeError("转码画面方向或比例校验失败，原视频未替换")
         if abs(result["fps"] - expected_fps) > 0.02:
             raise RuntimeError("转码帧率校验失败，原视频未替换")
         if abs(result["video_duration"] - source["video_duration"]) > 0.15:

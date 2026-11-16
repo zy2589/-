@@ -170,7 +170,15 @@
   }
 
   function spliceVideoTrackOrder() {
-    const remaining = new Set((state.videoLayers || []).map((clip) => String(clip.trackId || "")).filter(Boolean));
+    // A timeline track is the unit that controls both preview stacking and
+    // automatic split-pane assignment. Main-timeline clips are rendered by a
+    // different decoder from overlay clips, so include their mapped tracks in
+    // the same ordered set instead of implicitly treating the main decoder as
+    // the top layer.
+    const remaining = new Set([
+      ...(state.videoLayers || []).map((clip) => String(clip.trackId || "video")),
+      ...mainClips().map((clip) => String(state.mainVideoTrackMap?.[clip.id] || "video")),
+    ].filter(Boolean));
     const ordered = [];
     for (const id of state.trackOrder || []) {
       const key = String(id);
@@ -193,9 +201,11 @@
     }
     if (savedId !== "auto") return regions.find((region) => region.id === savedId) || regions[0];
     const trackOrder = spliceVideoTrackOrder();
-    const index = target?.type === "main"
-      ? 0
-      : Math.max(1, trackOrder.indexOf(String(target?.clip?.trackId || "")) + 1);
+    const trackId = target?.type === "main"
+      ? String(state.mainVideoTrackMap?.[target.clip?.id] || "video")
+      : String(target?.clip?.trackId || "video");
+    const trackIndex = trackOrder.indexOf(trackId);
+    const index = trackIndex >= 0 ? trackIndex : (target?.type === "main" ? 0 : trackOrder.length);
     return regions[Math.min(Math.max(0, index), regions.length - 1)] || null;
   }
 

@@ -316,10 +316,23 @@
   }
   function paint(now = performance.now()) {
     paintRequest = 0;
+    const hasRetouch = brushing || deleting || selectingFace || marks().length > 0 || !!tracking;
+    if (!hasRetouch) {
+      canvas.classList.remove("active");
+      return;
+    }
+    // Do not copy a decoder's retained last frame after its main timeline clip
+    // ends, is hidden, or is replaced by a higher identical-media layer.
+    if (canvas.dataset.previewTargetVisible !== "true" || canvas.style.visibility === "hidden") {
+      canvas.classList.remove("active");
+      if (state.playing) paintRequest = requestAnimationFrame(paint);
+      return;
+    }
     const video = currentVideo();
     if (!video || video.readyState < 2 || !state.video) {
       canvas.classList.remove("active");
-      if (brushing || deleting || selectingFace || marks().length) paintRequest = requestAnimationFrame(paint);
+      if (state.playing || brushing || deleting || selectingFace || marks().length || tracking)
+        paintRequest = requestAnimationFrame(paint);
       return;
     }
     if (now - lastPaint < 30) { paintRequest = requestAnimationFrame(paint); return; }
@@ -386,11 +399,11 @@
         ctx.strokeRect(region.x * width, region.y * height, region.width * width, region.height * height);
         ctx.restore();
       }
-      canvas.classList.add("active");
     } catch {
       canvas.classList.remove("active");
     }
-    if (state.playing || brushing || deleting || selectingFace || marks().length || tracking) paintRequest = requestAnimationFrame(paint);
+    if (hasRetouch && (state.playing || brushing || deleting || selectingFace || marks().length || tracking))
+      paintRequest = requestAnimationFrame(paint);
   }
   function insertKey(mark, x, y, time, manual = true) {
     const keys = sortedKeys(mark);

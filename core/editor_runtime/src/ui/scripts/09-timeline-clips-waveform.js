@@ -53,15 +53,15 @@ function assignOverlapLanes(items = []) {
       }
       function clipDurationMarkup(clip) {
         const duration = Math.max(0, Number(clip?.end || 0) - Number(clip?.start || 0));
-        const label = formatTime(duration, true);
+        const label = formatTime(duration, false);
         return `<span class="clip-duration" data-clip-duration title="片段时长 ${label}">${label}</span>`;
       }
       function updateTimelineClipDurationLabel(element, clip) {
         const label = element?.querySelector?.("[data-clip-duration]");
         if (!label || !clip) return;
         const duration = Math.max(0, Number(clip.end || 0) - Number(clip.start || 0));
-        label.textContent = formatTime(duration, true);
-        label.title = `片段时长 ${formatTime(duration, true)}`;
+        label.textContent = formatTime(duration, false);
+        label.title = `片段时长 ${formatTime(duration, false)}`;
       }
       function syncFollowPlayheadButton() {
         const button = $("followPlayhead");

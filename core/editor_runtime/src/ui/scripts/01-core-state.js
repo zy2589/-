@@ -1071,11 +1071,9 @@
         clearTimeout(toast.timer);
         toast.timer = setTimeout(() => $("toast").classList.remove("on"), 2200);
       }
-      function formatTime(seconds, ms = true) {
-        const s = Math.max(0, Number(seconds) || 0),
-          m = Math.floor(s / 60),
-          r = s - m * 60;
-        return `${String(m).padStart(2, "0")}:${r.toFixed(ms ? 3 : 0).padStart(ms ? 6 : 2, "0")}`;
+      function formatTime(seconds) {
+        const total = Math.round(Math.max(0, Number(seconds) || 0));
+        return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
       }
       function uid() {
         return globalThis.crypto &&
@@ -3816,7 +3814,7 @@
         if ($("rulerTimecode"))
           $("rulerTimecode").textContent = formatTime(state.currentTime, false);
         if ($("timelineBarTimecode"))
-          $("timelineBarTimecode").textContent = formatTime(state.currentTime, true);
+          $("timelineBarTimecode").textContent = formatTime(state.currentTime, false);
       }
       function syncTimelineChrome() {
         syncRulerScroll();

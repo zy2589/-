@@ -129,16 +129,24 @@ if (!(Test-Path -LiteralPath $InstalledExe -PathType Leaf)) { throw '复制后�
 # Never import projects, credentials, caches, or settings from other products.
 $Programs = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
 New-Item -ItemType Directory -Force -Path $Programs | Out-Null
-$ShortcutPath = Join-Path $Programs '剪辑助手.lnk'
+$Desktop = [Environment]::GetFolderPath('Desktop')
+New-Item -ItemType Directory -Force -Path $Desktop | Out-Null
+$ShortcutPaths = @(
+    (Join-Path $Programs '剪辑助手.lnk'),
+    (Join-Path $Desktop '剪辑助手.lnk')
+)
 $Shell = New-Object -ComObject WScript.Shell
-$Shortcut = $Shell.CreateShortcut($ShortcutPath)
-$Shortcut.TargetPath = $InstalledExe
-$Shortcut.WorkingDirectory = $Destination
-$Shortcut.IconLocation = $InstalledExe
-$Shortcut.Save()
+foreach ($ShortcutPath in $ShortcutPaths) {
+    $Shortcut = $Shell.CreateShortcut($ShortcutPath)
+    $Shortcut.TargetPath = $InstalledExe
+    $Shortcut.WorkingDirectory = $Destination
+    $Shortcut.IconLocation = $InstalledExe
+    $Shortcut.Save()
+}
 if ($MovedPrevious -and (Test-Path -LiteralPath $InstallRollback)) {
     try { Remove-Item -LiteralPath $InstallRollback -Recurse -Force }
     catch { Write-Warning "新版本已安装，旧版本临时目录清理失败：$InstallRollback" }
 }
 Write-Host "已安装到：$Destination"
-Write-Host "开始菜单快捷方式：$ShortcutPath"
+Write-Host "开始菜单快捷方式：$($ShortcutPaths[0])"
+Write-Host "桌面快捷方式：$($ShortcutPaths[1])"
