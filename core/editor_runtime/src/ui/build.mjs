@@ -3,6 +3,7 @@ import path from 'path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'url';
 import {
+  planIssueCaptionRemoval,
   planReviewCaptionDeletion,
   reviewCaptionBlockIsCovered,
   reviewCaptionWordMatches,
@@ -463,6 +464,37 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
       deletion.captions.some(caption => caption.id === 'other-clip'),
     '重复 issue ID 的删除回归失败：必须保留同一字幕组内的其他词、其他时间段、字幕轨和素材。',
   );
+  const broadReview = {
+    id: 'review-broad', issueId: 'shared-issue', captionTrackId: 'caption-a', ownerClipId: 'clip-a',
+    start: 1, end: 4, words: [{ issueId: 'shared-issue', display: 'remove', start: 1.2, end: 1.5 }],
+  };
+  const repeatedIssueWords = [{ id: 'all-shared-id', trackId: 'caption-a', ownerClipId: 'clip-a',
+    text: 'before remove after', words: [
+      { display: 'before', issueId: 'shared-issue', start: .4, end: .8 },
+      { display: 'remove', issueId: 'shared-issue', start: 1.2, end: 1.5 },
+      { display: 'after', issueId: 'shared-issue', start: 3.2, end: 3.6 },
+    ] }];
+  const narrowDeletion = planReviewCaptionDeletion(repeatedIssueWords, [broadReview], {
+    joinWords: words => words.map(word => word.display).join(' '),
+  });
+  requireBuildCheck(narrowDeletion.removedWords.length === 1 &&
+      narrowDeletion.captions[0]?.words.map(word => word.display).join(' ') === 'before after',
+    '同一错误 ID 的宽时间范围删除回归失败：必须只删 review.words 精确标出的词。');
+  const missingTrackScope = planReviewCaptionDeletion([
+    { id: 'track-a', trackId: 'caption-a', ownerClipId: 'clip-a', words: [
+      { display: 'one', issueId: 'shared-issue', start: 1.2, end: 1.5 }], text: 'one' },
+    { id: 'track-b', trackId: 'caption-b', ownerClipId: 'clip-a', words: [
+      { display: 'two', issueId: 'shared-issue', start: 1.2, end: 1.5 }], text: 'two' },
+  ], [{ id: 'review-no-track', issueId: 'shared-issue', ownerClipId: 'clip-a', start: 1, end: 2 }]);
+  requireBuildCheck(missingTrackScope.ambiguousCaptionIds.size === 2 &&
+      missingTrackScope.captions.length === 2 && missingTrackScope.removedWords.length === 0,
+    '缺少字幕轨范围且命中多个轨道时必须阻止删除，不能跨轨清除整组文案。');
+  const allTextBlocked = planIssueCaptionRemoval([
+    { id: 'all-text', trackId: 'caption-a', ownerClipId: 'clip-a', text: 'wrong', words: [
+      { display: 'wrong', issueId: 'shared-issue', start: 1.2, end: 1.5 }],
+  }], { id: 'review-a', issueId: 'shared-issue', captionTrackId: 'caption-a', ownerClipId: 'clip-a', start: 1, end: 2 });
+  requireBuildCheck(allTextBlocked.blocked && allTextBlocked.reason === 'would-remove-all-text',
+    '切除错误文案如果会清空工程全部字幕，必须在任何时间线编辑前拒绝。');
   const fullyCovered = planReviewCaptionDeletion([
     { id: 'whole-block', trackId: 'caption-a', ownerClipId: 'clip-a', text: 'repeat', start: 1.1, end: 1.8 },
   ], [selectedReview]);
@@ -529,6 +561,178 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
   requireBuildCheck(blockedEffects.snapshots === 0 && blockedState.captions.length === 1 &&
       blockedState.captions[0].text === 'keep this' && blockedEffects.toast.includes('整次操作已取消'),
     '逐词范围不明时必须在写入撤销记录前取消整个删除操作。');
+
+  const cutRouteStart = reviewScript.indexOf('      function cutReviewSegment(id) {');
+  const cutRouteEnd = reviewScript.indexOf('      function clearIssueWordFlags(', cutRouteStart);
+  requireBuildCheck(cutRouteStart >= 0 && cutRouteEnd > cutRouteStart,
+    '单条错误文案切除入口缺失，无法运行 P0 删除回归。');
+  const cutRouteState = {
+    reviewCaptions: [{ id: 'review-selected', issueId: 'shared-issue', start: 1, end: 4, type: 'mismatch' }],
+    issues: [{ id: 'shared-issue', start: 0, end: 8, type: 'mismatch' }],
+  };
+  const cutRouteCalls = [];
+  const cutReviewEntry = vm.runInNewContext(
+    `${reviewScript.slice(cutRouteStart, cutRouteEnd)}\ncutReviewSegment;`,
+    { state: cutRouteState, cutScriptIssue: (...args) => cutRouteCalls.push(args), deleteRepeatedReview: () => {} },
+  );
+  cutReviewEntry('review-selected');
+  requireBuildCheck(cutRouteCalls.length === 1 && cutRouteCalls[0][0] === 'shared-issue' &&
+      cutRouteCalls[0][1]?.scope?.id === 'review-selected' &&
+      cutRouteCalls[0][1]?.scope?.start === 1 && cutRouteCalls[0][1]?.scope?.end === 4,
+    '单条卡片切除必须把所选 review 的时间和素材范围传到删除执行器，不能扩大成聚合 issue 范围。');
+  const repeatReview = { id: 'review-repeat', issueId: 'repeat-issue', type: 'repeat', start: 1, end: 2 };
+  const repeatRouteCalls = [];
+  const repeatRoute = vm.runInNewContext(
+    `${reviewScript.slice(cutRouteStart, cutRouteEnd)}\ncutReviewSegment;`,
+    { state: { reviewCaptions: [repeatReview], issues: [] },
+      cutScriptIssue: () => {}, deleteRepeatedReview: id => repeatRouteCalls.push(id) },
+  );
+  repeatRoute('review-repeat');
+  requireBuildCheck(repeatRouteCalls.length === 1 && repeatRouteCalls[0] === 'review-repeat',
+    '重复片段卡片必须进入专用精确切除与保留字幕检查，不能绕过删除保护。');
+
+  const repeatGuardStart = reviewScript.indexOf('      function repeatCutPreservesCaptionText(');
+  const repeatGuardEnd = reviewScript.indexOf('      function captionTextKey(', repeatGuardStart);
+  requireBuildCheck(repeatGuardStart >= 0 && repeatGuardEnd > repeatGuardStart,
+    '重复片段字幕保护缺失，无法运行 P0 删除回归。');
+  const repeatGuard = vm.runInNewContext(
+    `${reviewScript.slice(repeatGuardStart, repeatGuardEnd)}\nrepeatCutPreservesCaptionText;`,
+    { state: { captions: [{ text: 'only copy', words: [
+        { display: 'only', start: 1.2, end: 1.5 },
+      ] }] } },
+  );
+  requireBuildCheck(!repeatGuard(1, 2),
+    '重复片段切除如果会删除工程唯一文案，必须由重复专用保护器拒绝。');
+  const repeatDeleteStart = reviewScript.indexOf('      function deleteRepeatedReview(');
+  const repeatDeleteEnd = reviewScript.indexOf('\n      function ', repeatDeleteStart + 12);
+  requireBuildCheck(repeatDeleteStart >= 0 && repeatDeleteEnd > repeatDeleteStart,
+    '重复片段删除执行器缺失，无法运行 P0 删除回归。');
+  const repeatState = { reviewCaptions: [repeatReview], duration: 10,
+    captions: [{ id: 'only-text', text: 'only copy', words: [
+      { display: 'only', start: 1.2, end: 1.5 },
+    ] }] };
+  const repeatEffects = { snapshots: 0, toast: '' };
+  const repeatDelete = vm.runInNewContext(
+    `${reviewScript.slice(repeatGuardStart, repeatGuardEnd)}\n`+
+      `${reviewScript.slice(repeatDeleteStart, repeatDeleteEnd)}\ndeleteRepeatedReview;`,
+    { state: repeatState, frameDuration: () => .04,
+      snapshot: () => { repeatEffects.snapshots += 1; },
+      toast: message => { repeatEffects.toast = message; } },
+  );
+  repeatDelete('review-repeat');
+  requireBuildCheck(repeatEffects.snapshots === 0 && repeatState.captions[0]?.text === 'only copy' &&
+      repeatEffects.toast.includes('全部文案'),
+    '重复片段实际删除执行器必须在快照前拒绝清空全部文案。');
+
+  const issueHelpersStart = reviewScript.indexOf('      function planIssueWordsRemoval(');
+  const issueHelpersEnd = reviewScript.indexOf('      function dismissTrimmedIssues(', issueHelpersStart);
+  const cutIssueStart = reviewScript.indexOf('      function cutScriptIssue(id,', issueHelpersEnd);
+  // cutScriptIssue is the final function in this source module. Its closing
+  // brace is followed only by whitespace, so the rest of the module is its
+  // complete standalone body for this VM harness.
+  const cutIssueEnd = reviewScript.length;
+  requireBuildCheck(issueHelpersStart >= 0 && issueHelpersEnd > issueHelpersStart &&
+      cutIssueStart > issueHelpersEnd && cutIssueEnd > cutIssueStart,
+    '脚本差异切除执行器缺失，无法运行实际 P0 删除回归。');
+  const cutHarnessSource = `${reviewScript.slice(issueHelpersStart, issueHelpersEnd)}\n`+
+    `${reviewScript.slice(cutIssueStart, cutIssueEnd)}\ncutScriptIssue;`;
+  const makeCutHarness = ({ captions, review, issue }) => {
+    const state = { captions: JSON.parse(JSON.stringify(captions)), captionRecoveryArchive: [],
+      trackLocks: {}, issues: [structuredClone(issue)], matchIssues: [],
+      reviewCaptions: [structuredClone(review), { id: 'review-later', issueId: issue.id,
+        start: 5, end: 6, type: issue.type }], audioAssets: [], removals: [], duration: 10 };
+    const effects = { snapshots: 0, toasts: [] };
+    const context = {
+      state, planIssueCaptionRemoval, reviewCaptionWordMatches, reviewCaptionBlockIsCovered,
+      joinCaptionWords: words => words.map(word => word.display || word.text || '').filter(Boolean).join(' '),
+      mainAudioClips: () => [], timelineToSource: value => value,
+      snapshot: () => { effects.snapshots += 1; }, shiftTracks: () => {},
+      normalizeRemovals: () => {}, recomputeContentDuration: () => {}, clampTracksToDuration: () => {},
+      seekTimeline: () => {}, renderAll: () => {}, queueAutosave: () => {},
+      toast: message => effects.toasts.push(message),
+    };
+    context.removeIssueWords = vm.runInNewContext(
+      `${reviewScript.slice(issueHelpersStart, issueHelpersEnd)}\nremoveIssueWords;`, context,
+    );
+    return { state, effects,
+      run: vm.runInNewContext(cutHarnessSource, context) };
+  };
+  const selectedCutReview = { id: 'review-selected', issueId: 'shared-issue',
+    captionTrackId: 'caption-a', ownerClipId: 'clip-a', sourceMediaId: 'source-a',
+    start: 1, end: 4, type: 'mismatch', words: [
+      { display: 'remove', issueId: 'shared-issue', start: 1.2, end: 1.5 },
+    ] };
+  const selectedCutIssue = { id: 'shared-issue', issueId: 'shared-issue', type: 'mismatch', start: 0, end: 8 };
+  const cutHarness = makeCutHarness({ issue: selectedCutIssue, review: selectedCutReview, captions: [
+    { id: 'same-group', trackId: 'caption-a', ownerClipId: 'clip-a', sourceMediaId: 'source-a',
+      text: 'before remove after', words: [
+        { display: 'before', issueId: 'shared-issue', start: .4, end: .8 },
+        { display: 'remove', issueId: 'shared-issue', start: 1.2, end: 1.5 },
+        { display: 'after', issueId: 'shared-issue', start: 3.2, end: 3.6 },
+      ] },
+  ] });
+  cutHarness.run('shared-issue', { scope: selectedCutReview });
+  requireBuildCheck(cutHarness.state.captions[0]?.words.map(word => word.display).join(' ') === 'before after' &&
+      cutHarness.state.removals.length === 1 && cutHarness.state.removals[0].start === 1 &&
+      cutHarness.state.removals[0].end === 4 && cutHarness.state.reviewCaptions[0]?.id === 'review-later',
+    '实际单条切除回归失败：宽 issue ID/时间不得删除同组未选中的词或其他 review 区间。');
+
+  const wipeHarness = makeCutHarness({ issue: selectedCutIssue,
+    review: { ...selectedCutReview, words: [{ display: 'only', issueId: 'shared-issue', start: 1.2, end: 1.5 }] },
+    captions: [{ id: 'only-text', trackId: 'caption-a', ownerClipId: 'clip-a', sourceMediaId: 'source-a',
+      text: 'only', words: [{ display: 'only', issueId: 'shared-issue', start: 1.2, end: 1.5 }] }],
+  });
+  wipeHarness.run('shared-issue', { scope: selectedCutReview });
+  requireBuildCheck(wipeHarness.effects.snapshots === 0 && wipeHarness.state.removals.length === 0 &&
+      wipeHarness.state.captions[0]?.text === 'only' &&
+      wipeHarness.effects.toasts.some(message => message.includes('删除全部文案')),
+    '单条切除如果会清空全部文案，必须在 snapshot、字幕写回和时间线剪切前取消。');
+
+  const replacementPlanStart = reviewScript.indexOf('      function planReviewCaptionReplacement(');
+  const replacementPlanEnd = reviewScript.indexOf('      function replaceReviewCaption(', replacementPlanStart);
+  requireBuildCheck(replacementPlanStart >= 0 && replacementPlanEnd > replacementPlanStart,
+    '手动修改字幕的精确范围计划器缺失，无法运行 P0 删除回归。');
+  const replacementPlan = vm.runInNewContext(
+    `${reviewScript.slice(replacementPlanStart, replacementPlanEnd)}\nplanReviewCaptionReplacement;`,
+    { editableCaptionTokens: value => String(value || '').split(/\s+/).filter(Boolean),
+      matchRecognizedCapitalization: value => value },
+  );
+  const narrowReplacement = replacementPlan([
+    { id: 'same-group', trackId: 'caption-a', ownerClipId: 'clip-a', sourceMediaId: 'source-a',
+      words: [
+        { display: 'before', issueId: 'shared-issue', start: .4, end: .8 },
+        { display: 'wrong', issueId: 'shared-issue', start: 1.2, end: 1.5 },
+        { display: 'after', issueId: 'shared-issue', start: 3.2, end: 3.6 },
+      ] },
+  ], { id: 'review-selected', issueId: 'shared-issue', captionTrackId: 'caption-a',
+    ownerClipId: 'clip-a', sourceMediaId: 'source-a', start: 1, end: 4,
+    words: [{ display: 'wrong', issueId: 'shared-issue', start: 1.2, end: 1.5 }] }, '', null);
+  requireBuildCheck(narrowReplacement?.length === 1 &&
+      narrowReplacement[0].words.map(word => word.display).join(' ') === 'before after',
+    '手动清除错误文案必须只作用于 review.words 指定的词，不能按重复 issue ID 扩大到其他字幕。');
+
+  const replaceStart = reviewScript.indexOf('      function replaceReviewCaption(');
+  const replaceEnd = reviewScript.indexOf('      function batchReviewAction(', replaceStart);
+  requireBuildCheck(replaceStart >= 0 && replaceEnd > replaceStart,
+    '手动替换字幕执行器缺失，无法运行 P0 删除回归。');
+  const lastCaptionState = { captions: [{ id: 'only-text', text: 'only', words: [
+    { display: 'only', start: 1.2, end: 1.5 },
+  ] }], reviewCaptions: [{ id: 'review-only', start: 1, end: 2 }],
+    issues: [], matchIssues: [], trackLocks: {} };
+  const lastCaptionEffects = { snapshots: 0, toast: '' };
+  const replaceCaption = vm.runInNewContext(
+    `${reviewScript.slice(replaceStart, replaceEnd)}\nreplaceReviewCaption;`,
+    { state: lastCaptionState, planReviewCaptionReplacement: () => [
+        { caption: lastCaptionState.captions[0], words: [] },
+      ],
+      isTrackLocked: () => false, joinCaptionWords: words => words.map(word => word.display).join(' '),
+      snapshot: () => { lastCaptionEffects.snapshots += 1; }, renderAll: () => {}, queueAutosave: () => {},
+      toast: message => { lastCaptionEffects.toast = message; } },
+  );
+  replaceCaption('review-only', 'manual', '');
+  requireBuildCheck(lastCaptionEffects.snapshots === 0 && lastCaptionState.captions[0]?.text === 'only' &&
+      lastCaptionEffects.toast.includes('删除全部文案'),
+    '手动清空最后一条字幕必须在撤销记录和工程写回前取消。');
 }
 
 export function buildUiHtml() {

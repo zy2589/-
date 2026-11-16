@@ -1,8 +1,12 @@
 """Windows video download assistant. Run with Python 3.10+."""
 import os
 import html
+import csv
+import io
+from html.parser import HTMLParser
 import json
 import difflib
+import hashlib
 import webbrowser
 import queue
 import re
@@ -30,9 +34,6 @@ VIDEO_SUFFIXES = frozenset({'.mp4', '.m4v', '.mov', '.mkv', '.webm', '.avi', '.m
                            '.flv', '.wmv', '.3gp', '.mts', '.m2ts', '.ogv', '.vob'})
 DENOISE_PRESERVED_STATE = '降噪失败（视频已保留）'
 DENOISE_ROW_LABEL = '降噪失败·已保留视频'
-COMPRESS_PRESERVED_STATE = '压缩失败（源视频已保留）'
-COMPRESS_ROW_LABEL = '压缩失败·源视频已保留'
-COMPRESS_SIZE_LIMIT_BYTES = 80 * 1024 * 1024
 DEFAULT_CANVA_URL = 'https://www.canva.com/design/DAHRA0BP3kM/2iA1F04Kv1rmVAPeaFgF7w/edit'
 
 
@@ -249,7 +250,13 @@ def drive_error_with_browser_link(error, url):
         return text
     browser_url = f'https://drive.google.com/file/d/{drive_id(url)}/view'
     lowered = text.casefold()
-    if any(marker in lowered for marker in ('too many users have viewed or downloaded', 'download quota', 'quota exceeded')):
+    if 'http 404' in lowered or '404 not found' in lowered:
+        guidance = ('\nGoogle Drive 返回了 HTTP 404。链接可能输入有误、文件已删除，或当前访问方式没有查看权限；'
+                    '请核对分享链接，并确认文件所有者允许当前账号访问。')
+    elif 'winerror 10013' in lowered or 'wsaeacces' in lowered:
+        guidance = ('\nWindows 拒绝了此程序连接 Google Drive 的 HTTPS 请求。请检查 Windows 防火墙或安全软件中“剪辑助手.exe”'
+                    '的出站网络规则，以及单位/路由器的网络策略；保持防护开启，不要关闭防火墙来绕过拦截。')
+    elif any(marker in lowered for marker in ('too many users have viewed or downloaded', 'download quota', 'quota exceeded')):
         guidance = '\nGoogle Drive 下载配额已耗尽，请稍后重试，或让文件所有者复制文件并提供新链接。'
     elif any(marker in lowered for marker in ('virus scan', 'unable to scan this file', 'cannot scan this file')):
         guidance = ('\nGoogle Drive 因文件较大而无法进行病毒扫描。请在浏览器提示页点击“仍然下载”继续；'
@@ -326,6 +333,11 @@ def gdrive_confirmation_fallback(url, cookie='', timeout=(20, 120)):
         session.mount('https://', adapter)
         response = session.get(current, timeout=timeout, allow_redirects=False)
         if response.status_code not in (301, 302, 303, 307, 308):
+            if response.status_code == 404:
+                response.close()
+                raise RuntimeError(
+                    'Google Drive 返回 HTTP 404：分享链接可能写错或已失效，'
+                    '也可能因当前账号没有权限而不可见。请核对完整链接或分享权限。')
             response.raise_for_status()
             return gdrive_confirmation_url(response.text, response.url)
         location = response.headers.get('Location')
@@ -352,7 +364,9 @@ def drive_download_with_auth_retry(call, *, cookie, temporary, browser_auth=Fals
         if not browser_auth:
             try:
                 target = gdrive_confirmation_fallback(kwargs['url'])
-            except Exception:
+            except Exception as confirmation_error:
+                if 'http 404' in str(confirmation_error).casefold():
+                    raise RuntimeError(str(confirmation_error)) from first_error
                 raise first_error
             if target:
                 return resolve_with_retry(call, **retry_args, **{**kwargs, 'url': target})
@@ -507,31 +521,241 @@ def extract_urls(text):
     return urls
 
 
-def task_pairs(base, rows):
+class _ClipboardLinkParser(HTMLParser):
+    """Read link targets from Google Sheets rich clipboard HTML."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.table_rows = []
+        self.row = None
+        self.cell = None
+        self.standalone = []
+        self.standalone_text = []
+        self.ignored_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag in ('style', 'script'):
+            self.ignored_depth += 1
+        elif tag == 'tr':
+            self.row = []
+            self.table_rows.append(self.row)
+        elif tag in ('td', 'th') and self.row is not None:
+            self.cell = {'links': [], 'text': []}
+            self.row.append(self.cell)
+        elif tag == 'a' and attrs.get('href'):
+            href = html.unescape(attrs['href']).strip()
+            if self.cell is not None:
+                self.cell['links'].append(href)
+            else:
+                self.standalone.append(href)
+        elif tag == 'br':
+            if self.cell is not None:
+                self.cell['text'].append('\n')
+            else:
+                self.standalone_text.append('\n')
+
+    def handle_endtag(self, tag):
+        if tag in ('style', 'script') and self.ignored_depth:
+            self.ignored_depth -= 1
+        elif tag in ('td', 'th'):
+            self.cell = None
+        elif tag == 'tr':
+            self.row = None
+
+    def handle_data(self, data):
+        if self.ignored_depth:
+            return
+        if self.cell is not None:
+            self.cell['text'].append(data)
+        else:
+            self.standalone_text.append(data)
+
+
+def clipboard_matrix(plain_text, fragment):
+    """Parse copied cells while keeping their hidden rich-link targets."""
+    parser = _ClipboardLinkParser()
+    try:
+        parser.feed(fragment or '')
+        parser.close()
+    except Exception:
+        parser = _ClipboardLinkParser()
+
+    if parser.table_rows:
+        return [[{'text': ''.join(cell['text']).strip(),
+                  'links': list(dict.fromkeys(url for href in cell['links'] for url in extract_urls(href)))}
+                 for cell in row] for row in parser.table_rows]
+
+    if parser.standalone:
+        links = list(dict.fromkeys(url for href in parser.standalone for url in extract_urls(href)))
+        visible = str(plain_text or '').strip().strip('"')
+        if not visible:
+            visible = ''.join(parser.standalone_text).strip()
+        return [[{'text': visible, 'links': links}]]
+
+    text = str(plain_text or '').replace('\r\n', '\n').replace('\r', '\n')
+    if not text.strip():
+        return []
+    try:
+        values = list(csv.reader(io.StringIO(text), delimiter='\t', quotechar='"'))
+    except csv.Error:
+        values = [line.split('\t') for line in text.split('\n')]
+    while values and not any(str(value).strip() for value in values[-1]):
+        values.pop()
+    return [[{'text': str(value).strip(), 'links': []} for value in row] for row in values]
+
+
+def clipboard_field_rows(matrix):
+    """Map a copied header row plus data rows to the download form fields."""
+    if not matrix or not matrix[0]:
+        return []
+    headers = [re.sub(r'[\s：:（）()_/-]+', '', str(cell.get('text', '')).casefold())
+               for cell in matrix[0]]
+    columns = {}
+
+    def find_column(field, aliases):
+        for alias in aliases:
+            alias = re.sub(r'[\s：:（）()_/-]+', '', alias.casefold())
+            for index, header in enumerate(headers):
+                is_header = header == alias
+                if field == 'phone' and alias == '需求备注' and '需求备注' in header:
+                    is_header = True
+                if field == 'link' and '视频' in header and '链接' in header:
+                    is_header = True
+                if is_header:
+                    return index
+        return None
+
+    columns['name'] = find_column('name', ('演员', '人名', '演员姓名', '人物', '姓名'))
+    columns['phone'] = find_column('phone', ('电话号码', '电话', '号码', '需求备注'))
+    columns['title'] = find_column('title', ('文案标题', '视频名称', '标题', '拍摄文案中文',
+                                            '拍摄文案英文', '画面标题'))
+    columns['link'] = find_column('link', ('拍摄视频链接', '视频链接地址', '视频链接', '视频URL'))
+    columns = {field: index for field, index in columns.items() if index is not None}
+    if not columns:
+        # A compact four-column paste without headers follows the download
+        # table's visible order: person, phone, title, video links.
+        if all(len(row) == 4 and extract_urls(
+                ' | '.join(row[3].get('links', []) or [row[3].get('text', '')]))
+               for row in matrix):
+            return [{'name': row[0].get('text', '').strip(),
+                     'phone': row[1].get('text', '').strip(),
+                     'title': row[2].get('text', '').strip(),
+                     'link': ' | '.join(row[3].get('links', []) or extract_urls(row[3].get('text', '')))}
+                    for row in matrix]
+        return []
+
+    result = []
+    for row in matrix[1:]:
+        values = {}
+        for field, column in columns.items():
+            if column >= len(row):
+                continue
+            cell = row[column]
+            values[field] = (' | '.join(cell['links']) if field == 'link' and cell['links']
+                             else str(cell.get('text', '')).strip())
+        if any(cell.get('text') or cell.get('links') for cell in row):
+            result.append(values)
+    return result
+
+
+def clipboard_link_groups(fragment):
+    """Return one URL group per copied linked cell; reject ambiguous multi-column copies."""
+    matrix = clipboard_matrix('', fragment)
+    if not matrix:
+        return []
+    groups = []
+    for row in matrix:
+        linked_cells = [cell['links'] for cell in row if cell['links']]
+        if len(linked_cells) > 1:
+            return []
+        groups.append(list(dict.fromkeys(linked_cells[0])) if linked_cells else [])
+    return groups if any(groups) else []
+
+
+def read_clipboard_html():
+    """Read Windows CF_HTML without changing clipboard contents."""
+    if os.name != 'nt':
+        return ''
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL('user32', use_last_error=True)
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    user32.OpenClipboard.argtypes = [wintypes.HWND]
+    user32.OpenClipboard.restype = wintypes.BOOL
+    user32.CloseClipboard.argtypes = []
+    user32.CloseClipboard.restype = wintypes.BOOL
+    user32.RegisterClipboardFormatW.argtypes = [wintypes.LPCWSTR]
+    user32.RegisterClipboardFormatW.restype = wintypes.UINT
+    user32.GetClipboardData.argtypes = [wintypes.UINT]
+    user32.GetClipboardData.restype = wintypes.HANDLE
+    kernel32.GlobalSize.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalSize.restype = ctypes.c_size_t
+    kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalUnlock.restype = wintypes.BOOL
+
+    if not user32.OpenClipboard(None):
+        return ''
+    handle = None
+    pointer = None
+    try:
+        format_id = user32.RegisterClipboardFormatW('HTML Format')
+        handle = user32.GetClipboardData(format_id) if format_id else None
+        if not handle:
+            return ''
+        size = kernel32.GlobalSize(handle)
+        pointer = kernel32.GlobalLock(handle)
+        if not pointer or not size:
+            return ''
+        raw = ctypes.string_at(pointer, size).split(b'\0', 1)[0]
+        header = raw[:4096].decode('ascii', 'ignore')
+        match = re.search(r'StartFragment:(\d+)', header)
+        end_match = re.search(r'EndFragment:(\d+)', header)
+        if match and end_match:
+            start, end = int(match.group(1)), int(end_match.group(1))
+            if 0 <= start <= end <= len(raw):
+                raw = raw[start:end]
+        return raw.decode('utf-8', 'replace')
+    except (OSError, ValueError, ctypes.ArgumentError):
+        return ''
+    finally:
+        if pointer:
+            kernel32.GlobalUnlock(handle)
+        user32.CloseClipboard()
+
+
+def task_rows(base, rows):
     if not base.strip():
         raise ValueError('请选择保存位置')
-    pairs = []
+    tasks = []
     for index, (person, title, text) in enumerate(rows, 1):
         if not any(value.strip() for value in (person, title, text)):
             continue
         urls = extract_urls(text)
-        if text.strip() and len(urls) != 1:
-            raise ValueError(f'第 {index} 行：需要一个视频链接；多个链接请用“从文本提取链接”分配')
+        if text.strip() and not urls:
+            raise ValueError(f'第 {index} 行：没有识别到有效的视频链接')
         person=person.strip();title=title.strip()
         # Rows are independent: any combination of person, title, phone and
         # URL is valid. Missing naming fields get stable per-row placeholders.
         name = folder_name(person or f'第{index}行', title or '引流')
+        path=destination(base,name)
         if urls:
-            path=destination(base,name)
-            pairs.append((name, urls[0], path))
+            for link_index, url in enumerate(urls, 1):
+                tasks.append((index - 1, name, url, path, link_index, len(urls)))
             continue
         # A missing URL means this row can still produce its title/promo art;
         # keep it in the same per-person / per-video-name folder as linked rows.
-        path = destination(base, name)
-        pairs.append((name.strip(), '', path))
-    if not pairs:
+        tasks.append((index - 1, name.strip(), '', path, 1, 1))
+    if not tasks:
         raise ValueError('请至少填写一行内容')
-    return pairs
+    return tasks
+
+
+def task_pairs(base, rows):
+    """Compatibility projection used by preflight helpers and legacy callers."""
+    return [(name, url, path) for _, name, url, path, _, _ in task_rows(base, rows)]
 
 
 def group_download_jobs(batch):
@@ -548,10 +772,8 @@ def group_download_jobs(batch):
         except Exception:
             identity = ('url', url.strip().casefold())
         retry_denoise = bool(settings[5]) if len(settings) > 5 else False
-        retry_compress = bool(settings[6]) if len(settings) > 6 else False
-        if retry_denoise or retry_compress:
-            mode = 'denoise' if retry_denoise else 'compress'
-            identity = (identity, 'retry', int(settings[4]), mode)
+        if retry_denoise:
+            identity = (identity, 'retry', int(settings[4]), 'denoise')
         else:
             identity = (identity, 'new')
         groups.setdefault(identity, []).append(job)
@@ -559,14 +781,23 @@ def group_download_jobs(batch):
 
 
 def plan_link_fill(text, current_links):
-    existing = {url for value in current_links for url in extract_urls(value)}
-    urls = [url for url in extract_urls(text) if url not in existing]
+    seen = {url for value in current_links for url in extract_urls(value)}
+    groups = []
+    for line in str(text or '').splitlines():
+        urls = []
+        for url in extract_urls(line):
+            if url in seen:
+                continue
+            seen.add(url)
+            urls.append(url)
+        if urls:
+            groups.append(urls)
     empty = [index for index, value in enumerate(current_links) if not value.strip()]
-    if not urls:
+    if not groups:
         raise ValueError('未识别到新链接；已填入的重复链接会被忽略。')
-    if len(urls) > len(empty):
-        raise ValueError(f'识别到 {len(urls)} 个新链接，只有 {len(empty)} 个空行；请减少内容或清空不需要的行。')
-    return list(zip(empty, urls))
+    if len(groups) > len(empty):
+        raise ValueError(f'识别到 {len(groups)} 组视频链接，只有 {len(empty)} 个空行；请减少内容或清空不需要的行。')
+    return [(index, ' | '.join(urls)) for index, urls in zip(empty, groups)]
 
 
 def folder_name(person, title):
@@ -579,16 +810,15 @@ def folder_name(person, title):
 
 
 def media_name(person, title, generated_at=None, fallback='未命名'):
-    """Build a readable, high-resolution timestamped name for a row's media."""
+    """Build a readable, collision-resistant name that fits common Windows paths."""
     person = str(person or '').strip() or fallback
     title = str(title or '').strip() or '引流'
     generated_at = generated_at or datetime.now()
-    timestamp = (f'{generated_at.year}年{generated_at.month}月{generated_at.day}日'
-                 f'{generated_at.hour}点{generated_at.minute}分{generated_at.second:02d}秒'
-                 f'-{generated_at.microsecond:06d}微秒')
+    timestamp = generated_at.strftime('%Y%m%d-%H%M%S-%f')
     base = folder_name(person, title)
-    if len(base) > 64:
-        base = base[:64].rstrip('. ')
+    if len(base) > 40:
+        suffix=hashlib.sha256(base.encode('utf-8')).hexdigest()[:8]
+        base=f'{base[:31].rstrip(". ")}-{suffix}'
     return f'{base}-{timestamp}'
 
 
@@ -848,10 +1078,11 @@ class App:
         self.page_vars=[];self.title_layout_vars=[];self.denoise_vars=[];self.denoise_picks=[];self.auto_page_values=[];self.auto_page_people=[];self.page_match_issues=[]
         self.suggested_page_values=[];self.match_jobs={};self.page_entries=[]
         self.title_entries=[];self.title_font_paths=[];self.title_color_ranges=[]
-        self.title_last_values=[];self.title_selection_ranges=[]
+        self.title_last_values=[];self.title_selection_ranges=[];self.title_manual_lines=[]
         self.phone_vars=[];self.phone_source_numbers=[];self.original_phone_values=[];self.auto_phone_values=[]
         self.background_vars=[];self.background_checks=[];self.progress_labels=[];self.input_entries=[];self.title_layout_picks=[]
         self.title_preview_popup=None;self.title_preview_image_label=None;self.title_preview_heading=None
+        self.title_preview_manual_text=None;self.title_preview_manual_syncing=False
         self.title_preview_photo=None;self.title_preview_index=None
         self.title_preview_font_var=None;self.title_preview_font_pick=None
         self.title_font_interaction=False;self.title_font_interaction_after=None
@@ -938,6 +1169,7 @@ class App:
         for variable in self.background_vars:
             variable.trace_add('write',lambda *_:self.record_edit())
         self.bulk_text.bind('<<Modified>>', self.bulk_changed)
+        self.bulk_text.bind('<<Paste>>', self.paste_rich_links, add='+')
         for widget in [self.bulk_text, *self.input_entries, *self.title_layout_picks, *self.denoise_picks]:
             widget.bind('<Control-z>', lambda event: self.restore_edit(False))
             widget.bind('<Control-y>', lambda event: self.restore_edit(True))
@@ -1043,6 +1275,7 @@ class App:
         self.row_statuses.append('待下载')
         self.title_entries.append(None);self.title_font_paths.append('');self.title_color_ranges.append([])
         self.title_last_values.append(title.get());self.title_selection_ranges.append(None)
+        self.title_manual_lines.append(None)
         self.denoise_vars.append(denoise)
         self.background_vars.append(background);self.auto_page_values.append('');self.auto_page_people.append('');self.page_match_issues.append('')
         self.suggested_page_values.append('');self.phone_source_numbers.append(None)
@@ -1051,13 +1284,16 @@ class App:
         number_label.grid(row=grid_row+1,column=0,padx=6,sticky='w')
         name_entry=ttk.Entry(row,textvariable=name,width=7,justify='left',style='Cell.TEntry')
         name_entry.grid(row=grid_row+1,column=1,sticky='ew',pady=4,padx=3)
+        name_entry.bind('<<Paste>>',lambda event,i=index:self.paste_column_values(event,i,'name'),add='+')
         phone_entry=ttk.Entry(row,textvariable=phone,width=15,justify='left',style='Cell.TEntry')
         phone_entry.grid(row=grid_row+1,column=2,sticky='ew',padx=3,pady=4)
+        phone_entry.bind('<<Paste>>',lambda event,i=index:self.paste_column_values(event,i,'phone'),add='+')
         title_cell=ttk.Frame(row)
         title_cell.grid(row=grid_row+1,column=3,sticky='ew',padx=3,pady=4)
         title_cell.columnconfigure(0,weight=1)
         title_entry=ttk.Entry(title_cell,textvariable=title,width=10,justify='left',style='Cell.TEntry')
         title_entry.grid(row=0,column=0,sticky='ew')
+        title_entry.bind('<<Paste>>',lambda event,i=index:self.paste_column_values(event,i,'title'),add='+')
         self.title_entries[index]=title_entry
         title_layout_pick=ttk.Combobox(title_cell,textvariable=title_layout,values=['全局','1行','2行','3行','4行'],state='readonly',width=4)
         title_layout_pick.grid(row=0,column=1,sticky='e',padx=(3,0))
@@ -1065,6 +1301,8 @@ class App:
         ToolTip(title_layout_pick,'只调整本行标题：跟随全局，或至少排成 1、2、3、4 行；当前行数放不下时会自动增加到四行。悬停标题可查看最终效果。')
         link_entry=ttk.Entry(row,textvariable=link,width=10,justify='left',style='Cell.TEntry')
         link_entry.grid(row=grid_row+1,column=4,sticky='ew',padx=3,pady=4)
+        link_entry.bind('<<Paste>>',lambda event,i=index:self.paste_column_values(event,i,'link'),add='+')
+        ToolTip(link_entry,'可粘贴多个视频链接；同一行内的链接分别下载到同一人名-视频名称文件夹。直接从 Google 表格复制时会读取单元格里的真实链接地址。')
         page_entry=ttk.Combobox(row,textvariable=page,values=['1'],state='readonly',width=4,style='Cell.TEntry')
         page_entry.grid(row=grid_row+1,column=5,sticky='ew',padx=3,pady=4)
         denoise_pick=ttk.Combobox(row,textvariable=denoise,
@@ -1097,7 +1335,7 @@ class App:
         title_entry.bind('<KeyRelease>',lambda _,i=index:self.schedule_title_preview(i,180),add='+')
         title_entry.bind('<<Paste>>',lambda _,i=index:self.schedule_title_preview(i,80),add='+')
         title.trace_add('write',lambda *_,i=index:self.refresh_title_preview(i))
-        title_layout.trace_add('write',lambda *_,i=index:self.refresh_title_preview(i))
+        title_layout.trace_add('write',lambda *_,i=index:self._title_layout_changed(i))
         page.trace_add('write',lambda *_,i=index:self.refresh_title_preview(i))
         phone.trace_add('write',lambda *_,i=index:self.refresh_title_preview(i))
         ToolTip(phone_entry,'生成标题图时用此号码替换所选模板中的号码；留空则使用模板原号码。')
@@ -1133,8 +1371,63 @@ class App:
                 self.title_color_ranges[index]=self._remap_title_ranges(
                     previous,current,self.title_color_ranges[index])
                 self.title_last_values[index]=current
+            if self.title_manual_lines[index] is not None:
+                from local_design import normalize_manual_title_lines
+                try:
+                    self.title_manual_lines[index]=normalize_manual_title_lines(
+                        current,self.title_manual_lines[index])
+                except ValueError:
+                    self.title_manual_lines[index]=None
         if index is not None and self.title_preview_index==index:
             self.schedule_title_preview(index,180)
+
+    def _title_layout_changed(self,index):
+        if self.title_manual_lines[index] is not None:
+            self.title_manual_lines[index]=None
+        self.refresh_title_preview(index)
+
+    def _sync_title_manual_editor(self,lines):
+        editor=self.title_preview_manual_text
+        if editor is None or not editor.winfo_exists():return
+        try:
+            if self.root.focus_get() is editor:return
+        except tk.TclError:pass
+        self.title_preview_manual_syncing=True
+        editor.delete('1.0','end')
+        if lines:editor.insert('1.0','\n'.join(lines))
+        self.title_preview_manual_syncing=False
+
+    def _title_manual_lines_changed(self,_event=None):
+        if self.title_preview_manual_syncing or self.title_preview_manual_text is None:return
+        index=self.title_preview_index
+        if index is None:return
+        raw_title=self.rows[index][1].get()
+        lines=self.title_preview_manual_text.get('1.0','end-1c').splitlines()
+        from local_design import normalize_manual_title_lines
+        try:
+            normalized=normalize_manual_title_lines(raw_title,lines)
+        except ValueError as exc:
+            if self.title_preview_hint is not None:
+                self.title_preview_hint.configure(text=str(exc))
+            return
+        if normalized!=self.title_manual_lines[index]:
+            self.record_edit()
+            self.title_manual_lines[index]=normalized
+            self.record_edit()
+            if self.title_preview_hint is not None:
+                self.title_preview_hint.configure(text=f'手动分行已应用 · {len(normalized)} 行；只调整换行')
+            self.schedule_title_preview(index,100)
+
+    def _reset_title_manual_lines(self):
+        index=self.title_preview_index
+        if index is None:return
+        if self.title_manual_lines[index] is not None:
+            self.record_edit()
+            self.title_manual_lines[index]=None
+            self.record_edit()
+        if self.title_preview_hint is not None:
+            self.title_preview_hint.configure(text='已恢复自动分行；可在上方文字框按 Enter 调整换行。')
+        self.schedule_title_preview(index,80)
 
     @staticmethod
     def _remap_title_ranges(previous,current,ranges):
@@ -1245,6 +1538,10 @@ class App:
     def _decorate_title_design(self,design,index,raw_title):
         result=dict(design)
         if self.title_font_paths[index]:result['font_path']=self.title_font_paths[index]
+        if self.title_manual_lines[index] is not None:
+            from local_design import normalize_manual_title_lines
+            result['manual_title_lines']=normalize_manual_title_lines(
+                raw_title,self.title_manual_lines[index])
         leading=len(raw_title)-len(raw_title.lstrip())
         title_length=len(raw_title.strip())
         result['custom_text_ranges']=[
@@ -1281,6 +1578,7 @@ class App:
             except tk.TclError:pass
         self.title_preview_popup=None;self.title_preview_image_label=None;self.title_preview_heading=None
         self.title_preview_font_var=None;self.title_preview_font_pick=None
+        self.title_preview_manual_text=None;self.title_preview_manual_syncing=False
         self.title_preview_palette=None;self.title_preview_hint=None
         self.title_preview_photo=None
 
@@ -1314,7 +1612,11 @@ class App:
         """Return only a user-entered phone, ignoring the page's auto-filled default."""
         value=self.phone_vars[index].get().strip()
         automatic=self.auto_phone_values[index].strip()
-        return '' if value and value==automatic else value
+        if not value or value==automatic:return ''
+        from page_cache import format_phone_like
+        formatted=format_phone_like(automatic or '+1',value)
+        if formatted!=value:self.phone_vars[index].set(formatted)
+        return '' if formatted==automatic else formatted
 
     def show_title_preview(self,index):
         self.title_preview_after=None
@@ -1346,6 +1648,27 @@ class App:
             self.title_preview_font_pick.bind('<ButtonPress-1>',self._begin_title_font_interaction,add='+')
             self.title_preview_font_pick.bind('<KeyPress-Down>',self._begin_title_font_interaction,add='+')
             self.title_preview_font_pick.bind('<Escape>',lambda _e:self._end_title_font_interaction(),add='+')
+            manual_row=tk.Frame(frame,background='#30343a')
+            manual_row.pack(fill='x',pady=(0,5))
+            manual_label=tk.Label(manual_row,text='手动分行',anchor='w',
+                background='#30343a',foreground='#c2c7cf',font=('Microsoft YaHei UI',9))
+            manual_label.pack(anchor='w')
+            manual_controls=tk.Frame(manual_row,background='#30343a')
+            manual_controls.pack(fill='x')
+            self.title_preview_manual_text=tk.Text(
+                manual_controls,height=4,width=34,wrap='word',
+                background='#1c1f23',foreground='#f0f2f4',insertbackground='#f0f2f4',
+                selectbackground='#3d668f',selectforeground='#ffffff',
+                font=('Microsoft YaHei UI',9),relief='flat',borderwidth=0,
+                highlightthickness=1,highlightbackground='#555b63',
+                padx=6,pady=4,undo=True)
+            self.title_preview_manual_text.pack(side='left',fill='x',expand=True)
+            self.title_preview_manual_text.bind('<KeyRelease>',self._title_manual_lines_changed,add='+')
+            self.title_preview_manual_text.bind('<<Paste>>',self._title_manual_lines_changed,add='+')
+            reset_manual=tk.Button(manual_controls,text='自动分行',command=self._reset_title_manual_lines,
+                background='#292d31',foreground='#f0f2f4',activebackground='#3a4046',
+                activeforeground='#ffffff',relief='flat',cursor='hand2',padx=6)
+            reset_manual.pack(side='left',padx=(5,0))
             style_hint=tk.Label(frame,text='选中标题文字后点色块改色 · 右键删除 · ＋添加预设',anchor='w',
                 background='#30343a',foreground='#c2c7cf',font=('Microsoft YaHei UI',9))
             style_hint.pack(fill='x',pady=(0,2))
@@ -1355,11 +1678,12 @@ class App:
             self.title_preview_image_label=tk.Label(frame,text='',background='#454a51',
                 foreground='#e5e7eb',font=('Microsoft YaHei UI',10),justify='center')
             self.title_preview_image_label.pack()
-            self.title_preview_hint=tk.Label(frame,text='鼠标移开后关闭 · 随输入更新',anchor='w',
+            self.title_preview_hint=tk.Label(frame,text='每行一段；只调整换行，文字需与标题一致（最多 4 行）',anchor='w',
                 background='#30343a',foreground='#c2c7cf',font=('Microsoft YaHei UI',9))
             self.title_preview_hint.pack(fill='x',pady=(5,0))
             for widget in (popup,frame,self.title_preview_heading,self.title_preview_image_label,
                            self.title_preview_hint,font_row,self.title_preview_font_pick,
+                           manual_row,manual_label,manual_controls,self.title_preview_manual_text,reset_manual,
                            style_hint,self.title_preview_palette):
                 widget.bind('<Enter>',lambda _:self.cancel_title_preview_close(),add='+')
                 widget.bind('<Leave>',lambda _:self.schedule_title_preview_close(),add='+')
@@ -1374,6 +1698,7 @@ class App:
         self.title_preview_font_var.set(selected_font)
         self.title_preview_font_pick.configure(values=['模板默认',*self.title_font_choices.keys()])
         if not title:
+            self._sync_title_manual_editor([])
             self.title_preview_heading.config(text=f'第 {index+1} 行 · 标题预览')
             self.title_preview_image_label.config(image='',text='输入标题后显示最终排版')
             self.title_preview_photo=None
@@ -1387,8 +1712,12 @@ class App:
                 number=page_number_for_position(pages,position) if position else None
                 template=self._decorate_title_design(design_for_font,index,raw_title)
                 design=replace_title(template,title)
+                self._sync_title_manual_editor([
+                    ''.join(run['text'] for run in line['runs']) for line in design['lines']])
                 image=render(design,output_size=self.resolution.get())
                 self.title_preview_heading.config(text=f'第 {index+1} 行 · {len(design["lines"])} 行标题')
+                if self.title_preview_hint is not None and self.title_manual_lines[index] is None:
+                    self.title_preview_hint.configure(text='每行一段；只调整换行，文字需与标题一致（最多 4 行）')
                 image.thumbnail((180,320),Image.Resampling.LANCZOS)
                 self.title_preview_photo=ImageTk.PhotoImage(image,master=popup)
                 self.title_preview_image_label.config(image=self.title_preview_photo,text='')
@@ -1488,6 +1817,7 @@ class App:
         self.title_color_ranges[index]=[]
         self.title_last_values[index]=''
         self.title_selection_ranges[index]=None
+        self.title_manual_lines[index]=None
         self.auto_page_values[index]=''
         self.auto_page_people[index]=''
         self.suggested_page_values[index]=''
@@ -1554,7 +1884,9 @@ class App:
         for index,(values,page,background,phone,title_layout,denoise) in enumerate(
                 zip(self.rows,self.page_vars,self.background_vars,self.phone_vars,self.title_layout_vars,self.denoise_vars)):
             row_values=tuple(variable.get() for variable in (*values,page,background,phone,title_layout,denoise))
-            rows.append((*row_values,self.title_font_paths[index],tuple(self.title_color_ranges[index])))
+            manual_lines=(tuple(self.title_manual_lines[index])
+                          if self.title_manual_lines[index] is not None else None)
+            rows.append((*row_values,self.title_font_paths[index],tuple(self.title_color_ranges[index]),manual_lines))
         return (self.bulk_text.get('1.0', 'end-1c'), tuple(rows), tuple(self.row_statuses))
 
     def record_edit(self):
@@ -1596,6 +1928,7 @@ class App:
                 variable.set(value)
             self.title_font_paths[index]=values[8]
             self.title_color_ranges[index]=list(values[9])
+            self.title_manual_lines[index]=(list(values[10]) if len(values)>10 and values[10] is not None else None)
             self.title_last_values[index]=variables[1].get()
         for index,value in enumerate(progress):
             self._set_row_progress(index,value)
@@ -1618,6 +1951,7 @@ class App:
             self.title_font_paths[index]=''
             self.title_color_ranges[index]=[]
             self.title_last_values[index]=''
+            self.title_manual_lines[index]=None
         # Clearing task text resets each row to the default traffic template.
         for variable in self.page_vars:
             variable.set('1')
@@ -1716,7 +2050,119 @@ class App:
             self.bulk_text.edit_modified(False)
             self.history_paused = False
             self.record_edit()
-        self.status.config(text=f'已按原顺序填入 {len(plan)} 个链接；已有内容保留，请填写对应人名和视频名称。')
+        self.status.config(text=f'已按原顺序填入 {len(plan)} 行链接；同一行多个链接会分别下载，已有内容保留。')
+
+    def paste_rich_links(self, event):
+        """Preserve actual hrefs when a user pastes Google Sheets link chips."""
+        widget = event.widget
+        try:
+            plain_text = widget.clipboard_get()
+        except tk.TclError:
+            plain_text = ''
+        fragment = read_clipboard_html()
+        matrix = clipboard_matrix(plain_text, fragment)
+        field_rows = clipboard_field_rows(matrix)
+        if field_rows:
+            if self.apply_clipboard_rows(0, field_rows):
+                return 'break'
+            return 'break'
+        groups = clipboard_link_groups(fragment)
+        groups = [list(dict.fromkeys(group)) for group in groups]
+        if not groups or not any(groups):
+            return None
+        if isinstance(widget, tk.Text):
+            pasted = '\n'.join(' | '.join(group) for group in groups)
+            selection = widget.tag_ranges('sel')
+            if selection:
+                widget.delete(selection[0], selection[1])
+            widget.insert('insert', pasted)
+            self.status.config(text='已读取表格中的真实链接地址；同一行内的多个链接会留在同一下载行。')
+            return 'break'
+
+        nonempty = [group for group in groups if group]
+        if len(nonempty) != 1 or len(groups) != 1:
+            self.status.config(text='检测到多行表格链接；请粘贴到上方“批量链接”区域，再点“识别并填入”。')
+            return 'break'
+        pasted = ' | '.join(nonempty[0])
+        try:
+            if widget.selection_present():
+                widget.delete('sel.first', 'sel.last')
+            widget.insert('insert', pasted)
+            widget.icursor('insert')
+        except tk.TclError:
+            return None
+        if len(nonempty[0]) > 1:
+            self.status.config(text=f'已从表格单元格读取到 {len(nonempty[0])} 个链接；将保留在本行分别下载。')
+        return 'break'
+
+    def _paste_matrix(self, widget):
+        try:
+            plain_text = widget.clipboard_get()
+        except tk.TclError:
+            plain_text = ''
+        return clipboard_matrix(plain_text, read_clipboard_html())
+
+    def paste_column_values(self, event, start_index, field):
+        """Fill a form column downward from a copied spreadsheet range."""
+        if self.active:
+            self.status.config(text='下载期间不能批量填入任务。')
+            return 'break'
+        matrix = self._paste_matrix(event.widget)
+        if not matrix:
+            return None
+        mapped = clipboard_field_rows(matrix)
+        if mapped:
+            if self.apply_clipboard_rows(start_index, mapped):
+                self.status.config(text=f'已按表头批量填入 {len(mapped)} 行演员、号码、文案和视频链接。')
+            return 'break'
+        if any(len(row) != 1 for row in matrix):
+            return None
+        values = []
+        for row in matrix:
+            cell = row[0]
+            value = (' | '.join(cell['links']) if field == 'link' and cell['links']
+                     else str(cell.get('text', '')).strip())
+            values.append(value)
+        has_rich_link = field == 'link' and any(row[0]['links'] for row in matrix)
+        if len(values) == 1 and not has_rich_link:
+            return None
+        assignments = [{field: value} for value in values]
+        if self.apply_clipboard_rows(start_index, assignments):
+            if field == 'link':
+                self.status.config(text=f'已将 {len(values)} 行视频链接填入；同格多个链接会留在同一行下载。')
+            else:
+                labels = {'name': '演员/人名', 'phone': '号码', 'title': '视频名称'}
+                self.status.config(text=f'已将 {len(values)} 行{labels[field]}填入对应列。')
+        return 'break'
+
+    def apply_clipboard_rows(self, start_index, assignments):
+        if self.active:
+            self.status.config(text='下载期间不能批量填入任务。')
+            return False
+        if start_index + len(assignments) > len(self.rows):
+            remaining = len(self.rows) - start_index
+            self.status.config(text=f'剪贴板有 {len(assignments)} 行数据，但当前位置只剩 {remaining} 行；请分批粘贴。')
+            return False
+        tracked = hasattr(self, 'undo_stack')
+        if tracked:
+            self.record_edit()
+            self.history_paused = True
+        for offset, values in enumerate(assignments):
+            index = start_index + offset
+            if 'name' in values:
+                self.rows[index][0].set(str(values['name']).strip())
+            if 'phone' in values:
+                self.phone_vars[index].set(str(values['phone']).strip())
+                if self.phone_vars[index].get().strip():
+                    self.format_phone_cell(index)
+            if 'title' in values:
+                self.rows[index][1].set(str(values['title']).strip())
+            if 'link' in values:
+                self.rows[index][2].set(str(values['link']).strip())
+        if tracked:
+            self.history_paused = False
+            self.record_edit()
+        return True
 
     def choose_dir(self):
         path = filedialog.askdirectory()
@@ -1733,8 +2179,7 @@ class App:
     def show_errors(self):
         errors = [f"第 {self.jobs[key]['row'] + 1} 行：{self.jobs[key].get('error', '')}"
                   for key in getattr(self, 'batch_keys', [])
-                  if self.jobs[key]['state'] in ('失败', DENOISE_PRESERVED_STATE,
-                                                  COMPRESS_PRESERVED_STATE)]
+                  if self.jobs[key]['state'] in ('失败', DENOISE_PRESERVED_STATE)]
         messagebox.showinfo('失败原因', '\n\n'.join(errors) or '没有失败任务', parent=self.root)
 
     def use_browser_login(self, browser):
@@ -1958,17 +2403,18 @@ class App:
                            ((f'第{i + 1}行', '', '') if self.supplied_phone(i) else row)
                            for i, row in enumerate(values)]
             if retry_keys:
-                tasks = [(self.jobs[key]['row'], self.jobs[key]['name'], self.jobs[key]['url'], self.jobs[key]['path']) for key in retry_keys]
+                tasks = [(self.jobs[key]['row'], self.jobs[key]['name'], self.jobs[key]['url'],
+                          self.jobs[key]['path'], self.jobs[key].get('link_index', 1),
+                          self.jobs[key].get('link_count', 1), key) for key in retry_keys]
             else:
-                pairs = task_pairs(self.base.get(), task_values)
-                indexes = [i for i, values_row in enumerate(task_values) if any(value.strip() for value in values_row)]
-                tasks = [(index, *pair) for index, pair in zip(indexes, pairs)]
-            retry_jobs_by_row = ({self.jobs[key]['row']: self.jobs[key] for key in retry_keys}
-                                 if retry_keys else {})
-            previous_stems = {row: job.get('media_stem') for row, job in retry_jobs_by_row.items()}
+                tasks = [(*task, None) for task in task_rows(self.base.get(), task_values)]
+            previous_stems = {}
+            for key in retry_keys or ():
+                previous_stems.setdefault(self.jobs[key]['row'], self.jobs[key].get('media_stem'))
             media_stems = {}
             last_generated_at = None
-            for index, _, _, _ in tasks:
+            task_rows_seen = dict.fromkeys(task[0] for task in tasks)
+            for index in task_rows_seen:
                 person, title, _ = task_values[index]
                 saved_stem = previous_stems.get(index)
                 if saved_stem:
@@ -1999,12 +2445,15 @@ class App:
                 return
             import yt_dlp
             import gdown
-            for _, _, _, path in tasks:
+            for _, _, _, path, _, _, _ in tasks:
                 path.mkdir(parents=True, exist_ok=True)
-            active_rows={index for index,_,_,_ in tasks}
             if templates:
                 png_warnings=[]
-                for index, _, _, path in tasks:
+                generated_png_rows=set()
+                for index, _, _, path, _, _, _ in tasks:
+                    if index in generated_png_rows:
+                        continue
+                    generated_png_rows.add(index)
                     if index not in templates:
                         continue
                     design = templates[index]
@@ -2046,27 +2495,26 @@ class App:
         # twelve-row form to repaint like a page refresh.
         batch = []
         self.batch_keys = []
-        for row_index, name, url, path in tasks:
+        for row_index, name, url, path, link_index, link_count, prior_key in tasks:
             key = uuid.uuid4().hex
             event = threading.Event()
             override = self.denoise_vars[row_index].get().strip()
             strength = int(override[:-1]) if override.endswith('%') else global_denoise
-            previous_job = retry_jobs_by_row.get(row_index)
+            previous_job = self.jobs.get(prior_key) if prior_key else None
             retry_denoise_files = (list(previous_job.get('denoise_failed_files') or [])
                                    if previous_job and previous_job.get('state') == DENOISE_PRESERVED_STATE else [])
-            retry_compress_files = (list(previous_job.get('compression_failed_files') or [])
-                                    if previous_job and previous_job.get('state') == COMPRESS_PRESERVED_STATE else [])
             self.jobs[key] = {'row': row_index, 'name': name, 'url': url, 'path': path,
                               'media_stem': media_stems[row_index], 'cancel': event, 'state': '排队中',
+                              'link_index': link_index, 'link_count': link_count,
                               'title_error': title_image_errors.get(row_index),
                               'denoise_strength': strength, 'denoise_failed_files': [],
-                              'compression_failed_files': [],
-                              'retry_denoise_files': retry_denoise_files,
-                              'retry_compress_files': retry_compress_files}
+                              'retry_denoise_files': retry_denoise_files}
             self.batch_keys.append(key)
-            self._set_row_progress(row_index,'0% · 排队中')
+            initial_progress = (f'0% · 链接 {link_index}/{link_count} 排队中'
+                                if link_count > 1 else '0% · 排队中')
+            self._set_row_progress(row_index,initial_progress)
             batch.append((key, url, event, (path, quality, cookie, browser_auth, strength,
-                                             retry_denoise_files, retry_compress_files)))
+                                             retry_denoise_files)))
         def run_batch():
             with ThreadPoolExecutor(max_workers=count) as executor:
                 groups, standalone = group_download_jobs(batch)
@@ -2081,18 +2529,16 @@ class App:
         return self._download_uncached(key, url, cancel, settings)
 
     def _download_group(self, batch):
-        """Download each link once, then compress large files and denoise as requested."""
+        """Download each link once, then denoise its audio when requested."""
         leader_key, url, cancel, leader_settings = batch[0]
         keys = [job[0] for job in batch]
         output_folders = {job[0]: Path(job[3][0]) for job in batch}
         retry_sources = []
-        retry_compress_sources = []
         for _key, _, _, settings in batch:
-            for slot, destination in ((5, retry_sources), (6, retry_compress_sources)):
-                for item in settings[slot] if len(settings) > slot else ():
-                    source = Path(item)
-                    if source not in destination:
-                        destination.append(source)
+            for item in settings[5] if len(settings) > 5 else ():
+                source = Path(item)
+                if source not in retry_sources:
+                    retry_sources.append(source)
 
         try:
             base = Path(leader_settings[0]).parent
@@ -2104,23 +2550,19 @@ class App:
                 strength = int(settings[4]) if len(settings) > 4 else 0
                 strengths.setdefault(strength, []).append(job)
 
-            retry_only_compression = bool(retry_compress_sources) and not retry_sources
-            # Keep processing folders out of the user's download directory. If
-            # Windows temporarily holds a compression output open during cleanup,
-            # a leftover work folder must never look like the final download.
+            # Keep processing folders out of the user's download directory so
+            # interrupted work cannot look like a completed download.
             with tempfile.TemporaryDirectory(prefix='clipassistant-batch-') as temporary:
                 work_root = Path(temporary)
-                selected_retry = retry_compress_sources if retry_only_compression else retry_sources
-                if selected_retry:
+                if retry_sources:
                     sources_by_name = {}
-                    expected_names = {source.name.casefold() for source in selected_retry}
-                    for source in selected_retry:
+                    expected_names = {source.name.casefold() for source in retry_sources}
+                    for source in retry_sources:
                         if source.is_file():
                             sources_by_name.setdefault(source.name.casefold(), source)
                     missing = sorted(expected_names - set(sources_by_name))
                     if missing:
-                        task = '压缩' if retry_only_compression else '降噪'
-                        raise RuntimeError(f'待重试{task}的视频已移动或删除：\n' + '\n'.join(missing))
+                        raise RuntimeError('待重试降噪的视频已移动或删除：\n' + '\n'.join(missing))
                     raw_sources = []
                     for index, source in enumerate(sources_by_name.values(), start=1):
                         pristine = work_root / 'source' / f'{index:04d}' / source.name
@@ -2139,15 +2581,11 @@ class App:
                         raise RuntimeError('下载没有生成可处理的视频文件。')
 
                 from core.denoise import denoise_video
-                from compress_video import CRF, transcode_mp4
                 terminal_keys = set()
                 for strength, strength_batch in strengths.items():
                     strength_keys = [job[0] for job in strength_batch]
                     result_files = {}
                     denoise_errors = {}
-                    denoise_preserved_as = {}
-                    compression_errors = {}
-                    skipped_compression = []
                     for index, source in enumerate(raw_sources, start=1):
                         if cancel.is_set():
                             raise RuntimeError('任务已取消')
@@ -2156,42 +2594,9 @@ class App:
                         shutil.copy2(source, source_work)
                         output = source_work
 
-                        # Download first without merging separate streams. Only
-                        # compress a new file when it exceeds the size limit;
-                        # denoise retries already point to the preserved source.
-                        small_input = (
-                            not retry_sources and not retry_only_compression and
-                            source_work.stat().st_size <= COMPRESS_SIZE_LIMIT_BYTES
-                        )
-                        needs_compression = (
-                            retry_only_compression or
-                            (not retry_sources and not small_input)
-                        )
-                        if small_input:
-                            skipped_compression.append(source.name.casefold())
-                            for key in strength_keys:
-                                self.events.put((key, '处理中', f'文件不超过 80 MB，跳过压缩 {index}/{len(raw_sources)}'))
-                        if needs_compression:
-                            for key in strength_keys:
-                                self.events.put((key, '处理中', f'H.264 压缩 {index}/{len(raw_sources)} · x264 CRF {CRF}'))
-                            try:
-                                output = transcode_mp4(
-                                    output,
-                                    resource_dir=self.resource_dir,
-                                    progress=lambda detail, group_keys=tuple(strength_keys):
-                                        [self.events.put((key, '处理中', detail)) for key in group_keys],
-                                    cancel=cancel,
-                                    remove_source=True,
-                                    compress=True,
-                                )
-                            except Exception as exc:
-                                if cancel.is_set():
-                                    raise
-                                compression_errors[source.name.casefold()] = str(exc)
-                                result_files[source.name.casefold()] = (source, output)
-                                continue
-
-                        if strength > 0 and not retry_only_compression:
+                        # Keep the downloaded video stream and original format;
+                        # only denoise its audio when the selected strength is on.
+                        if strength > 0:
                             for key in strength_keys:
                                 self.events.put((key, '处理中', f'降噪 {index}/{len(raw_sources)} · {strength}%'))
                             try:
@@ -2211,75 +2616,48 @@ class App:
                                 if cancel.is_set():
                                     raise
                                 denoise_errors[source.name.casefold()] = str(exc)
-                                denoise_preserved_as[source.name.casefold()] = (
-                                    '未压缩的原视频（不超过 80 MB）'
-                                    if source.name.casefold() in skipped_compression
-                                    else '压缩后的 MP4'
-                                )
                         result_files[source.name.casefold()] = (source, output)
 
                     for key, _, _, _settings in strength_batch:
                         folder = output_folders[key]
-                        self.events.put((key, '处理中', '正在把同一视频的处理结果复制到此行文件夹'))
+                        self.events.put((key, '处理中', '正在保存下载视频与降噪结果'))
                         failed_denoise_files = []
-                        failed_compression_files = []
                         copy_errors = []
                         for source in raw_sources:
                             _raw, output = result_files[source.name.casefold()]
-                            output_name = f'{Path(source.name).stem}{output.suffix}'
+                            job = self.jobs[key]
+                            link_prefix = (f'视频{job.get("link_index", 1)}-'
+                                           if job.get('link_count', 1) > 1 else '')
+                            output_name = f'{link_prefix}{Path(source.name).stem}{output.suffix}'
                             try:
                                 published = replace_published_file(output, folder, output_name)
                                 if output.suffix.casefold() != source.suffix.casefold():
-                                    old_source = folder / video_output_filename(source.name)
+                                    old_source = folder / video_output_filename(f'{link_prefix}{source.name}')
                                     if old_source != published and old_source.is_file():
                                         old_source.unlink()
                                 if source.name.casefold() in denoise_errors:
                                     failed_denoise_files.append(str(published))
-                                elif source.name.casefold() in compression_errors:
-                                    failed_compression_files.append(str(published))
                             except OSError as exc:
                                 copy_errors.append(f'{source.name}：{exc}')
                         self.jobs[key]['denoise_failed_files'] = failed_denoise_files
-                        self.jobs[key]['compression_failed_files'] = failed_compression_files
                         if copy_errors:
                             detail = '复制同一链接的处理结果失败：\n' + '\n'.join(copy_errors)
                             self.events.put((key, '失败', detail))
-                        elif denoise_errors and compression_errors:
-                            details = ('降噪失败：\n' + '\n'.join(
-                                f'{Path(name).name}：{error}' for name, error in denoise_errors.items()) +
-                                '\n压缩失败：\n' + '\n'.join(
-                                    f'{Path(name).name}：{error}' for name, error in compression_errors.items()))
-                            self.events.put((key, '失败',
-                                             f'同一批视频中有降噪和压缩失败项；已分别保留可恢复的视频。\n{details}'))
                         elif denoise_errors:
                             details = '\n'.join(
-                                f'{Path(name).name}：保留{denoise_preserved_as.get(name, "视频")}; 降噪错误：{error}'
+                                f'{Path(name).name}：保留原视频；降噪错误：{error}'
                                 for name, error in denoise_errors.items())
                             self.events.put((key, DENOISE_PRESERVED_STATE,
                                              f'降噪失败，已保留可用视频版本：\n{details}'))
-                        elif compression_errors:
-                            details = '\n'.join(f'{Path(name).name}：{error}'
-                                                for name, error in compression_errors.items())
-                            self.events.put((key, COMPRESS_PRESERVED_STATE,
-                                             f'压缩失败，原视频已保留：\n{details}'))
                         else:
-                            if retry_only_compression:
-                                label = '已重试压缩'
-                            elif strength == 0:
-                                label = '已压缩为 MP4'
-                            elif len(strength_batch) > 1:
-                                label = '同链接已复用压缩降噪成片'
-                            elif retry_sources:
+                            if retry_sources:
                                 label = '已重试降噪'
+                            elif strength == 0:
+                                label = '已下载原视频'
+                            elif len(strength_batch) > 1:
+                                label = '同链接已复用降噪结果'
                             else:
-                                label = '已压缩并降噪为 MP4'
-                            if skipped_compression:
-                                if len(skipped_compression) == len(raw_sources):
-                                    label = ('已下载（文件不超过 80 MB，跳过压缩）'
-                                             if strength == 0 else
-                                             '已降噪（文件不超过 80 MB，跳过压缩）')
-                                else:
-                                    label += f'；{len(skipped_compression)} 个不超过 80 MB 的文件跳过压缩'
+                                label = '已下载并降噪'
                             self.events.put((key, '完成', f'100% · {len(raw_sources)} 个视频{label}'))
                         terminal_keys.add(key)
             return True
@@ -2431,7 +2809,7 @@ class App:
                         gdown.download_folder, cookie=cookie, temporary=path,
                         browser_auth=browser_auth,
                         retry_args={'stop_event': cancel,
-                            'on_retry': lambda attempt, error: update('下载中', f'读取文件夹网络响应停滞，正在重试 {attempt}/2')},
+                            'on_retry': lambda attempt, error: update('下载中', f'文件夹重试 {attempt}/2 · {type(error).__name__}')},
                         url=url, output=str(path), skip_download=True, quiet=True,
                         timeout=(20, 120), **auth)
                     extensions = {'.mp4', '.mov', '.m4v', '.mkv', '.webm', '.avi', '.wmv', '.flv', '.mpeg', '.mpg', '.3gp', '.ts', '.mts', '.m2ts', '.vob', '.ogv'}
@@ -2460,7 +2838,7 @@ class App:
                         update('下载中', (f'{min(99, int(done * 100 / total))}%' if total else '—%（总大小未知）') + suffix)
                     def retry_status(attempt, error):
                         check()
-                        update('下载中', f'网络响应停滞，正在重试 {attempt}/2：{type(error).__name__}')
+                        update('下载中', f'重试 {attempt}/2 · {type(error).__name__}')
                     def waiting_status():
                         update('下载中', '等待同一链接的另一个任务完成，避免重复下载…')
                     update('下载中', f'0% · 视频 {index + 1}/{len(items)}' if is_folder else '0%')
@@ -2498,7 +2876,7 @@ class App:
                         update('处理中', '100% · 下载完成，准备后处理')
                 # Download one ready-to-play source stream. Do not download
                 # separate audio/video streams that require an FFmpeg merge;
-                # compression and denoising happen after the download returns.
+                # optional audio denoising happens after the download returns.
                 opts = {'outtmpl': str(path / '%(title).150B [%(id)s].%(ext)s'), 'format': 'best', 'noplaylist': True, 'windowsfilenames': True, 'overwrites': False, 'continuedl': True, 'retries': 3, 'socket_timeout': 30, 'max_filesize': 2 * 1024 * 1024 * 1024, 'progress_hooks': [hook], 'quiet': True, 'no_warnings': True}
                 if cookie:
                     opts['cookiefile'] = cookie
@@ -2519,14 +2897,12 @@ class App:
 
     def cancel(self):
         for key in getattr(self, 'batch_keys', []):
-            if self.jobs[key]['state'] not in ('完成', '失败', '已取消', DENOISE_PRESERVED_STATE,
-                                               COMPRESS_PRESERVED_STATE):
+            if self.jobs[key]['state'] not in ('完成', '失败', '已取消', DENOISE_PRESERVED_STATE):
                 self.jobs[key]['cancel'].set()
 
     def retry(self):
         keys = [key for key in getattr(self, 'batch_keys', [])
-                if self.jobs[key]['state'] in ('失败', DENOISE_PRESERVED_STATE,
-                                                COMPRESS_PRESERVED_STATE)]
+                if self.jobs[key]['state'] in ('失败', DENOISE_PRESERVED_STATE)]
         if keys and not self.active:
             self.start(keys)
 
@@ -2540,21 +2916,17 @@ class App:
                     self.extract_button.config(state='normal')
                     if not self.history_paused:
                         self.last_snapshot = self.snapshot()
-                    resolved_states = ('完成', DENOISE_PRESERVED_STATE, COMPRESS_PRESERVED_STATE)
+                    resolved_states = ('完成', DENOISE_PRESERVED_STATE)
                     all_resolved = all(self.jobs[key]['state'] in resolved_states for key in self.batch_keys)
                     denoise_failed = [key for key in self.batch_keys
                                       if self.jobs[key]['state'] == DENOISE_PRESERVED_STATE]
-                    compression_failed = [key for key in self.batch_keys
-                                          if self.jobs[key]['state'] == COMPRESS_PRESERVED_STATE]
-                    if all_resolved and (denoise_failed or compression_failed):
+                    if all_resolved and denoise_failed:
                         if not self.embedded:
                             self.root.deiconify()
                             self.root.lift()
                         summary=[]
                         if denoise_failed:
                             summary.append(f'{len(denoise_failed)} 项降噪失败，已保留对应视频版本')
-                        if compression_failed:
-                            summary.append(f'{len(compression_failed)} 项压缩失败，源视频已保留')
                         self.status.config(text='下载处理已结束；'+'；'.join(summary)+'。可查看失败原因或重试。')
                     elif all_resolved:
                         if self.exit_on_finish.get():
@@ -2586,23 +2958,31 @@ class App:
                         status_text='有下载失败或取消任务，窗口保留。可查看失败原因或重试。'
                         if denoise_failed:
                             status_text+=f'另有 {len(denoise_failed)} 项降噪失败，已保留对应视频版本。'
-                        if compression_failed:
-                            status_text+=f'另有 {len(compression_failed)} 项压缩失败，源视频已保留。'
                         warnings=getattr(self,'batch_warnings',[])
                         if warnings:
                             status_text+='\n标题图保存失败（视频下载已继续）：\n'+'\n'.join(warnings)
                         self.status.config(text=status_text)
                     if any(self.jobs[key].get('url') for key in self.batch_keys) and (all_resolved or any(
-                            self.jobs[key]['state'] in ('完成', DENOISE_PRESERVED_STATE,
-                                                        COMPRESS_PRESERVED_STATE) for key in self.batch_keys)):
+                            self.jobs[key]['state'] in ('完成', DENOISE_PRESERVED_STATE)
+                            for key in self.batch_keys)):
                         self.completion_actions.pack(side='right', padx=(8, 0))
                 else:
                     self.jobs[key]['state'] = state
-                    if state in ('失败', DENOISE_PRESERVED_STATE, COMPRESS_PRESERVED_STATE):
+                    if state in ('失败', DENOISE_PRESERVED_STATE):
                         self.jobs[key]['error'] = detail
                     label = (DENOISE_ROW_LABEL if state == DENOISE_PRESERVED_STATE else
-                             (COMPRESS_ROW_LABEL if state == COMPRESS_PRESERVED_STATE else
-                              (f'{detail} · {state}' if state in ('下载中', '下载完成', '处理中', '完成') else state)))
+                             (f'{detail} · {state}' if state in ('下载中', '下载完成', '处理中', '完成') else state))
+                    job = self.jobs[key]
+                    if job.get('link_count', 1) > 1:
+                        row_jobs = [self.jobs[item] for item in self.batch_keys
+                                    if self.jobs[item].get('row') == job.get('row')]
+                        if state in ('完成', '失败', '已取消', DENOISE_PRESERVED_STATE):
+                            resolved = sum(item.get('state') in
+                                           ('完成', '失败', '已取消', DENOISE_PRESERVED_STATE)
+                                           for item in row_jobs)
+                            label = f'{resolved}/{job["link_count"]} 个链接已处理'
+                        else:
+                            label = f'链接 {job["link_index"]}/{job["link_count"]} · {label}'
                     self._set_row_progress(self.jobs[key]['row'],label)
         except queue.Empty:
             pass
@@ -2663,6 +3043,17 @@ if __name__ == '__main__':
         assert '3 行标题' in instance.title_preview_heading.cget('text')
         assert len(__import__('local_design').replace_title(instance.title_preview_design(0),instance.rows[0][1].get())['lines'])==3
         instance.title_layout_vars[0].set('全局');root.update()
+        instance.title_preview_manual_text.delete('1.0','end')
+        instance.title_preview_manual_text.insert('1.0','3 Quiet\nSigns Holy Spirit\nIs With You')
+        instance._title_manual_lines_changed()
+        instance.show_title_preview(0);root.update()
+        manual_design=__import__('local_design').replace_title(
+            instance._decorate_title_design(instance.title_preview_design(0),0,instance.rows[0][1].get()),
+            instance.rows[0][1].get())
+        assert [''.join(run['text'] for run in line['runs']) for line in manual_design['lines']]==[
+            '3 Quiet','Signs Holy Spirit','Is With You']
+        instance._reset_title_manual_lines();instance.show_title_preview(0);root.update()
+        assert instance.title_manual_lines[0] is None
         instance.hide_title_preview()
         page_library=PageLibrary(instance)
         root.update()

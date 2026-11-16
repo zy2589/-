@@ -912,12 +912,23 @@ function polishSectionHtml(title, rows, emptyText) {
       }
       function planReviewCaptionReplacement(captions, review, text, useExpected = true) {
         const issueId = review.issueId || review.id;
-        const entries = captions.filter(c => (!review.captionTrackId || c.trackId === review.captionTrackId) &&
-          (!review.ownerClipId || c.ownerClipId === review.ownerClipId)).flatMap(caption =>
+        const entries = captions.filter(c => (!review.captionTrackId || (c.trackId || 'caption') === review.captionTrackId) &&
+          (!review.ownerClipId || c.ownerClipId === review.ownerClipId) &&
+          (!review.sourceMediaId || c.sourceMediaId === review.sourceMediaId)).flatMap(caption =>
           (caption.words || []).map((word, index) => ({caption, word, index})))
           .filter(e => Math.min(e.word.end, review.end) - Math.max(e.word.start, review.start) > .005);
-        const linked = entries.filter(e => e.word.issueId === issueId);
-        const selected = (linked.length ? linked : entries).filter(e => !e.word.userKept && e.word.matchType !== 'edited')
+        const hasWordScope = Array.isArray(review.words);
+        const targets = hasWordScope ? review.words.filter(word =>
+          Number.isFinite(Number(word?.start)) && Number.isFinite(Number(word?.end)) &&
+          Number(word.end) > Number(word.start)) : [];
+        if (hasWordScope && !targets.length) return null;
+        const inExactWordScope = entry => !hasWordScope || targets.some(target =>
+          (!target.issueId || target.issueId === issueId) &&
+          Math.min(Number(target.end), Number(entry.word.end)) -
+            Math.max(Number(target.start), Number(entry.word.start)) > .005);
+        const scopedEntries = entries.filter(inExactWordScope);
+        const linked = scopedEntries.filter(e => e.word.issueId === issueId);
+        const selected = (linked.length ? linked : scopedEntries).filter(e => !e.word.userKept && e.word.matchType !== 'edited')
           .sort((a,b) => a.word.start-b.word.start);
         if (!selected.length) return null;
         // A split review retains the original issue's whole expectedText. Its
@@ -967,6 +978,15 @@ function polishSectionHtml(title, rows, emptyText) {
         if (sourceMode !== 'manual' && (!text || /^[—-]$/.test(text))) return toast('没有可靠的对应文案，请核对后手动修改');
         const changes = planReviewCaptionReplacement(state.captions, review, text, sourceMode === 'manual' ? null : sourceMode !== 'spoken');
         if (!changes) return toast('对应字幕已修改或位置发生变化，请重新核对；已保留提示');
+        const hasExistingText = state.captions.some(c => (c.words || []).length || String(c.text || '').trim());
+        const changedByCaption = new Map(changes.map(change => [change.caption, change.words]));
+        const hasRemainingText = state.captions.some(caption => {
+          const words = changedByCaption.has(caption) ? changedByCaption.get(caption) : caption.words || [];
+          const text = changedByCaption.has(caption) ? joinCaptionWords(words) : caption.text || '';
+          return words.length > 0 || String(text).trim().length > 0;
+        });
+        if (hasExistingText && !hasRemainingText)
+          return toast('此次修改会删除全部文案，已取消操作以保护字幕');
         if(record) snapshot();
         for (const {caption,words} of changes) {
           caption.words=words;caption.text=joinCaptionWords(words);
@@ -1058,10 +1078,11 @@ function polishSectionHtml(title, rows, emptyText) {
         if (review.type === 'repeat') return deleteRepeatedReview(review.id);
         const issueId = review.issueId || review.id;
         if (state.issues.some((item) => item.id === issueId)) {
-          cutScriptIssue(issueId);
+          // Aggregate issues can span several split review markers. Keep this
+          // operation scoped to the marker the user actually clicked.
+          cutScriptIssue(issueId, { scope: review });
           return;
         }
-        snapshot();
         const start = Math.max(0, Number(review.start || 0));
         let end = Math.min(
           state.duration,
@@ -1080,7 +1101,13 @@ function polishSectionHtml(title, rows, emptyText) {
           toast("这一处没有可剪掉的音频范围");
           return;
         }
-        removeIssueWords(issueId, start, end, review);
+        const captionRemoval = planIssueWordsRemoval(issueId, start, end, review);
+        if (captionRemoval.blocked) {
+          toast(issueCaptionRemovalMessage(captionRemoval.reason));
+          return;
+        }
+        snapshot();
+        removeIssueWords(issueId, start, end, review, captionRemoval);
         state.removals.push({
           start: sourceStart,
           end: sourceEnd,
@@ -1610,44 +1637,31 @@ function polishSectionHtml(title, rows, emptyText) {
         renderAll();
         toast("已把这段口语补充插入正确字幕");
       }
-      function removeIssueWords(issueId, start, end, scope = {}) {
-        const scopedIssueId = String(issueId || '');
-        const cutStart = Number(start), cutEnd = Number(end);
-        if (!scopedIssueId || !Number.isFinite(cutStart) || !Number.isFinite(cutEnd) || cutEnd <= cutStart) return;
-        const overlapsRange = word => {
-          const wordStart = Number(word?.start), wordEnd = Number(word?.end);
-          return Number.isFinite(wordStart) && Number.isFinite(wordEnd) &&
-            Math.min(wordEnd,cutEnd) - Math.max(wordStart,cutStart) > .005;
-        };
-        const belongsToIssueScope = caption => {
-          if (scope?.ownerClipId && caption.ownerClipId && caption.ownerClipId !== scope.ownerClipId) return false;
-          if (scope?.sourceMediaId && caption.sourceMediaId && caption.sourceMediaId !== scope.sourceMediaId) return false;
-          return !scope?.captionTrackId || (caption.trackId || 'caption') === scope.captionTrackId;
-        };
-        state.captions = state.captions
-          .map((caption) => {
-            if (!Array.isArray(caption.words) || !caption.words.length)
-              return caption;
-            const words = caption.words.filter((word) => {
-              if (!belongsToIssueScope(caption)) return true;
-              const overlaps = overlapsRange(word);
-              if (word.issueId === scopedIssueId) return !overlaps;
-              if (word.issueId) return true;
-              return !(
-                overlaps &&
-                word.matchType === "error" &&
-                ["extra", "repeat"].includes(word.issueType)
-              );
-            });
-            if (!words.length) return null;
-            caption.words = words;
-            caption.text = words
-              .map((word) => word.display)
-              .join(" ")
-              .replace(/\s+([.,!?;:])/g, "$1");
-            return caption;
-          })
-          .filter(Boolean);
+      function planIssueWordsRemoval(issueId, start, end, scope = {}) {
+        const issue = { ...scope, id: scope.id || issueId,
+          issueId: scope.issueId || issueId, start, end };
+        return planIssueCaptionRemoval(state.captions || [], issue, {
+          lockedTracks: state.trackLocks || {},
+          joinWords: words => joinCaptionWords(words),
+        });
+      }
+      function issueCaptionRemovalMessage(reason) {
+        if (reason === 'would-remove-all-text') return '此次切除会删除全部文案，已取消操作以保护字幕';
+        if (reason === 'ambiguous-scope') return '错误文案跨多个轨道或素材，无法唯一定位；已取消切除以保护字幕';
+        return '找不到精确对应的错误字幕，已取消切除以保护字幕';
+      }
+      function removeIssueWords(issueId, start, end, scope = {}, prepared = null) {
+        const plan = prepared || planIssueWordsRemoval(issueId, start, end, scope);
+        if (plan.blocked) return false;
+        const deletion = plan.deletion;
+        state.captions = deletion.captions;
+        state.captionRecoveryArchive = (state.captionRecoveryArchive || []).filter(record => {
+          const caption = record?.caption;
+          if (deletion.removedCaptionIds.has(caption?.id)) return false;
+          if (record?.word) return !caption || !reviewCaptionWordMatches(plan.review, caption, record.word);
+          return !caption || !reviewCaptionBlockIsCovered(plan.review, caption);
+        });
+        return true;
       }
       function dismissTrimmedIssues(start, end, ownerIds = null) {
         const cutStart = Number(start || 0), cutEnd = Number(end || 0);
@@ -1830,22 +1844,29 @@ function polishSectionHtml(title, rows, emptyText) {
         seekTimeline(Math.max(0, stayTime));
         return applied;
       }
-      function cutScriptIssue(id, { record = true, quiet = false } = {}) {
+      function cutScriptIssue(id, { record = true, quiet = false, scope = null } = {}) {
         const issue = state.issues.find((item) => item.id === id);
         if (!issue) return;
-        const start = Math.max(0, Number(issue.start || 0));
+        const target = scope ? { ...issue, ...scope, id: scope.id || issue.id,
+          issueId: scope.issueId || issue.issueId || issue.id } : issue;
+        const start = Math.max(0, Number(target.start ?? 0));
         let end = Math.min(
           state.duration,
-          Math.max(start + 0.04, Number(issue.end || 0)),
+          Math.max(start + 0.04, Number(target.end ?? 0)),
         );
-        if (issue.type === 'repeat' && !repeatCutPreservesCaptionText(start,end)) {
+        if (target.type === 'repeat' && !repeatCutPreservesCaptionText(start,end)) {
           if (!quiet) toast('疑似重复范围覆盖了全部文案，已取消删除以保护工程');
+          return;
+        }
+        const captionRemoval = planIssueWordsRemoval(id, start, end, target);
+        if (captionRemoval.blocked) {
+          if (!quiet) toast(issueCaptionRemovalMessage(captionRemoval.reason));
           return;
         }
         if (!mainAudioClips().some(c=>c.start<end&&c.end>start) &&
             state.audioAssets.some(c=>c.start<end&&c.end>start)) {
           if (record) snapshot();
-          removeIssueWords(id,start,end,issue);
+          if (!removeIssueWords(id,start,end,target,captionRemoval)) return;
           dismissTrimmedIssues(start,end);
           // Independent clips already own their source ranges. Cut the placed
           // timeline directly; mapping through removed main media is invalid.
@@ -1861,18 +1882,20 @@ function polishSectionHtml(title, rows, emptyText) {
           return;
         }
         if (record) snapshot();
-        removeIssueWords(id, start, end, issue);
+        if (!removeIssueWords(id, start, end, target, captionRemoval)) return;
         state.removals.push({
           start: sourceStart,
           end: sourceEnd,
-          source: `script-${issue.type || "difference"}`,
+          source: `script-${target.type || "difference"}`,
         });
         shiftTracks(start, end - start);
-        state.reviewCaptions = state.reviewCaptions.filter(
-          (item) => (item.issueId || item.id) !== id,
-        );
-        state.issues = state.issues.filter((item) => item.id !== id);
-        state.matchIssues = (state.matchIssues || []).filter(item => (item.issueId || item.id) !== id);
+        state.reviewCaptions = state.reviewCaptions.filter(item => scope
+          ? item.id !== scope.id : (item.issueId || item.id) !== id);
+        const remainingIssue = state.reviewCaptions.some(item => (item.issueId || item.id) === id) ||
+          state.captions.some(caption => (caption.words || []).some(word => word.issueId === id));
+        state.issues = state.issues.filter(item => item.id !== id || remainingIssue);
+        state.matchIssues = (state.matchIssues || []).filter(item =>
+          (item.issueId || item.id) !== id || remainingIssue);
         normalizeRemovals();
         recomputeContentDuration();
         clampTracksToDuration();

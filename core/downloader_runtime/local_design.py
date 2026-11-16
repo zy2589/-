@@ -52,6 +52,21 @@ def system_fonts():
     return dict(sorted(result.items()))
 
 
+def normalize_manual_title_lines(title, lines):
+    """Validate manual line breaks while keeping the title's words unchanged."""
+    translate = str.maketrans({'“':'"','”':'"','‘':"'",'’':"'",'—':'-','–':'-'})
+    normalize = lambda value: unicodedata.normalize('NFKC', str(value)).translate(translate)
+    normalized_title = ' '.join(normalize(title).split())
+    cleaned = [' '.join(normalize(line).split()) for line in lines]
+    if not cleaned or any(not line for line in cleaned):
+        raise ValueError('标题分行不能为空。')
+    if len(cleaned) > 4:
+        raise ValueError('标题最多手动分成 4 行。')
+    if ' '.join(cleaned) != normalized_title:
+        raise ValueError('手动分行只能调整换行，文字必须与“视频名称”完全一致。')
+    return cleaned
+
+
 def replace_title(template, title):
     source_title=str(title)
     title = unicodedata.normalize('NFKC',source_title).translate(str.maketrans({'“':'"','”':'"','‘':"'",'’':"'",'—':'-','–':'-'}))
@@ -75,9 +90,13 @@ def replace_title(template, title):
     # A row's selected line count is a minimum. If its saved font makes that
     # layout too wide, continue to the next line count up to four.
     exact_layout=bool(design.get('layout_exact'))
-    values = fit_title_lines(title,requested,lambda value:measure_line(value,0))
-    if exact_layout and len(values)>requested:
-        values=balanced_lines(title,requested,lambda value:measure_line(value,0))
+    manual_lines=design.get('manual_title_lines')
+    if manual_lines is not None:
+        values=normalize_manual_title_lines(source_title,manual_lines)
+    else:
+        values = fit_title_lines(title,requested,lambda value:measure_line(value,0))
+        if exact_layout and len(values)>requested:
+            values=balanced_lines(title,requested,lambda value:measure_line(value,0))
     colored=title_line_runs(values)
     design['lines']=[dict(original[min(i,len(original)-1)],**inherited,runs=colored[i]) for i,value in enumerate(values)]
     if inherited:

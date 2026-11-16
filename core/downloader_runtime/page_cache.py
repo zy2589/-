@@ -13,10 +13,37 @@ def english_brackets(text):
 
 
 PHONE_PATTERN=r'\+[^\S\r\n]*\d[\d ()\-（）]{6,}\d'
+PHONE_LABEL_PATTERN = re.compile(
+    r'(?:电话(?:号码)?|電話(?:號碼|番号)?|号码|號碼|手机|手機|(?<![\w])(?:whats\s*app|whatsapp|phone(?:\s*number)?|telephone|tel)(?![\w]))\s*[:：=]?\s*',
+    re.IGNORECASE,
+)
+
+
+def extract_phone_input(text, region='US'):
+    """Extract a plausible phone number from pasted labels or descriptive text."""
+    value = unicodedata.normalize('NFKC', str(text or '')).translate(str.maketrans({
+        '（': '(', '）': ')', '—': '-', '–': '-', '−': '-', '―': '-',
+        '\u00a0': ' ', '\u200b': ' ', '\u2060': ' ',
+    }))
+    value = ''.join(str(unicodedata.digit(char)) if char.isdigit() else char for char in value)
+
+    # A labeled phone wins over incidental numbers in the surrounding copy,
+    # for example a promo multiplier such as "1.25x" before "电话：+64…".
+    labels = list(PHONE_LABEL_PATTERN.finditer(value))
+    search_text = value[labels[-1].end():] if labels else value
+    matches = list(phonenumbers.PhoneNumberMatcher(search_text, region))
+    if not matches and labels:
+        return ''
+    if not matches:
+        return ''
+    international = [match for match in matches if '+' in match.raw_string]
+    match = (international or matches)[-1]
+    return re.sub(r'\s+', ' ', match.raw_string.translate(str.maketrans({'＋': '+'}))).strip()
 
 
 def format_phone(text):
-    clean=unicodedata.normalize('NFKC',text).strip()
+    clean=extract_phone_input(text)
+    if not clean:return ''
     clean=re.sub(r'[ \t]+',' ',clean)
     if '(' in clean or ')' in clean:
         clean=re.sub(r'[ \t]*([()])[ \t]*',r'\1',clean)
@@ -31,7 +58,15 @@ def format_phone(text):
 
 def format_phone_like(existing,text):
     """Format replacement digits with the saved number's separators when possible."""
-    existing=str(existing or '').strip();text=str(text or '').strip()
+    existing=str(existing or '').strip()
+    region='US'
+    try:
+        old_number=phonenumbers.parse(existing,None)
+        region=phonenumbers.region_code_for_number(old_number) or region
+    except phonenumbers.NumberParseException:
+        pass
+    text=extract_phone_input(text,region)
+    if not text:return ''
     if text and not text.startswith('+'):
         try:
             old_number=phonenumbers.parse(existing,None)
@@ -50,14 +85,18 @@ def format_phone_like(existing,text):
         new_parsed=phonenumbers.parse(text,None)
         same_country=old_parsed.country_code==new_parsed.country_code
     except phonenumbers.NumberParseException:pass
-    if '(' in existing and same_country and len(old_digits)==len(new_digits) and new_digits:
+    if same_country and len(old_digits)==len(new_digits) and new_digits:
+        # Respect intentional grouping in the pasted number. When the input is
+        # compact, keep the existing row/template style (e.g. +1(202)555-0147).
+        if any(char in text for char in ' ()-'):
+            return re.sub(r'\s+', ' ', text).strip()
         digits=iter(new_digits)
         return ''.join(next(digits) if char.isdigit() else char for char in existing)
     return format_phone(text)
 
 
 def normalize_contacts(text):
-    text=english_brackets(text)
+    text=unicodedata.normalize('NFKC',english_brackets(text))
     return re.sub(PHONE_PATTERN,lambda match:format_phone(match.group()),text)
 
 

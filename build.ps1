@@ -49,7 +49,6 @@ foreach ($RequiredFile in @($Python, $PyInstaller, $Entry,
         (Join-Path $Assets '剪辑助手图标-128.png'),
         (Join-Path $Assets '剪辑助手图标-1024.png'),
         (Join-Path $Downloader 'app.py'),
-        (Join-Path $Downloader 'compress_video.py'),
         (Join-Path $EditorRuntimeCodeSource 'project-store.mjs'),
         (Join-Path $EditorRuntimeCodeSource 'main.mjs'),
         (Join-Path $EditorRuntimeCodeSource 'ui\build.mjs'),
@@ -132,6 +131,10 @@ if (Test-Path -LiteralPath $PackageDownloader) {
 }
 New-Item -ItemType Directory -Force -Path $PackageDownloader | Out-Null
 Copy-Item -Path (Join-Path $Downloader '*') -Destination $PackageDownloader -Recurse -Force
+$UnusedCompressor = Join-Path $PackageDownloader 'compress_video.py'
+if (Test-Path -LiteralPath $UnusedCompressor -PathType Leaf) {
+    Remove-Item -LiteralPath $UnusedCompressor -Force
+}
 Get-ChildItem -LiteralPath $PackageDownloader -Directory -Filter '__pycache__' -Recurse |
     Sort-Object { $_.FullName.Length } -Descending |
     ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
@@ -485,18 +488,29 @@ if (!$DownloadMethodSourceText.Contains("'format': 'best'") -or
     throw '下载阶段仍会合并独立音视频流，已中止打包。'
 }
 $DownloadStageIndex = $DownloadGroupSourceText.IndexOf('self._download(leader_key')
-$CompressionStageIndex = $DownloadGroupSourceText.IndexOf('output = transcode_mp4(')
 $DenoiseStageIndex = $DownloadGroupSourceText.IndexOf('output = denoise_video(')
-if ($DownloadStageIndex -lt 0 -or $CompressionStageIndex -le $DownloadStageIndex -or
-    $DenoiseStageIndex -le $CompressionStageIndex -or
-    !$DownloadGroupSourceText.Contains('source_work.stat().st_size <= COMPRESS_SIZE_LIMIT_BYTES')) {
-    throw '下载后压缩/降噪顺序或压缩阈值异常，已中止打包。'
+if ($DownloadStageIndex -lt 0 -or $DenoiseStageIndex -le $DownloadStageIndex -or
+    $DownloadGroupSourceText.Contains('transcode_mp4') -or
+    $DownloadGroupSourceText.Contains('compress_video') -or
+    $DownloadGroupSourceText.Contains('COMPRESS_SIZE_LIMIT_BYTES')) {
+    throw '下载后处理必须直接降噪且不得压缩转码，已中止打包。'
+}
+$TitleAppSourceText = [IO.File]::ReadAllText((Join-Path $Downloader 'app.py'))
+$TitleRendererSourceText = [IO.File]::ReadAllText((Join-Path $Downloader 'local_design.py'))
+$PngOutputSourceText = [IO.File]::ReadAllText((Join-Path $Downloader 'png_output.py'))
+if (!$TitleAppSourceText.Contains('self.title_preview_manual_text') -or
+    !$TitleAppSourceText.Contains('manual_title_lines') -or
+    !$TitleRendererSourceText.Contains('def normalize_manual_title_lines') -or
+    !$PngOutputSourceText.Contains("f'.clipassistant-{uuid.uuid4().hex}.tmp'")) {
+    throw '标题手动分行、导出联动或长标题短临时文件修复缺失，已中止打包。'
 }
 $LegacyPipelineSourceText = [IO.File]::ReadAllText((Join-Path $Root 'core\pipeline.py'))
 if (!$LegacyPipelineSourceText.Contains('"format": "best"') -or
     $LegacyPipelineSourceText.Contains('bestvideo*+bestaudio') -or
-    $LegacyPipelineSourceText.Contains('merge_output_format')) {
-    throw '备用下载流程仍会在下载阶段合并音视频流，已中止打包。'
+    $LegacyPipelineSourceText.Contains('merge_output_format') -or
+    $LegacyPipelineSourceText.Contains('transcode_mp4') -or
+    $LegacyPipelineSourceText.Contains('COMPRESS_SIZE_LIMIT_BYTES')) {
+    throw '备用下载流程仍包含合并或压缩转码，已中止打包。'
 }
     $RenderSourceText = [IO.File]::ReadAllText((Join-Path $EngineEditorSource 'media\render.mjs'))
     if (!$RenderSourceText.Contains('const hasMainAudio = !config.noMainVideoSource')) {

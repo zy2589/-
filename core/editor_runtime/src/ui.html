@@ -6074,11 +6074,62 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
       </div>
     </div>
 <script>
+function isTime(value) {
+  return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+}
+
 function reviewCaptionScopeMatches(review, caption) {
   const trackId = caption.trackId || 'caption';
   if (review.captionTrackId && review.captionTrackId !== trackId) return false;
-  if (review.ownerClipId && review.ownerClipId !== caption.ownerClipId) return false;
+  if (review.ownerClipId && review.ownerClipId !== (caption.ownerClipId || '')) return false;
+  if (review.sourceMediaId && review.sourceMediaId !== (caption.sourceMediaId || '')) return false;
   return true;
+}
+
+function reviewWordTargets(review) {
+  const issueId = String(review.issueId || review.id || '');
+  return (Array.isArray(review.words) ? review.words : []).filter(word => {
+    const start = Number(word?.start), end = Number(word?.end);
+    return (!word?.issueId || String(word.issueId) === issueId) &&
+      isTime(word?.start) && isTime(word?.end) && end > start;
+  });
+}
+
+function rangesOverlap(leftStart, leftEnd, rightStart, rightEnd) {
+  return Math.min(leftEnd, rightEnd) - Math.max(leftStart, rightStart) > 0.005;
+}
+
+function reviewWordOverlapsCaptionWord(target, caption, word) {
+  const targetSourceStart = Number(target?.sourceStart), targetSourceEnd = Number(target?.sourceEnd);
+  const wordSourceStart = Number(word?.sourceStart), wordSourceEnd = Number(word?.sourceEnd);
+  if ([target?.sourceStart, target?.sourceEnd, word?.sourceStart, word?.sourceEnd].every(isTime) &&
+      targetSourceEnd > targetSourceStart && wordSourceEnd > wordSourceStart &&
+      (!target.sourceMediaId || !caption.sourceMediaId || target.sourceMediaId === caption.sourceMediaId))
+    return rangesOverlap(targetSourceStart, targetSourceEnd, wordSourceStart, wordSourceEnd);
+  return rangesOverlap(Number(target.start), Number(target.end), Number(word.start), Number(word.end));
+}
+
+function reviewWordsCoverCaption(review, caption) {
+  const targets = reviewWordTargets(review);
+  if (!targets.length) return true;
+  const useSource = isTime(caption.sourceStart) && isTime(caption.sourceEnd) &&
+    Number(caption.sourceEnd) > Number(caption.sourceStart) && targets.every(target =>
+      isTime(target.sourceStart) && isTime(target.sourceEnd) &&
+      Number(target.sourceEnd) > Number(target.sourceStart) &&
+      (!target.sourceMediaId || !caption.sourceMediaId || target.sourceMediaId === caption.sourceMediaId));
+  const start = useSource ? Number(caption.sourceStart) : Number(caption.start);
+  const end = useSource ? Number(caption.sourceEnd) : Number(caption.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return false;
+  const intervals = targets.map(target => useSource
+    ? [Number(target.sourceStart), Number(target.sourceEnd)]
+    : [Number(target.start), Number(target.end)]).sort((a, b) => a[0] - b[0]);
+  let coveredUntil = start;
+  for (const [rangeStart, rangeEnd] of intervals) {
+    if (rangeStart > coveredUntil + 0.005) return false;
+    if (rangeEnd > coveredUntil) coveredUntil = rangeEnd;
+    if (coveredUntil >= end - 0.005) return true;
+  }
+  return coveredUntil >= end - 0.005;
 }
 
 function reviewCaptionWordMatches(review, caption, word) {
@@ -6086,18 +6137,20 @@ function reviewCaptionWordMatches(review, caption, word) {
   const issueId = String(review.issueId || review.id || '');
   const wordStart = Number(word?.start), wordEnd = Number(word?.end);
   const reviewStart = Number(review.start), reviewEnd = Number(review.end);
-  return !!issueId && String(word?.issueId || '') === issueId &&
-    Number.isFinite(wordStart) && Number.isFinite(wordEnd) && wordEnd > wordStart &&
-    Number.isFinite(reviewStart) && Number.isFinite(reviewEnd) && reviewEnd > reviewStart &&
-    wordStart < reviewEnd && wordEnd > reviewStart;
+  if (!(!!issueId && String(word?.issueId || '') === issueId &&
+    isTime(word?.start) && isTime(word?.end) && wordEnd > wordStart &&
+    isTime(review.start) && isTime(review.end) && reviewEnd > reviewStart &&
+    wordStart < reviewEnd && wordEnd > reviewStart)) return false;
+  const targets = reviewWordTargets(review);
+  return !targets.length || targets.some(target => reviewWordOverlapsCaptionWord(target, caption, word));
 }
 
 function reviewCaptionBlockOverlaps(review, caption) {
   if (!reviewCaptionScopeMatches(review, caption)) return false;
   const captionStart = Number(caption.start), captionEnd = Number(caption.end);
   const reviewStart = Number(review.start), reviewEnd = Number(review.end);
-  return Number.isFinite(captionStart) && Number.isFinite(captionEnd) && captionEnd > captionStart &&
-    Number.isFinite(reviewStart) && Number.isFinite(reviewEnd) && reviewEnd > reviewStart &&
+  return isTime(caption.start) && isTime(caption.end) && captionEnd > captionStart &&
+    isTime(review.start) && isTime(review.end) && reviewEnd > reviewStart &&
     captionStart < reviewEnd && captionEnd > reviewStart;
 }
 
@@ -6105,7 +6158,9 @@ function reviewCaptionBlockIsCovered(review, caption, margin = 0.005) {
   if (!reviewCaptionBlockOverlaps(review, caption)) return false;
   const captionStart = Number(caption.start), captionEnd = Number(caption.end);
   const reviewStart = Number(review.start), reviewEnd = Number(review.end);
-  return captionStart >= reviewStart - margin && captionEnd <= reviewEnd + margin;
+  return isTime(caption.start) && isTime(caption.end) && isTime(review.start) && isTime(review.end) &&
+    captionStart >= reviewStart - margin && captionEnd <= reviewEnd + margin &&
+    reviewWordsCoverCaption(review, caption);
 }
 
 function planReviewCaptionDeletion(captions, reviews, {
@@ -6122,7 +6177,32 @@ function planReviewCaptionDeletion(captions, reviews, {
     ambiguousCaptionIds: new Set(),
   };
 
+  // Older projects may lack track/source ownership on a review marker. Never
+  // interpret missing scope as permission to delete matching words from every
+  // track or source in the same timeline interval.
+  const ambiguousScopeCaptions = new Set();
+  for (const review of selected) {
+    const unscoped = { ...review, captionTrackId: '', ownerClipId: '', sourceMediaId: '' };
+    const candidates = (Array.isArray(captions) ? captions : []).filter(caption =>
+      (Array.isArray(caption.words) ? caption.words : []).some(word =>
+        reviewCaptionWordMatches(unscoped, caption, word)));
+    const distinct = field => new Set(candidates.map(caption => String(
+      field === 'trackId' ? caption.trackId || 'caption' : caption[field] || '',
+    )));
+    const ambiguous = (!review.captionTrackId && distinct('trackId').size > 1) ||
+      (!review.ownerClipId && distinct('ownerClipId').size > 1) ||
+      (!review.sourceMediaId && distinct('sourceMediaId').size > 1);
+    if (ambiguous) {
+      for (const caption of candidates) ambiguousScopeCaptions.add(caption);
+    }
+  }
+
   for (const caption of Array.isArray(captions) ? captions : []) {
+    if (ambiguousScopeCaptions.has(caption)) {
+      result.ambiguousCaptionIds.add(caption.id);
+      result.captions.push(caption);
+      continue;
+    }
     const trackId = caption.trackId || 'caption';
     if (lockedTracks[trackId]) {
       result.captions.push(caption);
@@ -6193,6 +6273,23 @@ function planReviewCaptionDeletion(captions, reviews, {
   }
 
   return result;
+}
+
+function planIssueCaptionRemoval(captions, issue, options = {}) {
+  const issueId = String(issue?.issueId || issue?.id || '');
+  if (!issueId) return { blocked: true, reason: 'missing-issue-id', deletion: null };
+  const review = { ...issue, id: issue.id || issueId, issueId };
+  const deletion = planReviewCaptionDeletion(captions, [review], options);
+  const original = Array.isArray(captions) ? captions : [];
+  const hasText = original.some(caption => (caption.words || []).length || String(caption.text || '').trim());
+  const hasRemainingText = deletion.captions.some(caption =>
+    (caption.words || []).length || String(caption.text || '').trim());
+  const removedAny = deletion.removedWords.length > 0 || deletion.removedCaptionIds.size > 0;
+  let reason = '';
+  if (deletion.ambiguousCaptionIds.size) reason = 'ambiguous-scope';
+  else if (hasText && !hasRemainingText) reason = 'would-remove-all-text';
+  else if (hasText && !removedAny) reason = 'no-exact-caption-match';
+  return { blocked: !!reason, reason, review, deletion };
 }
 // Shared by single-video CC, manuscript matching, batch editing and old projects.
 function harmlessCaptionDifference(spoken, expected) {
@@ -20202,12 +20299,23 @@ function polishSectionHtml(title, rows, emptyText) {
       }
       function planReviewCaptionReplacement(captions, review, text, useExpected = true) {
         const issueId = review.issueId || review.id;
-        const entries = captions.filter(c => (!review.captionTrackId || c.trackId === review.captionTrackId) &&
-          (!review.ownerClipId || c.ownerClipId === review.ownerClipId)).flatMap(caption =>
+        const entries = captions.filter(c => (!review.captionTrackId || (c.trackId || 'caption') === review.captionTrackId) &&
+          (!review.ownerClipId || c.ownerClipId === review.ownerClipId) &&
+          (!review.sourceMediaId || c.sourceMediaId === review.sourceMediaId)).flatMap(caption =>
           (caption.words || []).map((word, index) => ({caption, word, index})))
           .filter(e => Math.min(e.word.end, review.end) - Math.max(e.word.start, review.start) > .005);
-        const linked = entries.filter(e => e.word.issueId === issueId);
-        const selected = (linked.length ? linked : entries).filter(e => !e.word.userKept && e.word.matchType !== 'edited')
+        const hasWordScope = Array.isArray(review.words);
+        const targets = hasWordScope ? review.words.filter(word =>
+          Number.isFinite(Number(word?.start)) && Number.isFinite(Number(word?.end)) &&
+          Number(word.end) > Number(word.start)) : [];
+        if (hasWordScope && !targets.length) return null;
+        const inExactWordScope = entry => !hasWordScope || targets.some(target =>
+          (!target.issueId || target.issueId === issueId) &&
+          Math.min(Number(target.end), Number(entry.word.end)) -
+            Math.max(Number(target.start), Number(entry.word.start)) > .005);
+        const scopedEntries = entries.filter(inExactWordScope);
+        const linked = scopedEntries.filter(e => e.word.issueId === issueId);
+        const selected = (linked.length ? linked : scopedEntries).filter(e => !e.word.userKept && e.word.matchType !== 'edited')
           .sort((a,b) => a.word.start-b.word.start);
         if (!selected.length) return null;
         // A split review retains the original issue's whole expectedText. Its
@@ -20257,6 +20365,15 @@ function polishSectionHtml(title, rows, emptyText) {
         if (sourceMode !== 'manual' && (!text || /^[—-]$/.test(text))) return toast('没有可靠的对应文案，请核对后手动修改');
         const changes = planReviewCaptionReplacement(state.captions, review, text, sourceMode === 'manual' ? null : sourceMode !== 'spoken');
         if (!changes) return toast('对应字幕已修改或位置发生变化，请重新核对；已保留提示');
+        const hasExistingText = state.captions.some(c => (c.words || []).length || String(c.text || '').trim());
+        const changedByCaption = new Map(changes.map(change => [change.caption, change.words]));
+        const hasRemainingText = state.captions.some(caption => {
+          const words = changedByCaption.has(caption) ? changedByCaption.get(caption) : caption.words || [];
+          const text = changedByCaption.has(caption) ? joinCaptionWords(words) : caption.text || '';
+          return words.length > 0 || String(text).trim().length > 0;
+        });
+        if (hasExistingText && !hasRemainingText)
+          return toast('此次修改会删除全部文案，已取消操作以保护字幕');
         if(record) snapshot();
         for (const {caption,words} of changes) {
           caption.words=words;caption.text=joinCaptionWords(words);
@@ -20348,10 +20465,11 @@ function polishSectionHtml(title, rows, emptyText) {
         if (review.type === 'repeat') return deleteRepeatedReview(review.id);
         const issueId = review.issueId || review.id;
         if (state.issues.some((item) => item.id === issueId)) {
-          cutScriptIssue(issueId);
+          // Aggregate issues can span several split review markers. Keep this
+          // operation scoped to the marker the user actually clicked.
+          cutScriptIssue(issueId, { scope: review });
           return;
         }
-        snapshot();
         const start = Math.max(0, Number(review.start || 0));
         let end = Math.min(
           state.duration,
@@ -20370,7 +20488,13 @@ function polishSectionHtml(title, rows, emptyText) {
           toast("这一处没有可剪掉的音频范围");
           return;
         }
-        removeIssueWords(issueId, start, end, review);
+        const captionRemoval = planIssueWordsRemoval(issueId, start, end, review);
+        if (captionRemoval.blocked) {
+          toast(issueCaptionRemovalMessage(captionRemoval.reason));
+          return;
+        }
+        snapshot();
+        removeIssueWords(issueId, start, end, review, captionRemoval);
         state.removals.push({
           start: sourceStart,
           end: sourceEnd,
@@ -20900,44 +21024,31 @@ function polishSectionHtml(title, rows, emptyText) {
         renderAll();
         toast("已把这段口语补充插入正确字幕");
       }
-      function removeIssueWords(issueId, start, end, scope = {}) {
-        const scopedIssueId = String(issueId || '');
-        const cutStart = Number(start), cutEnd = Number(end);
-        if (!scopedIssueId || !Number.isFinite(cutStart) || !Number.isFinite(cutEnd) || cutEnd <= cutStart) return;
-        const overlapsRange = word => {
-          const wordStart = Number(word?.start), wordEnd = Number(word?.end);
-          return Number.isFinite(wordStart) && Number.isFinite(wordEnd) &&
-            Math.min(wordEnd,cutEnd) - Math.max(wordStart,cutStart) > .005;
-        };
-        const belongsToIssueScope = caption => {
-          if (scope?.ownerClipId && caption.ownerClipId && caption.ownerClipId !== scope.ownerClipId) return false;
-          if (scope?.sourceMediaId && caption.sourceMediaId && caption.sourceMediaId !== scope.sourceMediaId) return false;
-          return !scope?.captionTrackId || (caption.trackId || 'caption') === scope.captionTrackId;
-        };
-        state.captions = state.captions
-          .map((caption) => {
-            if (!Array.isArray(caption.words) || !caption.words.length)
-              return caption;
-            const words = caption.words.filter((word) => {
-              if (!belongsToIssueScope(caption)) return true;
-              const overlaps = overlapsRange(word);
-              if (word.issueId === scopedIssueId) return !overlaps;
-              if (word.issueId) return true;
-              return !(
-                overlaps &&
-                word.matchType === "error" &&
-                ["extra", "repeat"].includes(word.issueType)
-              );
-            });
-            if (!words.length) return null;
-            caption.words = words;
-            caption.text = words
-              .map((word) => word.display)
-              .join(" ")
-              .replace(/\s+([.,!?;:])/g, "$1");
-            return caption;
-          })
-          .filter(Boolean);
+      function planIssueWordsRemoval(issueId, start, end, scope = {}) {
+        const issue = { ...scope, id: scope.id || issueId,
+          issueId: scope.issueId || issueId, start, end };
+        return planIssueCaptionRemoval(state.captions || [], issue, {
+          lockedTracks: state.trackLocks || {},
+          joinWords: words => joinCaptionWords(words),
+        });
+      }
+      function issueCaptionRemovalMessage(reason) {
+        if (reason === 'would-remove-all-text') return '此次切除会删除全部文案，已取消操作以保护字幕';
+        if (reason === 'ambiguous-scope') return '错误文案跨多个轨道或素材，无法唯一定位；已取消切除以保护字幕';
+        return '找不到精确对应的错误字幕，已取消切除以保护字幕';
+      }
+      function removeIssueWords(issueId, start, end, scope = {}, prepared = null) {
+        const plan = prepared || planIssueWordsRemoval(issueId, start, end, scope);
+        if (plan.blocked) return false;
+        const deletion = plan.deletion;
+        state.captions = deletion.captions;
+        state.captionRecoveryArchive = (state.captionRecoveryArchive || []).filter(record => {
+          const caption = record?.caption;
+          if (deletion.removedCaptionIds.has(caption?.id)) return false;
+          if (record?.word) return !caption || !reviewCaptionWordMatches(plan.review, caption, record.word);
+          return !caption || !reviewCaptionBlockIsCovered(plan.review, caption);
+        });
+        return true;
       }
       function dismissTrimmedIssues(start, end, ownerIds = null) {
         const cutStart = Number(start || 0), cutEnd = Number(end || 0);
@@ -21120,22 +21231,29 @@ function polishSectionHtml(title, rows, emptyText) {
         seekTimeline(Math.max(0, stayTime));
         return applied;
       }
-      function cutScriptIssue(id, { record = true, quiet = false } = {}) {
+      function cutScriptIssue(id, { record = true, quiet = false, scope = null } = {}) {
         const issue = state.issues.find((item) => item.id === id);
         if (!issue) return;
-        const start = Math.max(0, Number(issue.start || 0));
+        const target = scope ? { ...issue, ...scope, id: scope.id || issue.id,
+          issueId: scope.issueId || issue.issueId || issue.id } : issue;
+        const start = Math.max(0, Number(target.start ?? 0));
         let end = Math.min(
           state.duration,
-          Math.max(start + 0.04, Number(issue.end || 0)),
+          Math.max(start + 0.04, Number(target.end ?? 0)),
         );
-        if (issue.type === 'repeat' && !repeatCutPreservesCaptionText(start,end)) {
+        if (target.type === 'repeat' && !repeatCutPreservesCaptionText(start,end)) {
           if (!quiet) toast('疑似重复范围覆盖了全部文案，已取消删除以保护工程');
+          return;
+        }
+        const captionRemoval = planIssueWordsRemoval(id, start, end, target);
+        if (captionRemoval.blocked) {
+          if (!quiet) toast(issueCaptionRemovalMessage(captionRemoval.reason));
           return;
         }
         if (!mainAudioClips().some(c=>c.start<end&&c.end>start) &&
             state.audioAssets.some(c=>c.start<end&&c.end>start)) {
           if (record) snapshot();
-          removeIssueWords(id,start,end,issue);
+          if (!removeIssueWords(id,start,end,target,captionRemoval)) return;
           dismissTrimmedIssues(start,end);
           // Independent clips already own their source ranges. Cut the placed
           // timeline directly; mapping through removed main media is invalid.
@@ -21151,18 +21269,20 @@ function polishSectionHtml(title, rows, emptyText) {
           return;
         }
         if (record) snapshot();
-        removeIssueWords(id, start, end, issue);
+        if (!removeIssueWords(id, start, end, target, captionRemoval)) return;
         state.removals.push({
           start: sourceStart,
           end: sourceEnd,
-          source: `script-${issue.type || "difference"}`,
+          source: `script-${target.type || "difference"}`,
         });
         shiftTracks(start, end - start);
-        state.reviewCaptions = state.reviewCaptions.filter(
-          (item) => (item.issueId || item.id) !== id,
-        );
-        state.issues = state.issues.filter((item) => item.id !== id);
-        state.matchIssues = (state.matchIssues || []).filter(item => (item.issueId || item.id) !== id);
+        state.reviewCaptions = state.reviewCaptions.filter(item => scope
+          ? item.id !== scope.id : (item.issueId || item.id) !== id);
+        const remainingIssue = state.reviewCaptions.some(item => (item.issueId || item.id) === id) ||
+          state.captions.some(caption => (caption.words || []).some(word => word.issueId === id));
+        state.issues = state.issues.filter(item => item.id !== id || remainingIssue);
+        state.matchIssues = (state.matchIssues || []).filter(item =>
+          (item.issueId || item.id) !== id || remainingIssue);
         normalizeRemovals();
         recomputeContentDuration();
         clampTracksToDuration();

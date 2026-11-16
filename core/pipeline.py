@@ -18,7 +18,6 @@ VIDEO_SUFFIXES = {
     ".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi", ".mpeg", ".mpg",
     ".ts", ".flv", ".wmv", ".3gp", ".mts", ".m2ts", ".ogv", ".vob",
 }
-COMPRESS_SIZE_LIMIT_BYTES = 80 * 1024 * 1024
 
 
 @dataclass
@@ -163,7 +162,7 @@ def _download_files(
                 else:
                     progress("下载中")
             elif data.get("status") == "finished":
-                progress("下载完成，准备压缩/降噪")
+                progress("下载完成")
 
         options = {
             "outtmpl": str(target / "%(title).150B [%(id)s].%(ext)s"),
@@ -226,22 +225,6 @@ def run_task(
             if cancel.is_set():
                 raise RuntimeError("任务已取消")
             final_source = source
-            if source.stat().st_size > COMPRESS_SIZE_LIMIT_BYTES:
-                progress(f"下载完成，正在压缩 {index}/{len(downloaded)}")
-                try:
-                    from .downloader_runtime.compress_video import transcode_mp4
-
-                    final_source = transcode_mp4(
-                        final_source,
-                        resource_dir=resource_dir,
-                        progress=progress,
-                        cancel=cancel,
-                        remove_source=False,
-                        compress=True,
-                    )
-                except Exception as exc:
-                    errors.append(f"{source.name}：压缩失败：{exc}")
-                    final_source = source
             if strength_percent > 0:
                 progress(f"下载完成，正在降噪 {index}/{len(downloaded)}")
                 try:

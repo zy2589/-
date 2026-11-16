@@ -1,8 +1,59 @@
+function isTime(value) {
+  return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+}
+
 function reviewCaptionScopeMatches(review, caption) {
   const trackId = caption.trackId || 'caption';
   if (review.captionTrackId && review.captionTrackId !== trackId) return false;
-  if (review.ownerClipId && review.ownerClipId !== caption.ownerClipId) return false;
+  if (review.ownerClipId && review.ownerClipId !== (caption.ownerClipId || '')) return false;
+  if (review.sourceMediaId && review.sourceMediaId !== (caption.sourceMediaId || '')) return false;
   return true;
+}
+
+function reviewWordTargets(review) {
+  const issueId = String(review.issueId || review.id || '');
+  return (Array.isArray(review.words) ? review.words : []).filter(word => {
+    const start = Number(word?.start), end = Number(word?.end);
+    return (!word?.issueId || String(word.issueId) === issueId) &&
+      isTime(word?.start) && isTime(word?.end) && end > start;
+  });
+}
+
+function rangesOverlap(leftStart, leftEnd, rightStart, rightEnd) {
+  return Math.min(leftEnd, rightEnd) - Math.max(leftStart, rightStart) > 0.005;
+}
+
+function reviewWordOverlapsCaptionWord(target, caption, word) {
+  const targetSourceStart = Number(target?.sourceStart), targetSourceEnd = Number(target?.sourceEnd);
+  const wordSourceStart = Number(word?.sourceStart), wordSourceEnd = Number(word?.sourceEnd);
+  if ([target?.sourceStart, target?.sourceEnd, word?.sourceStart, word?.sourceEnd].every(isTime) &&
+      targetSourceEnd > targetSourceStart && wordSourceEnd > wordSourceStart &&
+      (!target.sourceMediaId || !caption.sourceMediaId || target.sourceMediaId === caption.sourceMediaId))
+    return rangesOverlap(targetSourceStart, targetSourceEnd, wordSourceStart, wordSourceEnd);
+  return rangesOverlap(Number(target.start), Number(target.end), Number(word.start), Number(word.end));
+}
+
+function reviewWordsCoverCaption(review, caption) {
+  const targets = reviewWordTargets(review);
+  if (!targets.length) return true;
+  const useSource = isTime(caption.sourceStart) && isTime(caption.sourceEnd) &&
+    Number(caption.sourceEnd) > Number(caption.sourceStart) && targets.every(target =>
+      isTime(target.sourceStart) && isTime(target.sourceEnd) &&
+      Number(target.sourceEnd) > Number(target.sourceStart) &&
+      (!target.sourceMediaId || !caption.sourceMediaId || target.sourceMediaId === caption.sourceMediaId));
+  const start = useSource ? Number(caption.sourceStart) : Number(caption.start);
+  const end = useSource ? Number(caption.sourceEnd) : Number(caption.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return false;
+  const intervals = targets.map(target => useSource
+    ? [Number(target.sourceStart), Number(target.sourceEnd)]
+    : [Number(target.start), Number(target.end)]).sort((a, b) => a[0] - b[0]);
+  let coveredUntil = start;
+  for (const [rangeStart, rangeEnd] of intervals) {
+    if (rangeStart > coveredUntil + 0.005) return false;
+    if (rangeEnd > coveredUntil) coveredUntil = rangeEnd;
+    if (coveredUntil >= end - 0.005) return true;
+  }
+  return coveredUntil >= end - 0.005;
 }
 
 export function reviewCaptionWordMatches(review, caption, word) {
@@ -10,18 +61,20 @@ export function reviewCaptionWordMatches(review, caption, word) {
   const issueId = String(review.issueId || review.id || '');
   const wordStart = Number(word?.start), wordEnd = Number(word?.end);
   const reviewStart = Number(review.start), reviewEnd = Number(review.end);
-  return !!issueId && String(word?.issueId || '') === issueId &&
-    Number.isFinite(wordStart) && Number.isFinite(wordEnd) && wordEnd > wordStart &&
-    Number.isFinite(reviewStart) && Number.isFinite(reviewEnd) && reviewEnd > reviewStart &&
-    wordStart < reviewEnd && wordEnd > reviewStart;
+  if (!(!!issueId && String(word?.issueId || '') === issueId &&
+    isTime(word?.start) && isTime(word?.end) && wordEnd > wordStart &&
+    isTime(review.start) && isTime(review.end) && reviewEnd > reviewStart &&
+    wordStart < reviewEnd && wordEnd > reviewStart)) return false;
+  const targets = reviewWordTargets(review);
+  return !targets.length || targets.some(target => reviewWordOverlapsCaptionWord(target, caption, word));
 }
 
 export function reviewCaptionBlockOverlaps(review, caption) {
   if (!reviewCaptionScopeMatches(review, caption)) return false;
   const captionStart = Number(caption.start), captionEnd = Number(caption.end);
   const reviewStart = Number(review.start), reviewEnd = Number(review.end);
-  return Number.isFinite(captionStart) && Number.isFinite(captionEnd) && captionEnd > captionStart &&
-    Number.isFinite(reviewStart) && Number.isFinite(reviewEnd) && reviewEnd > reviewStart &&
+  return isTime(caption.start) && isTime(caption.end) && captionEnd > captionStart &&
+    isTime(review.start) && isTime(review.end) && reviewEnd > reviewStart &&
     captionStart < reviewEnd && captionEnd > reviewStart;
 }
 
@@ -29,7 +82,9 @@ export function reviewCaptionBlockIsCovered(review, caption, margin = 0.005) {
   if (!reviewCaptionBlockOverlaps(review, caption)) return false;
   const captionStart = Number(caption.start), captionEnd = Number(caption.end);
   const reviewStart = Number(review.start), reviewEnd = Number(review.end);
-  return captionStart >= reviewStart - margin && captionEnd <= reviewEnd + margin;
+  return isTime(caption.start) && isTime(caption.end) && isTime(review.start) && isTime(review.end) &&
+    captionStart >= reviewStart - margin && captionEnd <= reviewEnd + margin &&
+    reviewWordsCoverCaption(review, caption);
 }
 
 export function planReviewCaptionDeletion(captions, reviews, {
@@ -46,7 +101,32 @@ export function planReviewCaptionDeletion(captions, reviews, {
     ambiguousCaptionIds: new Set(),
   };
 
+  // Older projects may lack track/source ownership on a review marker. Never
+  // interpret missing scope as permission to delete matching words from every
+  // track or source in the same timeline interval.
+  const ambiguousScopeCaptions = new Set();
+  for (const review of selected) {
+    const unscoped = { ...review, captionTrackId: '', ownerClipId: '', sourceMediaId: '' };
+    const candidates = (Array.isArray(captions) ? captions : []).filter(caption =>
+      (Array.isArray(caption.words) ? caption.words : []).some(word =>
+        reviewCaptionWordMatches(unscoped, caption, word)));
+    const distinct = field => new Set(candidates.map(caption => String(
+      field === 'trackId' ? caption.trackId || 'caption' : caption[field] || '',
+    )));
+    const ambiguous = (!review.captionTrackId && distinct('trackId').size > 1) ||
+      (!review.ownerClipId && distinct('ownerClipId').size > 1) ||
+      (!review.sourceMediaId && distinct('sourceMediaId').size > 1);
+    if (ambiguous) {
+      for (const caption of candidates) ambiguousScopeCaptions.add(caption);
+    }
+  }
+
   for (const caption of Array.isArray(captions) ? captions : []) {
+    if (ambiguousScopeCaptions.has(caption)) {
+      result.ambiguousCaptionIds.add(caption.id);
+      result.captions.push(caption);
+      continue;
+    }
     const trackId = caption.trackId || 'caption';
     if (lockedTracks[trackId]) {
       result.captions.push(caption);
@@ -117,4 +197,21 @@ export function planReviewCaptionDeletion(captions, reviews, {
   }
 
   return result;
+}
+
+export function planIssueCaptionRemoval(captions, issue, options = {}) {
+  const issueId = String(issue?.issueId || issue?.id || '');
+  if (!issueId) return { blocked: true, reason: 'missing-issue-id', deletion: null };
+  const review = { ...issue, id: issue.id || issueId, issueId };
+  const deletion = planReviewCaptionDeletion(captions, [review], options);
+  const original = Array.isArray(captions) ? captions : [];
+  const hasText = original.some(caption => (caption.words || []).length || String(caption.text || '').trim());
+  const hasRemainingText = deletion.captions.some(caption =>
+    (caption.words || []).length || String(caption.text || '').trim());
+  const removedAny = deletion.removedWords.length > 0 || deletion.removedCaptionIds.size > 0;
+  let reason = '';
+  if (deletion.ambiguousCaptionIds.size) reason = 'ambiguous-scope';
+  else if (hasText && !hasRemainingText) reason = 'would-remove-all-text';
+  else if (hasText && !removedAny) reason = 'no-exact-caption-match';
+  return { blocked: !!reason, reason, review, deletion };
 }

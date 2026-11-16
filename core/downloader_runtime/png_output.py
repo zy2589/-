@@ -19,7 +19,9 @@ def publish_png(image, output, backup_root):
         backups.mkdir(parents=True,exist_ok=True)
         identity=hashlib.sha256(str(output.resolve()).encode('utf-8')).hexdigest()[:16]
         (backups/f'{identity}-{datetime.now():%Y%m%d-%H%M%S-%f}.png').write_bytes(previous)
-    temporary=output.with_name(output.name+f'.{uuid.uuid4().hex}.tmp')
+    # Do not append a UUID to the full output name: the long basename and
+    # timestamp could push Windows past MAX_PATH before the PNG is published.
+    temporary=output.with_name(f'.clipassistant-{uuid.uuid4().hex}.tmp')
     try:
         temporary.write_bytes(payload)
         try:
