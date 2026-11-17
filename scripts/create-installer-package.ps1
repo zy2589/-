@@ -67,7 +67,9 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Compression.ZipFile]::CreateFromDirectory($StagingRoot, $ArchivePath, [IO.Compression.CompressionLevel]::Optimal, $false)
 $Zip = [IO.Compression.ZipFile]::OpenRead($ArchivePath)
 try {
-    $Entries = @($Zip.Entries | Where-Object { !$_.FullName.EndsWith('/') })
+    $Entries = @($Zip.Entries | Where-Object {
+        !$_.FullName.EndsWith('/') -and !$_.FullName.EndsWith([string][char]92)
+    })
     $Expected = (Get-ChildItem -LiteralPath $StagingRoot -Recurse -File | Measure-Object).Count
     if ($Entries.Count -ne $Expected) { throw "安装包文件数量校验失败：$($Entries.Count) / $Expected" }
     foreach ($Entry in $Entries) {

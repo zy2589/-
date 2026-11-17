@@ -93,7 +93,9 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $Zip = [IO.Compression.ZipFile]::OpenRead($ArchivePath)
 try {
-    $FileEntries = @($Zip.Entries | Where-Object { !$_.FullName.EndsWith('/') })
+    $FileEntries = @($Zip.Entries | Where-Object {
+        !$_.FullName.EndsWith('/') -and !$_.FullName.EndsWith([string][char]92)
+    })
     $ExpectedCount = (Get-ChildItem -LiteralPath $StagingRoot -Recurse -File | Measure-Object).Count
     if ($FileEntries.Count -ne $ExpectedCount) {
         throw "压缩包文件数校验失败：$($FileEntries.Count) / $ExpectedCount"
