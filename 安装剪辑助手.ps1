@@ -18,7 +18,15 @@ if (!(Test-Path -LiteralPath $EditorHost -PathType Leaf)) {
 $EditorRuntime = Join-Path $Source '剪辑助手内核\Modules\剪辑助手\剪辑界面'
 $UiHtmlPath = Join-Path $EditorRuntime 'src\ui.html'
 $NodeRuntime = Join-Path $Source '剪辑助手内核\runtime\node\node.exe'
-foreach ($PackageFile in @($UiHtmlPath, $NodeRuntime)) {
+$PtyRuntime = Join-Path $Source '剪辑助手内核\Modules\剪辑助手\剪辑界面\vendor\node-pty'
+foreach ($PackageFile in @(
+    $UiHtmlPath,
+    $NodeRuntime,
+    (Join-Path $PtyRuntime 'lib\index.js'),
+    (Join-Path $PtyRuntime 'prebuilds\win32-x64\conpty.node'),
+    (Join-Path $PtyRuntime 'prebuilds\win32-x64\conpty\conpty.dll'),
+    (Join-Path $PtyRuntime 'prebuilds\win32-x64\conpty\OpenConsole.exe')
+)) {
     if (!(Test-Path -LiteralPath $PackageFile -PathType Leaf)) {
         throw "安装包缺少必要文件，未更改当前安装：$PackageFile"
     }
@@ -31,6 +39,22 @@ foreach ($Anchor in @('frame', 'spliceGuideLayer', 'selectionBox', 'spliceFreeze
 foreach ($PlaybackMode in @('normal-audio', 'normal-muted', 'freeze-resume', 'freeze-hold')) {
     if (!$UiHtml.Contains(('value="' + $PlaybackMode + '"'))) {
         throw "安装包缺少拼接播放模式，未更改当前安装：$PlaybackMode"
+    }
+}
+foreach ($AntigravityAuthFeature in @(
+    'id="antigravityAuthCode"',
+    'id="submitAntigravityCode"',
+    'submitAntigravityAuthorizationCode'
+)) {
+    if (!$UiHtml.Contains($AntigravityAuthFeature)) {
+        throw "安装包缺少 Antigravity 授权码输入功能，未更改当前安装：$AntigravityAuthFeature"
+    }
+}
+$AiSettingsPath = Join-Path $EditorRuntime 'src\ai-settings.mjs'
+$AiSettingsText = [IO.File]::ReadAllText($AiSettingsPath)
+foreach ($AntigravityRuntimeFeature in @('node-pty', 'Select login method:', 'terminal.write(`${code}\r`)')) {
+    if (!$AiSettingsText.Contains($AntigravityRuntimeFeature)) {
+        throw "安装包缺少 Antigravity 终端登录功能，未更改当前安装：$AntigravityRuntimeFeature"
     }
 }
 foreach ($TrackLabelFeature in @(

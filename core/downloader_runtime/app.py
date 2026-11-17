@@ -13,6 +13,7 @@ import queue
 import re
 import shutil
 import sys
+import subprocess
 import threading
 import time
 import tempfile
@@ -25,6 +26,11 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from app_settings import PALETTES, apply_appearance, read_settings, update_settings, settings_location, seed_user_data, rebase_local_fonts, sync_appearance
 from desktop_ui import icon_button, icon_menu, DarkPopupMenu, add_theme_menu, set_window_icon, ToolTip, bind_scale_wheel
+from template_translation import (DEFAULT_LANGUAGE, LANGUAGES, LANGUAGE_CODES,
+                                  load_translation_cache, save_translation_cache,
+                                  translate_template_copy, translation_cache_key)
+from template_language import (apply_template_translation,
+                               build_template_translation_request)
 
 _drive_guard = threading.Lock()
 _drive_locks = {}
@@ -443,7 +449,7 @@ def resolve_with_retry(call, stop_event, on_retry=None, **kwargs):
                 raise RuntimeError('任务已取消')
 
 
-def drive_item(url, name, temporary, folder, cancel, progress, cookie='', on_retry=None, on_wait=None, max_bytes=2 * 1024 * 1024 * 1024, browser_auth=False, output_stem=None, output_index=0, output_total=1):
+def drive_item(url, name, temporary, folder, cancel, progress, cookie='', on_retry=None, on_wait=None, max_bytes=2 * 1024 * 1024 * 1024, browser_auth=False, output_stem=None, output_index=0, output_total=1, ffprobe=None):
     """Download each Drive file once per batch and copy it to other destinations."""
     import gdown
     key = drive_id(url)
@@ -464,6 +470,8 @@ def drive_item(url, name, temporary, folder, cancel, progress, cookie='', on_ret
             raise RuntimeError('任务已取消')
         saved = _drive_completed.get(key)
         if saved and saved.is_file():
+            saved = repair_video_suffix(saved, ffprobe)
+            _drive_completed[key] = saved
             output_name = video_output_filename(saved.name)
             copied = publish_file(saved, folder, output_name)
             return copied is None
@@ -479,6 +487,7 @@ def drive_item(url, name, temporary, folder, cancel, progress, cookie='', on_ret
         output_name = video_output_filename(filename)
         target = folder / output_name
         if target.is_file():
+            repair_video_suffix(target, ffprobe)
             return True
         def bounded_progress(done, total):
             if done > max_bytes:
@@ -498,7 +507,8 @@ def drive_item(url, name, temporary, folder, cancel, progress, cookie='', on_ret
             raise RuntimeError(drive_error_with_browser_link(exc, url)) from exc
         if not result or not Path(result).is_file():
             raise RuntimeError('文件未成功保存，请检查分享权限或配额')
-        source = Path(result)
+        source = repair_video_suffix(Path(result), ffprobe)
+        output_name = video_output_filename(source.name)
         published = publish_file(source, folder, output_name)
         if published:
             _drive_completed[key] = published
@@ -954,6 +964,75 @@ def video_output_filename(source_name):
     return safe_video_filename(Path(str(source_name)).name)
 
 
+def repair_video_suffix(path, ffprobe):
+    """Detect a suffix-less Drive download by its container and append a usable suffix."""
+    path = Path(path)
+    if path.suffix.lower() in VIDEO_SUFFIXES:
+        return path
+    ffprobe = Path(ffprobe) if ffprobe else None
+    if not ffprobe or not ffprobe.is_file():
+        raise RuntimeError(f'下载文件“{path.name}”没有可识别的视频尾缀，且 FFprobe 不可用，无法确认文件格式。')
+    try:
+        result = subprocess.run(
+            [str(ffprobe), '-v', 'error', '-show_entries',
+             'format=format_name:format_tags=major_brand:stream=codec_type,width,height:stream_disposition=attached_pic',
+             '-of', 'json', str(path)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding='utf-8', errors='replace', timeout=20,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), check=False)
+        data = json.loads(result.stdout) if result.returncode == 0 else {}
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        data = {}
+
+    streams = data.get('streams') or []
+    has_video = any(
+        stream.get('codec_type') == 'video'
+        and str(stream.get('width') or '').isdigit()
+        and str(stream.get('height') or '').isdigit()
+        and int(stream.get('width') or 0) > 0
+        and int(stream.get('height') or 0) > 0
+        and str((stream.get('disposition') or {}).get('attached_pic', '0')).lower() not in {'1', 'true'}
+        for stream in streams)
+    if not has_video:
+        raise RuntimeError(f'下载文件“{path.name}”尾缀不完整，且文件内容未能识别为有效视频。')
+
+    format_data = data.get('format') or {}
+    formats = {item.strip().lower() for item in str(format_data.get('format_name') or '').split(',')}
+    brand = str((format_data.get('tags') or {}).get('major_brand') or '').lower()
+    suffix = None
+    if 'webm' in formats:
+        suffix = '.webm'
+    elif 'matroska' in formats:
+        suffix = '.mkv'
+    elif 'avi' in formats:
+        suffix = '.avi'
+    elif 'mpegts' in formats:
+        suffix = '.ts'
+    elif formats.intersection({'mpeg', 'mpegvideo'}):
+        suffix = '.mpg'
+    elif 'asf' in formats:
+        suffix = '.wmv'
+    elif 'flv' in formats:
+        suffix = '.flv'
+    elif 'ogg' in formats:
+        suffix = '.ogv'
+    elif 'vob' in formats:
+        suffix = '.vob'
+    elif formats.intersection({'mov', 'mp4', 'm4a', '3gp', '3g2', 'mj2'}):
+        suffix = '.3gp' if brand.startswith(('3gp', '3g')) else '.mov' if brand.startswith('qt') else '.m4v' if brand.startswith('m4v') else '.mp4'
+    if not suffix:
+        raise RuntimeError(f'已确认“{path.name}”包含视频，但暂不支持自动补全该容器格式的尾缀。')
+
+    target = path.with_suffix(suffix)
+    index = 2
+    while target.exists() and target.resolve() != path.resolve():
+        target = path.with_name(f'{path.stem}-{index}{suffix}')
+        index += 1
+    if target.resolve() != path.resolve():
+        path.rename(target)
+    return target
+
+
 def local_video_files(folder):
     return sorted((item for item in Path(folder).iterdir()
                    if item.is_file() and item.suffix.lower() in VIDEO_SUFFIXES),
@@ -1210,14 +1289,17 @@ class App:
         task_content.pack(fill='both',expand=True)
         header_form = ttk.Frame(task_content)
         header_form.pack(fill='x', pady=(0, 2))
-        for column, text in enumerate(('序号', '人名', '号码', '视频名称', '视频链接', '模板', '降噪', '进度', '清空')):
+        for column, text in enumerate(('序号', '人名', '号码', '视频名称', '视频链接', '语言', '降噪', '进度', '清空')):
             ttk.Label(header_form, text=text, style='Muted.TLabel').grid(row=0, column=column, sticky='w', padx=4, pady=(0, 8))
         column_weights=(0,1,1,2,3,0,0,0,0)
-        column_minimums=(34,56,72,76,110,36,52,128,42) if window_width<900 else ((40,65,84,92,130,42,58,138,44) if window_width<1120 else (48,85,112,130,180,50,64,148,46))
+        column_minimums=(34,56,72,76,110,68,52,128,42) if window_width<900 else ((40,65,84,92,130,72,58,138,44) if window_width<1120 else (48,85,112,130,180,78,64,148,46))
         for column,(weight,minimum) in enumerate(zip(column_weights,column_minimums)):
             header_form.columnconfigure(column,weight=weight,minsize=minimum)
         self.rows=[];self.row_statuses=[];self.row_clear_buttons=[]
-        self.page_vars=[];self.title_layout_vars=[];self.denoise_vars=[];self.denoise_picks=[];self.auto_page_values=[];self.auto_page_people=[];self.page_match_issues=[]
+        self.page_vars=[];self.language_vars=[];self.title_layout_vars=[];self.denoise_vars=[];self.denoise_picks=[];self.auto_page_values=[];self.auto_page_people=[];self.page_match_issues=[]
+        self.template_translation_cache_path=self.settings_path.parent/'lead-template-translations.json'
+        self.template_translation_cache=load_translation_cache(self.template_translation_cache_path)
+        self.translation_pending=False
         self.suggested_page_values=[];self.match_jobs={};self.page_entries=[]
         self.title_entries=[];self.title_font_paths=[];self.title_color_ranges=[]
         self.title_last_values=[];self.title_selection_ranges=[];self.title_manual_lines=[]
@@ -1306,7 +1388,7 @@ class App:
         for values in self.rows:
             for variable in values:
                 variable.trace_add('write', lambda *_: self.record_edit())
-        for variable in (*self.page_vars, *self.phone_vars,*self.title_layout_vars,*self.denoise_vars):
+        for variable in (*self.page_vars, *self.language_vars, *self.phone_vars,*self.title_layout_vars,*self.denoise_vars):
             variable.trace_add('write', lambda *_: self.record_edit())
         for variable in self.background_vars:
             variable.trace_add('write',lambda *_:self.record_edit())
@@ -1344,7 +1426,10 @@ class App:
         self.extract_button.configure(state='normal')
 
     def set_view_active(self, active):
-        self.view_active = bool(active)
+        active = bool(active)
+        if active == self.view_active:
+            return
+        self.view_active = active
         if not self.view_active:
             # Native Tk menus are separate popup windows. If navigation hides
             # the downloader while a cascade is open, it can remain on-screen
@@ -1410,10 +1495,11 @@ class App:
         separator.grid(row=grid_row,column=0,columnspan=9,sticky='sew')
         name,title,link=tk.StringVar(),tk.StringVar(),tk.StringVar()
         page,phone=tk.StringVar(value='1'),tk.StringVar()
+        language=tk.StringVar(value=DEFAULT_LANGUAGE)
         background=tk.BooleanVar(value=False)
         title_layout=tk.StringVar(value='全局')
         denoise=tk.StringVar(value='全局')
-        self.rows.append((name,title,link));self.page_vars.append(page);self.phone_vars.append(phone);self.title_layout_vars.append(title_layout)
+        self.rows.append((name,title,link));self.page_vars.append(page);self.language_vars.append(language);self.phone_vars.append(phone);self.title_layout_vars.append(title_layout)
         self.row_statuses.append('待下载')
         self.title_entries.append(None);self.title_font_paths.append('');self.title_color_ranges.append([])
         self.title_last_values.append(title.get());self.title_selection_ranges.append(None)
@@ -1445,8 +1531,9 @@ class App:
         link_entry.grid(row=grid_row+1,column=4,sticky='ew',padx=3,pady=4)
         link_entry.bind('<<Paste>>',lambda event,i=index:self.paste_column_values(event,i,'link'),add='+')
         ToolTip(link_entry,'可粘贴多个视频链接；同一行内的链接分别下载到同一人名-视频名称文件夹。直接从 Google 表格复制时会读取单元格里的真实链接地址。')
-        page_entry=ttk.Combobox(row,textvariable=page,values=['1'],state='readonly',width=4,style='Cell.TEntry')
+        page_entry=ttk.Combobox(row,textvariable=language,values=list(LANGUAGES),state='readonly',width=8,style='Cell.TEntry')
         page_entry.grid(row=grid_row+1,column=5,sticky='ew',padx=3,pady=4)
+        page_entry.bind('<<ComboboxSelected>>',lambda _,i=index:self.preview_page(i))
         denoise_pick=ttk.Combobox(row,textvariable=denoise,
                                   values=['全局']+[f'{value}%' for value in range(0,101)],
                                   state='readonly',width=5,style='Cell.TEntry')
@@ -1482,10 +1569,10 @@ class App:
         page.trace_add('write',lambda *_,i=index:self.refresh_title_preview(i))
         phone.trace_add('write',lambda *_,i=index:self.refresh_title_preview(i))
         ToolTip(phone_entry,'生成标题图时用此号码替换所选模板中的号码；留空则使用模板原号码。')
-        ToolTip(page_entry,'当前仅保留引流模板 1。')
+        ToolTip(page_entry,'选择本行引流文案的语种。英语使用原文；其他语种会在开始下载/生成图片时翻译文案，号码和模板样式保持不变。')
         ToolTip(progress,lambda label=progress:label.cget('text'))
         if hasattr(self,'last_snapshot'):
-            for variable in (name,title,link,page,phone,background,title_layout,denoise):
+            for variable in (name,title,link,page,language,phone,background,title_layout,denoise):
                 variable.trace_add('write',lambda *_:self.record_edit())
             for widget in (name_entry,phone_entry,title_entry,link_entry,page_entry):
                 widget.bind('<Control-z>',lambda event:self.restore_edit(False))
@@ -1960,6 +2047,7 @@ class App:
         self.history_paused=True
         for variable in self.rows[index]:variable.set('')
         self.page_vars[index].set('1')
+        self.language_vars[index].set(DEFAULT_LANGUAGE)
         self.phone_vars[index].set('')
         self.title_layout_vars[index].set('全局')
         self.denoise_vars[index].set('全局')
@@ -2032,9 +2120,9 @@ class App:
 
     def snapshot(self):
         rows=[]
-        for index,(values,page,background,phone,title_layout,denoise) in enumerate(
-                zip(self.rows,self.page_vars,self.background_vars,self.phone_vars,self.title_layout_vars,self.denoise_vars)):
-            row_values=tuple(variable.get() for variable in (*values,page,background,phone,title_layout,denoise))
+        for index,(values,page,language,background,phone,title_layout,denoise) in enumerate(
+                zip(self.rows,self.page_vars,self.language_vars,self.background_vars,self.phone_vars,self.title_layout_vars,self.denoise_vars)):
+            row_values=tuple(variable.get() for variable in (*values,page,language,background,phone,title_layout,denoise))
             manual_lines=(tuple(self.title_manual_lines[index])
                           if self.title_manual_lines[index] is not None else None)
             rows.append((*row_values,self.title_font_paths[index],tuple(self.title_color_ranges[index]),manual_lines))
@@ -2074,12 +2162,12 @@ class App:
         self.history_paused = True
         self.bulk_text.delete('1.0', 'end')
         self.bulk_text.insert('1.0', bulk)
-        for index,(variables,page,background,phone,title_layout,denoise, values) in enumerate(zip(self.rows,self.page_vars,self.background_vars,self.phone_vars,self.title_layout_vars,self.denoise_vars,rows)):
-            for variable, value in zip((*variables,page,background,phone,title_layout,denoise),values[:8]):
+        for index,(variables,page,language,background,phone,title_layout,denoise, values) in enumerate(zip(self.rows,self.page_vars,self.language_vars,self.background_vars,self.phone_vars,self.title_layout_vars,self.denoise_vars,rows)):
+            for variable, value in zip((*variables,page,language,background,phone,title_layout,denoise),values[:9]):
                 variable.set(value)
-            self.title_font_paths[index]=values[8]
-            self.title_color_ranges[index]=list(values[9])
-            self.title_manual_lines[index]=(list(values[10]) if len(values)>10 and values[10] is not None else None)
+            self.title_font_paths[index]=values[9]
+            self.title_color_ranges[index]=list(values[10])
+            self.title_manual_lines[index]=(list(values[11]) if len(values)>11 and values[11] is not None else None)
             self.title_last_values[index]=variables[1].get()
         for index,value in enumerate(progress):
             self._set_row_progress(index,value)
@@ -2106,6 +2194,8 @@ class App:
         # Clearing task text resets each row to the default traffic template.
         for variable in self.page_vars:
             variable.set('1')
+        for variable in self.language_vars:
+            variable.set(DEFAULT_LANGUAGE)
         for variable in self.phone_vars:
             variable.set('')
         for variable in self.title_layout_vars:
@@ -2406,7 +2496,8 @@ class App:
             effective = format_phone(supplied) if supplied else phone
             phone = f'原号码: {phone}；使用号码: {effective}' + ('（本行替换）' if supplied else '（默认）')
             person,title,link=self.rows[index]
-            self.status.config(text=f'第{index+1}行: 模板 {number}, {phone}\n人名: {person.get()}\n标题: {title.get()}\n链接: {link.get()}')
+            language=self.language_vars[index].get() or DEFAULT_LANGUAGE
+            self.status.config(text=f'第{index+1}行: 模板语种 {language}, {phone}\n人名: {person.get()}\n标题: {title.get()}\n链接: {link.get()}')
         except (OSError, ValueError, KeyError):
             self.status.config(text='选择模板并填写号码，可预览本行引流模板效果')
 
@@ -2528,7 +2619,7 @@ class App:
         if not self.rows_ready:
             self.status.config(text='任务列表正在准备，请稍候。')
             return
-        if self.active:
+        if self.active or self.translation_pending:
             return
         self.completion_actions.pack_forget()
         try:
@@ -2541,6 +2632,7 @@ class App:
             count = int(self.count.get())
             templates = {}
             title_image_errors = {}
+            translations_to_fetch = {}
             from page_cache import read_pages, page_design, read_style, page_number_for_position, page_footer, format_phone_like
             cached_pages = read_pages(self.cache_path)
             for index, page in enumerate(self.page_vars):
@@ -2561,8 +2653,38 @@ class App:
                                                    read_style(self.cache_path), phone_override=formatted)
                     templates[index]['phone_input']=supplied
                     templates[index]=self._decorate_title_design(templates[index],index,values[index][1])
+                    language=self.language_vars[index].get().strip() or DEFAULT_LANGUAGE
+                    if language not in LANGUAGE_CODES:
+                        raise ValueError(f'第 {index+1} 行：不支持“{language}”语种。')
+                    target_language=LANGUAGE_CODES[language]
+                    if target_language!='en':
+                        translation_request,translation_metadata=build_template_translation_request(
+                            templates[index],formatted)
+                        cache_key=translation_cache_key(target_language,translation_request)
+                        cached_translation=self.template_translation_cache.get(cache_key)
+                        if cached_translation is None:
+                            translations_to_fetch.setdefault(cache_key,(translation_request,target_language))
+                        else:
+                            templates[index]=apply_template_translation(
+                                templates[index],cached_translation,translation_metadata,formatted)
+                    templates[index]['selected_template_language']=language
                 except ValueError as exc:
                     raise ValueError(f'第 {index + 1} 行：模板 {position} 无法使用：{exc}') from exc
+            if translations_to_fetch:
+                self.translation_pending=True
+                self.start_button.config(state='disabled')
+                self.status.config(text='正在按所选语种翻译引流模板；原有换行、字号、颜色和号码格式会保留，完成后开始生成。')
+                def translate_pending_templates():
+                    translated={}
+                    error=''
+                    try:
+                        for cache_key,(request,target_language) in translations_to_fetch.items():
+                            translated[cache_key]=translate_template_copy(request,target_language)
+                    except Exception as exc:
+                        error=str(exc)
+                    self.events.put((None,'template_translation_ready',{'translations':translated,'error':error}))
+                threading.Thread(target=translate_pending_templates,daemon=True).start()
+                return
             if not 1 <= count <= 10:
                 raise ValueError('同时下载数量必须在 1 到 10 之间')
             task_values = [row if any(value.strip() for value in row) else
@@ -3037,9 +3159,10 @@ class App:
                             'on_retry': lambda attempt, error: update('下载中', f'文件夹重试 {attempt}/2 · {type(error).__name__}')},
                         url=url, output=str(path), skip_download=True, quiet=True,
                         timeout=(20, 120), **auth)
-                    extensions = {'.mp4', '.mov', '.m4v', '.mkv', '.webm', '.avi', '.wmv', '.flv', '.mpeg', '.mpg', '.3gp', '.ts', '.mts', '.m2ts', '.vob', '.ogv'}
+                    extensions = VIDEO_SUFFIXES
                     items = sorted(((f'https://drive.google.com/uc?id={item.id}', Path(item.path).name)
-                                    for item in listing if Path(item.path).suffix.lower() in extensions),
+                                    for item in listing if Path(item.path).suffix.lower() in extensions
+                                    or not Path(item.path).suffix),
                                    key=lambda item: item[1].casefold())
                     if not items:
                         raise RuntimeError('云端文件夹中没有找到可识别的视频文件')
@@ -3071,7 +3194,8 @@ class App:
                         if drive_item(file_url, original_name, path, folder, cancel, progress, cookie,
                                       on_retry=retry_status, on_wait=waiting_status,
                                       max_bytes=min(2 * 1024 * 1024 * 1024,batch_limit-downloaded_bytes),
-                                      browser_auth=browser_auth):
+                                      browser_auth=browser_auth,
+                                      ffprobe=self.resource_dir / 'ffmpeg' / 'ffprobe.exe'):
                             skipped += 1
                         else:
                             output_name=video_output_filename(filename)
@@ -3135,6 +3259,28 @@ class App:
         try:
             while True:
                 key, state, detail = self.events.get_nowait()
+                if state == 'template_translation_ready':
+                    payload=detail if isinstance(detail,dict) else {}
+                    translated=payload.get('translations',{})
+                    if isinstance(translated,dict):
+                        self.template_translation_cache.update(
+                            {cache_key:value for cache_key,value in translated.items()
+                             if isinstance(cache_key,str) and isinstance(value,dict)})
+                        try:
+                            save_translation_cache(self.template_translation_cache_path,
+                                                   self.template_translation_cache)
+                        except OSError as exc:
+                            self.status.config(text=f'翻译已完成，但翻译缓存未能写入：{exc}')
+                    self.translation_pending=False
+                    self.start_button.config(state='normal')
+                    translation_error=str(payload.get('error') or '').strip()
+                    if translation_error:
+                        self.status.config(text=f'引流模板翻译失败，尚未开始下载：{translation_error}')
+                        messagebox.showerror('引流模板翻译失败',translation_error,parent=self.root)
+                    else:
+                        self.status.config(text='引流模板翻译完成，正在生成标题图并开始任务。')
+                        self.root.after_idle(self.start)
+                    continue
                 if key is None:
                     self.active = False
                     self.start_button.config(state='normal')

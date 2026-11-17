@@ -190,7 +190,7 @@ function registerFontFace(font) {
         queueAutosave();
         toast("正确文案已清空");
       };
-      $("matchScript").onclick = matchScript;
+      $("matchScript").onclick = event => matchScript({forceRecognition: event.shiftKey});
       $("aiReviewStrict").onclick = () => reviewScriptWithAi("strict");
       $("aiReviewNatural").onclick = () => reviewScriptWithAi("natural");
       if ($("globalPolish")) $("globalPolish").onclick = runGlobalPolish;
@@ -433,14 +433,64 @@ function registerFontFace(font) {
       if ($("loginAntigravity")) $("loginAntigravity").onclick = async () => {
         try {
           await persistReviewSettings();
-          unwrap(await window.native.openAntigravityLogin());
+          const result = unwrap(await window.native.openAntigravityLogin());
           $("antigravityHint").className = "status";
-          $("antigravityHint").textContent = "已打开登录窗口。浏览器授权完成后回到这里点「检测」。";
-          toast("已打开 agy 登录窗口");
+          $("antigravityHint").textContent = result.alreadyOpen
+            ? "登录流程仍在运行。完成浏览器授权后点「检测」；若页面显示授权码，再粘贴到下方提交。"
+            : "正在启动 Google 登录。完成浏览器授权后点「检测」；若页面显示授权码，再粘贴到下方提交。";
+          toast("登录流程已启动");
         } catch (e) {
           $("antigravityHint").className = "status error";
           $("antigravityHint").textContent = e.message;
           toast(e.message);
+        }
+      };
+      const submitAntigravityCode = async () => {
+        const input = $("antigravityAuthCode");
+        const button = $("submitAntigravityCode");
+        const code = input?.value?.trim() || "";
+        if (!code) {
+          input?.focus();
+          toast("请先粘贴浏览器显示的授权码");
+          return;
+        }
+        button.disabled = true;
+        $("antigravityHint").className = "status";
+        $("antigravityHint").textContent = "正在提交授权码并确认登录状态…";
+        try {
+          const result = unwrap(await window.native.submitAntigravityAuthorizationCode({ code }));
+          if (!result.submitted) throw new Error("授权码没有提交，请重试。");
+          input.value = "";
+          let status = null;
+          for (let attempt = 0; attempt < 8; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            status = unwrap(await window.native.checkAntigravityStatus());
+            if (status.antigravityState === "ready" || status.antigravityState === "error") break;
+          }
+          await fillReviewSettings(status || undefined);
+          if (status?.antigravityState === "ready") {
+            toast("Antigravity 授权成功");
+          } else if (status?.antigravityState === "error") {
+            $("antigravityHint").className = "status error";
+            toast(status.antigravityHint || "Antigravity 授权检查失败");
+          } else {
+            $("antigravityHint").className = "status warn";
+            $("antigravityHint").textContent = "暂未检测到登录。请确认验证码完整且未过期；需要时重新点「登录」获取新码。";
+            toast("暂未检测到 Antigravity 登录");
+          }
+        } catch (e) {
+          $("antigravityHint").className = "status error";
+          $("antigravityHint").textContent = e.message || "授权码提交失败";
+          toast(e.message || "授权码提交失败");
+        } finally {
+          button.disabled = false;
+        }
+      };
+      if ($("submitAntigravityCode")) $("submitAntigravityCode").onclick = submitAntigravityCode;
+      if ($("antigravityAuthCode")) $("antigravityAuthCode").onkeydown = (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          submitAntigravityCode();
         }
       };
       if ($("openAntigravityDocs")) $("openAntigravityDocs").onclick = async () => {
@@ -1658,6 +1708,10 @@ function registerFontFace(font) {
         refreshSourceAvailability().catch((error) => console.warn(error));
       });
       $("scriptText").addEventListener("input", queueAutosave);
+      $("manuscriptLanguage")?.addEventListener("change", () => {
+        state.manuscriptLanguage = $("manuscriptLanguage").value || "";
+        queueAutosave();
+      });
       renderPresets();
       colorControls();
       beautyControls();

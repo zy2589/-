@@ -27,10 +27,18 @@
                 id="scriptText"
                 placeholder="在这里粘贴完整正确文案……"
               ></textarea>
+              <label class="field" style="margin-top:8px">
+                <span class="small">文案／口播语种</span>
+                <select class="select" id="manuscriptLanguage">
+                  <option value="en">英语（默认）</option>
+                  <option value="auto">自动检测口播语种</option>
+                </select>
+              </label>
+              <p class="small feature-help">默认英语；口播或文案是其他语种时，请在这里手动选择。语种会用于听写和匹配，并分别缓存。</p>
               <div class="row script-match-actions" style="margin-top: 8px">
                 <button class="btn grow" id="pasteScript">粘贴文案</button
                 ><button class="btn" id="clearScript">清空</button
-                ><button class="btn primary grow" id="matchScript">
+                ><button class="btn primary grow" id="matchScript" type="button" title="默认复用转写记录；Shift+点击绕过缓存重新识别">
                   匹配文案
                 </button
                 >
@@ -44,11 +52,11 @@
               </button>
 
               <p class="small feature-help">清理格式与标点，保留正文措辞。</p>
-              <button class="btn wide" id="realignCaptions">字幕对齐</button>
+              <button class="btn wide" id="realignCaptions" title="Shift+点击绕过缓存重新识别后再对齐">字幕对齐</button>
               <p class="small feature-help">按修剪后的音频重新对齐，补回遗漏字幕。</p>
               <section class="auto-caption-panel" id="autoCaptionPanel">
                 <label class="small"><input type="checkbox" id="ccProofread" checked> 按正确文案校对</label>
-                <button class="btn primary wide" id="generateAutoCaptions" type="button" title="优先复用识别记录；Shift+点击重新听写">CC 语音字幕识别</button>
+                <button class="btn primary wide" id="generateAutoCaptions" type="button" title="默认复用转写记录；Shift+点击绕过缓存重新识别">CC 语音字幕识别</button>
               <p class="small feature-help">填写正确文案时，CC 会参照经文格式和专有名词大小写；勾选校对后还会对照错词、重复词和漏词。</p>
                 <div class="progress auto-caption-progress" id="autoCaptionProgress" hidden><span></span></div>
                 <div class="small auto-caption-status" id="autoCaptionStatus">勾选后与正确文案对照：绿色口语、红色重复或错词、紫色缺词需补录。不勾选则保留识别口播，对照文案修正单词和标点，文字框标明已替换及口语补充；未填文案则直接识别。</div>

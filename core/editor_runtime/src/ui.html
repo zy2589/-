@@ -2405,7 +2405,6 @@ select option, select optgroup {
 #spliceGuideLayer .splice-guide-region.selected { filter: drop-shadow(0 0 2px #f4d35e); }
 #spliceGuideLayer .splice-guide-region[data-region-kind="pip"] { pointer-events: all; cursor: move; touch-action: none; }
 #spliceGuideLayer .splice-guide-region[data-region-kind="pip"] { fill: rgba(104,169,162,.015); }
-#spliceGuideLayer .splice-guide-region[data-region-kind="pip"].selected { stroke: #f4d35e; }
 #spliceGuideLayer .splice-guide-region.drop-target { stroke: #f4d35e; stroke-width: 6; fill: rgba(244, 211, 94, .12); }
 .selectionbox[data-splice-target="frame"] { border-color: #f4d35e; box-shadow: 0 0 0 1px rgba(20,24,29,.75), 0 0 8px rgba(244,211,94,.28); }
 .selectionbox[data-splice-target="frame"] .resizehandle,
@@ -4495,10 +4494,18 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
                 id="scriptText"
                 placeholder="在这里粘贴完整正确文案……"
               ></textarea>
+              <label class="field" style="margin-top:8px">
+                <span class="small">文案／口播语种</span>
+                <select class="select" id="manuscriptLanguage">
+                  <option value="en">英语（默认）</option>
+                  <option value="auto">自动检测口播语种</option>
+                </select>
+              </label>
+              <p class="small feature-help">默认英语；口播或文案是其他语种时，请在这里手动选择。语种会用于听写和匹配，并分别缓存。</p>
               <div class="row script-match-actions" style="margin-top: 8px">
                 <button class="btn grow" id="pasteScript">粘贴文案</button
                 ><button class="btn" id="clearScript">清空</button
-                ><button class="btn primary grow" id="matchScript">
+                ><button class="btn primary grow" id="matchScript" type="button" title="默认复用转写记录；Shift+点击绕过缓存重新识别">
                   匹配文案
                 </button
                 >
@@ -4512,11 +4519,11 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
               </button>
 
               <p class="small feature-help">清理格式与标点，保留正文措辞。</p>
-              <button class="btn wide" id="realignCaptions">字幕对齐</button>
+              <button class="btn wide" id="realignCaptions" title="Shift+点击绕过缓存重新识别后再对齐">字幕对齐</button>
               <p class="small feature-help">按修剪后的音频重新对齐，补回遗漏字幕。</p>
               <section class="auto-caption-panel" id="autoCaptionPanel">
                 <label class="small"><input type="checkbox" id="ccProofread" checked> 按正确文案校对</label>
-                <button class="btn primary wide" id="generateAutoCaptions" type="button" title="优先复用识别记录；Shift+点击重新听写">CC 语音字幕识别</button>
+                <button class="btn primary wide" id="generateAutoCaptions" type="button" title="默认复用转写记录；Shift+点击绕过缓存重新识别">CC 语音字幕识别</button>
               <p class="small feature-help">填写正确文案时，CC 会参照经文格式和专有名词大小写；勾选校对后还会对照错词、重复词和漏词。</p>
                 <div class="progress auto-caption-progress" id="autoCaptionProgress" hidden><span></span></div>
                 <div class="small auto-caption-status" id="autoCaptionStatus">勾选后与正确文案对照：绿色口语、红色重复或错词、紫色缺词需补录。不勾选则保留识别口播，对照文案修正单词和标点，文字框标明已替换及口语补充；未填文案则直接识别。</div>
@@ -5944,7 +5951,7 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
           <div class="status" id="vertexKeyHint"></div>
         </div>
         <div id="antigravitySettings" style="display:none">
-          <p class="small">走本机 agy 的 Gemini 套餐，不用 API Key。没装过先点「安装」，装好后点「登录」用浏览器授权，再点「检测」。</p>
+          <p class="small">走本机 agy 的 Gemini 套餐，不用 API Key。没装过先点「安装」，然后点「登录」打开浏览器；若浏览器显示授权码，把它粘贴到下方并提交。</p>
           <div class="row" style="margin-top:7px; flex-wrap:wrap; gap:6px">
             <button class="btn" type="button" id="checkAntigravity">检测</button>
             <button class="btn primary" type="button" id="installAntigravity">安装 agy</button>
@@ -5952,6 +5959,13 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
             <button class="btn" type="button" id="browseAntigravityCli">浏览路径</button>
             <button class="btn" type="button" id="openAntigravityDocs">官方说明</button>
           </div>
+          <div class="row" style="align-items:end; gap:6px; margin-top:8px">
+            <label class="field grow" style="margin:0"><span class="small">浏览器授权码</span>
+              <input class="input" id="antigravityAuthCode" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="2048" placeholder="粘贴浏览器显示的授权码" />
+            </label>
+            <button class="btn primary" type="button" id="submitAntigravityCode">提交授权码</button>
+          </div>
+          <p class="small" style="margin:4px 0 0">授权码只提交给本机登录进程，不保存到设置。</p>
           <label class="field" style="margin-top:8px"><span class="small">agy 路径（可留空自动查找）</span>
             <input class="input" id="antigravityPath" placeholder="agy 或完整路径，官方一般在 %LOCALAPPDATA%\agy\bin\agy.exe" />
           </label>
@@ -7180,6 +7194,7 @@ function captionMeaningContext(captions, review) {
         captions: [],
         autoTranscript: null,
         recognizedText: "", recognizedTextCleared: false,
+        manuscriptLanguage: "en",
         captionRecoveryArchive: [],
         auxSubtitles: defaultAuxSubtitleSettings(),
         reviewCaptions: [],
@@ -8639,6 +8654,8 @@ function captionMeaningContext(captions, review) {
         applyLayout();
         $("projectName").textContent = state.projectName;
         $("scriptText").value = data.script || data.autoCaptionScript || "";
+        state.manuscriptLanguage = String(data.manuscriptLanguage || "en");
+        if ($("manuscriptLanguage")) $("manuscriptLanguage").value = state.manuscriptLanguage;
         state.legacyAutoCaptionScript = data.autoCaptionScript || "";
         if (state.video?.url) {
           $("video").src = state.video.url;
@@ -18976,12 +18993,26 @@ function filterSpeechLanguageList(query, languages) {
               .join("")
           : `<div class="small" style="padding:8px">没有匹配的语种</div>`;
       }
+      function renderManuscriptLanguageOptions(selected = state.manuscriptLanguage || "en") {
+        const select = $("manuscriptLanguage");
+        if (!select) return;
+        const options = [
+          new Option("英语（默认）", "en"),
+          new Option("自动检测口播语种", "auto"),
+          ...speechLanguageCatalog
+            .filter((item) => item.id !== "auto" && item.id !== "en")
+            .map((item) => new Option(`${item.label} · ${item.english || item.id}`, item.id)),
+        ];
+        select.replaceChildren(...options);
+        select.value = selected === "en" || selected === "auto" || speechLanguageCatalog.some((item) => item.id === selected) ? selected : "en";
+      }
       async function checkModel() {
         try {
           const s = unwrap(await window.native.modelStatus());
           const engine = s.preferredEngine || s.engine || "groq";
           if ($("speechEngine")) $("speechEngine").value = engine;
           speechLanguageCatalog = Array.isArray(s.speechLanguages) ? s.speechLanguages : [];
+          renderManuscriptLanguageOptions(state.manuscriptLanguage || "en");
           const selectedLanguage = s.speechLanguage || "en";
           renderSpeechLanguageOptions(
             selectedLanguage,
@@ -19259,7 +19290,7 @@ function filterSpeechLanguageList(query, languages) {
           return false;
         }
       }
-      async function matchScript({alignmentOnly = false} = {}) {
+      async function matchScript({alignmentOnly = false, forceRecognition = false} = {}) {
         if (!state.video) {
           toast("请先导入视频");
           return false;
@@ -19301,9 +19332,11 @@ function filterSpeechLanguageList(query, languages) {
               inputPath: state.video.path,
               duration: state.sourceDuration,
               script: $("scriptText").value,
+              scriptLanguage: $("manuscriptLanguage")?.value || "",
               removals: [],
               sourceClips,
               alignmentOnly,
+              forceRecognition,
               captionLines: state.captionLines,
               naturalPunctuation: !!state.naturalCaptionPunctuation,
             }),
@@ -21779,6 +21812,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
           ignoredPolishIds: Array.from(window.__ignoredPolishIds || state.ignoredPolishIds || []),
           layout: state.layout,
           script: $("scriptText").value,
+          manuscriptLanguage: String(state.manuscriptLanguage || "en"),
           autoCaptionScript: state.legacyAutoCaptionScript || "",
         };
       }
@@ -21894,6 +21928,8 @@ function persistedMediaItem(item, preserveWaveform = false) {
             };
           }
           $("scriptText").value = d.script || d.autoCaptionScript || "";
+          state.manuscriptLanguage = String(d.manuscriptLanguage || "en");
+          if ($("manuscriptLanguage")) $("manuscriptLanguage").value = state.manuscriptLanguage;
           state.legacyAutoCaptionScript = d.autoCaptionScript || "";
           setRatio(d.ratio || "9:16");
           if (state.captions.length) {
@@ -26393,7 +26429,7 @@ function registerFontFace(font) {
         queueAutosave();
         toast("正确文案已清空");
       };
-      $("matchScript").onclick = matchScript;
+      $("matchScript").onclick = event => matchScript({forceRecognition: event.shiftKey});
       $("aiReviewStrict").onclick = () => reviewScriptWithAi("strict");
       $("aiReviewNatural").onclick = () => reviewScriptWithAi("natural");
       if ($("globalPolish")) $("globalPolish").onclick = runGlobalPolish;
@@ -26636,14 +26672,64 @@ function registerFontFace(font) {
       if ($("loginAntigravity")) $("loginAntigravity").onclick = async () => {
         try {
           await persistReviewSettings();
-          unwrap(await window.native.openAntigravityLogin());
+          const result = unwrap(await window.native.openAntigravityLogin());
           $("antigravityHint").className = "status";
-          $("antigravityHint").textContent = "已打开登录窗口。浏览器授权完成后回到这里点「检测」。";
-          toast("已打开 agy 登录窗口");
+          $("antigravityHint").textContent = result.alreadyOpen
+            ? "登录流程已在等待授权码。完成浏览器步骤后，把授权码粘贴到下方并提交。"
+            : "登录流程已启动。完成浏览器步骤后，把授权码粘贴到下方并提交。";
+          toast("登录流程已启动");
         } catch (e) {
           $("antigravityHint").className = "status error";
           $("antigravityHint").textContent = e.message;
           toast(e.message);
+        }
+      };
+      const submitAntigravityCode = async () => {
+        const input = $("antigravityAuthCode");
+        const button = $("submitAntigravityCode");
+        const code = input?.value?.trim() || "";
+        if (!code) {
+          input?.focus();
+          toast("请先粘贴浏览器显示的授权码");
+          return;
+        }
+        button.disabled = true;
+        $("antigravityHint").className = "status";
+        $("antigravityHint").textContent = "正在提交授权码并确认登录状态…";
+        try {
+          const result = unwrap(await window.native.submitAntigravityAuthorizationCode({ code }));
+          if (!result.submitted) throw new Error("授权码没有提交，请重试。");
+          input.value = "";
+          let status = null;
+          for (let attempt = 0; attempt < 8; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            status = unwrap(await window.native.checkAntigravityStatus());
+            if (status.antigravityState === "ready" || status.antigravityState === "error") break;
+          }
+          await fillReviewSettings(status || undefined);
+          if (status?.antigravityState === "ready") {
+            toast("Antigravity 授权成功");
+          } else if (status?.antigravityState === "error") {
+            $("antigravityHint").className = "status error";
+            toast(status.antigravityHint || "Antigravity 授权检查失败");
+          } else {
+            $("antigravityHint").className = "status warn";
+            $("antigravityHint").textContent = "暂未检测到登录。请确认验证码完整且未过期；需要时重新点「登录」获取新码。";
+            toast("暂未检测到 Antigravity 登录");
+          }
+        } catch (e) {
+          $("antigravityHint").className = "status error";
+          $("antigravityHint").textContent = e.message || "授权码提交失败";
+          toast(e.message || "授权码提交失败");
+        } finally {
+          button.disabled = false;
+        }
+      };
+      if ($("submitAntigravityCode")) $("submitAntigravityCode").onclick = submitAntigravityCode;
+      if ($("antigravityAuthCode")) $("antigravityAuthCode").onkeydown = (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          submitAntigravityCode();
         }
       };
       if ($("openAntigravityDocs")) $("openAntigravityDocs").onclick = async () => {
@@ -27861,6 +27947,10 @@ function registerFontFace(font) {
         refreshSourceAvailability().catch((error) => console.warn(error));
       });
       $("scriptText").addEventListener("input", queueAutosave);
+      $("manuscriptLanguage")?.addEventListener("change", () => {
+        state.manuscriptLanguage = $("manuscriptLanguage").value || "";
+        queueAutosave();
+      });
       renderPresets();
       colorControls();
       beautyControls();
@@ -27932,6 +28022,7 @@ function registerFontFace(font) {
           timelineSignature: autoCaptionTimelineSignature(),
           transcriptSourcePath: autoCaptionSourcePath(),
           scriptText:$("scriptText")?.value || "",
+          manuscriptLanguage:$("manuscriptLanguage")?.value || "",
         };
       }
       function bindMatchedReviewSources(reviews, clips = manuscriptSourceClips()) {
@@ -28040,7 +28131,8 @@ function registerFontFace(font) {
             autoCaptionMediaSignature() !== context.mediaSignature ||
             autoCaptionTimelineSignature() !== context.timelineSignature ||
             autoCaptionSourcePath() !== context.transcriptSourcePath ||
-            ($("scriptText")?.value || "") !== context.scriptText)
+            ($("scriptText")?.value || "") !== context.scriptText ||
+            ($("manuscriptLanguage")?.value || "") !== context.manuscriptLanguage)
           throw new Error("工程、源素材或时间线已经变化，旧转录结果已安全丢弃");
       }
       function locallyRetimeEditedCaptionWords(existing, tokens, caption) {
@@ -28256,6 +28348,7 @@ function registerFontFace(font) {
             duration: state.sourceDuration || state.duration,
             captionLines: state.captionLines,
             script: correctScript,
+            scriptLanguage: $("manuscriptLanguage")?.value || "",
             proofread,
             forceRecognition,
             sourceClips:manuscriptSourceClips(),
@@ -28366,6 +28459,7 @@ function registerFontFace(font) {
             duration: state.sourceDuration || state.duration,
             captionLines: state.captionLines,
             script,
+            scriptLanguage: $("manuscriptLanguage")?.value || "en",
             forcedAlignment: true,
           }));
           jobId = started.jobId;
@@ -29474,10 +29568,10 @@ function refreshCaptionMeaningDialog() {
 var captionReviewShowAll=false;
 $('reviewPendingOnly').onclick=()=>{captionReviewShowAll=false;renderIssues();};
 $('reviewAll').onclick=()=>{captionReviewShowAll=true;renderIssues();};
-$('realignCaptions').onclick=async()=>{
+$('realignCaptions').onclick=async(event)=>{
   if(state.autoTranscript?.trackId && isTrackLocked(state.autoTranscript.trackId))return toast('请先解锁字幕轨道');
   const button=$('realignCaptions');button.disabled=true;button.textContent='对齐中…';
-  try{await matchScript({alignmentOnly:true});}finally{button.disabled=false;button.textContent='字幕对齐';}
+  try{await matchScript({alignmentOnly:true,forceRecognition:event.shiftKey});}finally{button.disabled=false;button.textContent='字幕对齐';}
 };
 
 function showCaptionDetails(caption) {
@@ -30638,7 +30732,7 @@ generateAutoCaptions=(...args)=>runExclusiveCaptionAnalysis(()=>originalGenerate
         ? (Number(region.borderWidth || 0) > 0 ? region.borderColor || "#68A9A2" : "transparent")
         : "rgba(104,169,162,.88)";
       const width = region.kind === "pip"
-        ? Math.max(region.id === selectedId ? 2 : 0, Number(region.borderWidth || 0) * outputScale)
+        ? Number(region.borderWidth || 0) * outputScale
         : Math.max(1.5, Number(region.borderWidth || 0) * 2.3);
       return `<polygon class="splice-guide-region${region.id === selectedId ? " selected" : ""}" data-region-id="${escapeHtml(region.id)}" data-region-kind="${escapeHtml(region.kind || "pane")}" points="${points}" stroke="${stroke}" stroke-width="${width}" fill="${region.kind === "pip" ? "rgba(104,169,162,.035)" : "rgba(104,169,162,.018)"}"/>`;
     });

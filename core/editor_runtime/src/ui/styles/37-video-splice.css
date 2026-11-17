@@ -34,7 +34,6 @@
 #spliceGuideLayer .splice-guide-region.selected { filter: drop-shadow(0 0 2px #f4d35e); }
 #spliceGuideLayer .splice-guide-region[data-region-kind="pip"] { pointer-events: all; cursor: move; touch-action: none; }
 #spliceGuideLayer .splice-guide-region[data-region-kind="pip"] { fill: rgba(104,169,162,.015); }
-#spliceGuideLayer .splice-guide-region[data-region-kind="pip"].selected { stroke: #f4d35e; }
 #spliceGuideLayer .splice-guide-region.drop-target { stroke: #f4d35e; stroke-width: 6; fill: rgba(244, 211, 94, .12); }
 .selectionbox[data-splice-target="frame"] { border-color: #f4d35e; box-shadow: 0 0 0 1px rgba(20,24,29,.75), 0 0 8px rgba(244,211,94,.28); }
 .selectionbox[data-splice-target="frame"] .resizehandle,

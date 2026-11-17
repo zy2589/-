@@ -330,13 +330,22 @@ def render(design, green_preview=False, output_size='1080x1920'):
 
     paint([(line['runs'],line.get('size',52),line.get('bold',True)) for line in design['lines']],design.get('top',850)*scale+pad)
     rows=[]
+    footer_roles=design.get('footer_roles',[])
+    footer_auto_highlights=design.get('footer_auto_highlights',{})
     for index,text in enumerate(design.get('footer','').splitlines()):
         if not text.strip():continue
         # Keep logical font sizes here; paint() applies the 2x supersampling once.
-        size=design.get('phone_size',68) if re.search(r'\d{3}',text) else design.get('link_size',48) if text.strip()=='LINK IN MY BIO' else design.get('footer_size',38)
+        role=footer_roles[index] if index<len(footer_roles) else ''
+        size=design.get('phone_size',68) if role=='phone' or re.search(r'\d{3}',text) else design.get('link_size',48) if role=='cta' or text.strip()=='LINK IN MY BIO' else design.get('footer_size',38)
+        try:
+            auto_spans=footer_auto_highlights.get(str(index),[])
+        except AttributeError:
+            auto_spans=[]
         runs=[]
         for j,char in enumerate(text):
-            color=highlight if text.startswith('+') or text.strip()=='LINK IN MY BIO' or any(match.start()<=j<match.end() for match in re.finditer('FREE',text)) else normal
+            color=highlight if role=='phone' or role=='cta' or text.startswith('+') or text.strip()=='LINK IN MY BIO' or any(match.start()<=j<match.end() for match in re.finditer('FREE',text,re.IGNORECASE)) or any(
+                isinstance(span,(list,tuple)) and len(span)>=2 and int(span[0])<=j<int(span[1])
+                for span in auto_spans) else normal
             spec={'color':color}
             for style in design.get('footer_styles',[]):
                 if style['line']==index and (style.get('whole_line') or style['start']<=j<style['end']):

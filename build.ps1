@@ -8,6 +8,7 @@ $Assets = Join-Path $Root 'assets'
 $Downloader = Join-Path $Root 'core\downloader_runtime'
 $EditorHostSource = Join-Path $Root 'core\editor_host'
 $EditorRuntimeCodeSource = Join-Path $Root 'core\editor_runtime\src'
+$EditorPtyPackageSource = Join-Path $Root 'core\editor_runtime\vendor\node-pty'
 $EditorRuntimeSource = Join-Path $Resources 'editor-runtime'
 $EditorRuntimeAssets = Join-Path $EditorRuntimeSource 'assets'
 $EditorWebViewSource = Join-Path $EditorRuntimeSource 'webview2'
@@ -196,6 +197,32 @@ $SourceAssetStage = Join-Path $EngineEditorSource 'assets'
 New-Item -ItemType Directory -Force -Path $EngineEditorSource, $RuntimeAssetStage | Out-Null
 Copy-Item -Path (Join-Path $EditorRuntimeCodeSource '*') -Destination $EngineEditorSource -Recurse -Force
 Copy-Item -Path (Join-Path $EditorRuntimeAssets '*') -Destination $RuntimeAssetStage -Recurse -Force
+$PtyPackageJson = Join-Path $EditorPtyPackageSource 'package.json'
+$PtyLibSource = Join-Path $EditorPtyPackageSource 'lib'
+$PtyPrebuildSource = Join-Path $EditorPtyPackageSource 'prebuilds\win32-x64'
+foreach ($PtyPackageFile in @(
+    $PtyPackageJson,
+    (Join-Path $PtyLibSource 'index.js'),
+    (Join-Path $PtyPrebuildSource 'conpty.node'),
+    (Join-Path $PtyPrebuildSource 'conpty\conpty.dll'),
+    (Join-Path $PtyPrebuildSource 'conpty\OpenConsole.exe')
+)) {
+    if (!(Test-Path -LiteralPath $PtyPackageFile -PathType Leaf)) {
+        throw "缺少 Windows 终端桥接依赖，未生成安装包：$PtyPackageFile"
+    }
+}
+$PtyRuntimeStage = Join-Path $EngineEditor 'vendor\node-pty'
+$PtyRuntimePrebuildStage = Join-Path $PtyRuntimeStage 'prebuilds\win32-x64'
+New-Item -ItemType Directory -Force -Path $PtyRuntimeStage, $PtyRuntimePrebuildStage | Out-Null
+Copy-Item -Path $PtyLibSource -Destination $PtyRuntimeStage -Recurse -Force
+Copy-Item -LiteralPath $PtyPackageJson -Destination (Join-Path $PtyRuntimeStage 'package.json') -Force
+Copy-Item -LiteralPath (Join-Path $EditorPtyPackageSource 'LICENSE') -Destination (Join-Path $PtyRuntimeStage 'LICENSE') -Force
+Get-ChildItem -LiteralPath $PtyPrebuildSource -Recurse -File | Where-Object { $_.Extension -ne '.pdb' } | ForEach-Object {
+    $RelativePtyPath = $_.FullName.Substring($PtyPrebuildSource.Length).TrimStart('\')
+    $PtyTarget = Join-Path $PtyRuntimePrebuildStage $RelativePtyPath
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $PtyTarget) | Out-Null
+    Copy-Item -LiteralPath $_.FullName -Destination $PtyTarget -Force
+}
 foreach ($PrivateSeedPath in @(
     (Join-Path $SourceAssetStage 'credential-seed'),
     (Join-Path $SourceAssetStage 'user-seed'),
@@ -539,7 +566,7 @@ if (!$LegacyPipelineSourceText.Contains('"format": "best"') -or
         }
     }
     $SpliceRender = [IO.File]::ReadAllText((Join-Path $EngineEditorSource 'media\render.mjs'))
-    foreach ($SpliceRenderToken in @('const spliceRegion = image.spliceRegion', 'image.spliceRegion.x', 'spliceShapeAlphaFilter(spliceRegion)')) {
+    foreach ($SpliceRenderToken in @('const spliceRegion = image.spliceRegion', 'image.spliceRegion.x', 'spliceShapeAlphaFilter(spliceRegion, targetW, targetH)')) {
         if (!$SpliceRender.Contains($SpliceRenderToken)) {
             throw "拼接静帧/图片导出缺少分区支持：$SpliceRenderToken"
         }

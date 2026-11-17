@@ -47,7 +47,20 @@ const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const downloads = new Map();
 const analyses = new Map();
 const autoCaptionAnalyses = new Map();
-function transcriptCacheSettings(languageOverride = ""){const settings=loadSpeechSettings();return {...settings,speechLanguage:languageOverride||settings.speechLanguage,reviewModel:settings.engine==='gemini'?loadReviewSettings().model:''};}
+function logSpeechJob(job,event,details={}){
+  try{
+    const directory=path.join(supportRoot(),'logs');
+    fs.mkdirSync(directory,{recursive:true,mode:0o700});
+    fs.appendFileSync(path.join(directory,'transcription-jobs.jsonl'),JSON.stringify({
+      at:new Date().toISOString(),event,jobId:String(job?.id||''),kind:String(job?.kind||'script'),
+      engine:String(job?.engine||''),forceRecognition:Boolean(job?.forceRecognition),
+      manuscriptLanguage:String(job?.manuscriptLanguage||''),speechLanguage:String(job?.speechLanguage||''),
+      recognitionChunkCount:Number(job?.recognitionChunkCount||0),recognitionChunkSeconds:Number(job?.recognitionChunkSeconds||0),
+      cacheDecision:String(job?.cacheDecision||'unknown'),...details,
+    })+'\n',{encoding:'utf8',mode:0o600});
+  }catch{/* diagnostics must never interrupt transcription */}
+}
+function transcriptCacheSettings(languageOverride = ""){const settings=loadSpeechSettings();return {...settings,speechLanguage:languageOverride||settings.speechLanguage,reviewModel:settings.engine==='gemini'?loadReviewSettings().model:'',deepgramChunkSeconds:settings.engine==='deepgram'?DEEPGRAM_CHUNK_SECONDS:undefined};}
 export { finalizeScriptAnalysis, finalizeAutoCaptionAnalysis };
 const HF_WHISPER =
   "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
@@ -232,6 +245,11 @@ export function speechLanguage() {
   return loadSpeechSettings().speechLanguage || "en";
 }
 
+function resolveSpeechLanguage(script, configuredLanguage, manuscriptLanguage = "") {
+  const selected = String(manuscriptLanguage || "").trim();
+  return selected ? normalizeSpeechLanguage(selected) : speechLanguageForManuscript(script, configuredLanguage);
+}
+
 const DEFAULT_LOCAL_WHISPER = "turbo-q5";
 
 export function normalizeLocalWhisperModel(value) {
@@ -283,7 +301,9 @@ const GEMINI_CHUNK_OVERLAP = 1.5;
 const GEMINI_MAX_INLINE_BYTES = 16 * 1024 * 1024;
 const DEEPGRAM_LISTEN_URL = "https://api.deepgram.com/v1/listen";
 const DEEPGRAM_STT_MODEL = "nova-3";
-const DEEPGRAM_CHUNK_SECONDS = 480;
+// Shorter requests avoid Nova-3 drifting into phonetic or unrelated words on
+// ordinary multi-minute clips. The overlap preserves words across boundaries.
+const DEEPGRAM_CHUNK_SECONDS = 40;
 const DEEPGRAM_CHUNK_OVERLAP = 1.2;
 
 function groqKeyFile() {
@@ -1129,7 +1149,11 @@ export async function transcribeWithDeepgram(
   { duration = 0, job = null, signal = null, script = "", language = speechLanguage() } = {},
 ) {
   const totalDuration = Math.max(0.04, Number(duration || 0.04));
-  const needChunks = totalDuration > DEEPGRAM_CHUNK_SECONDS + 20;
+  const needChunks = totalDuration > DEEPGRAM_CHUNK_SECONDS + 2;
+  if(job){
+    job.recognitionChunkCount=needChunks?Math.ceil(totalDuration/(DEEPGRAM_CHUNK_SECONDS-DEEPGRAM_CHUNK_OVERLAP)):1;
+    job.recognitionChunkSeconds=needChunks?DEEPGRAM_CHUNK_SECONDS:Math.ceil(totalDuration);
+  }
   if (!needChunks) {
     if (job) job.progress = 0.22;
     const data = await deepgramTranscribeFile(audioPath, { signal, script, language });
@@ -1906,6 +1930,8 @@ export function startScriptAnalysis({
   naturalPunctuation = false,
   sourceClips,
   alignmentOnly = false,
+  forceRecognition = false,
+  scriptLanguage = "",
 }) {
   if (!canTranscribe()) {
     const engine = loadSpeechSettings().engine;
@@ -1923,12 +1949,14 @@ export function startScriptAnalysis({
   const id = crypto.randomUUID();
   const tempDir = fs.mkdtempSync(path.join(supportRoot(), "analysis-"));
   const settings = loadSpeechSettings();
-  const effectiveSpeechLanguage = speechLanguageForManuscript(script, settings.speechLanguage);
+  const effectiveSpeechLanguage = resolveSpeechLanguage(script, settings.speechLanguage, scriptLanguage);
   assertSpeechModelSupportsLanguage(settings.engine, effectiveSpeechLanguage, settings.localModel);
   const useLocal = settings.engine === "local";
   const wavPath = path.join(tempDir, useLocal ? "audio.wav" : "audio.flac");
   const job = {
     id,
+    kind: "script",
+    engine: settings.engine,
     state: "extracting",
     progress: 0.02,
     error: "",
@@ -1940,13 +1968,18 @@ export function startScriptAnalysis({
     sourceClips,
     inputPath,
     alignmentOnly,
+    forceRecognition:Boolean(forceRecognition),
+    manuscriptLanguage:String(scriptLanguage||''),
     speechLanguage: effectiveSpeechLanguage,
     cacheKey:transcriptCacheKey(inputPath,transcriptCacheSettings(effectiveSpeechLanguage)),
   };
   analyses.set(id, job);
-  const cached=readTranscriptCache(supportRoot(),job.cacheKey);
+  const cached=forceRecognition?null:readTranscriptCache(supportRoot(),job.cacheKey);
+  job.cacheHit=Boolean(cached);
+  job.cacheDecision=forceRecognition?'bypassed':cached?'hit':'miss';
+  logSpeechJob(job,'started',{cacheDecision:job.cacheDecision});
   if(cached){
-    fs.rmSync(tempDir,{recursive:true,force:true});job.cacheHit=true;
+    fs.rmSync(tempDir,{recursive:true,force:true});
     void finalizeScriptAnalysis(job,cached.segments,cached.fallbackText,duration,script,removals).catch(error=>{if(job.state==='cancelled')return;job.state="failed";job.error=error.message;});
     return {jobId:id};
   }
@@ -2091,6 +2124,14 @@ async function finalizeAutoCaptionAnalysis(job, segments, duration, captionLines
   unique = normalizeBibleVersionSegments(await verifyAudioOmissions(job,unique,job.proofread===false?'':script,duration));
   if(unique.some(s=>s.asrEchoVerified))fallbackText=unique.map(s=>s.text).join(' ');
   if(job.state==='cancelled')return;
+  const orderedTranscript=[...unique].sort((a,b)=>a.start-b.start);
+  const transcriptGaps=[];
+  for(let index=1;index<orderedTranscript.length;index++){
+    const gap=Number(orderedTranscript[index].start)-Number(orderedTranscript[index-1].end);
+    if(gap>12)transcriptGaps.push(gap);
+  }
+  logSpeechJob(job,'transcript-ready',{segmentCount:unique.length,audioVerifiedWordCount:unique.filter(segment=>segment.audioVerified).length,
+    gapsOver12Seconds:transcriptGaps.length,longestGapSeconds:Math.round(Math.max(0,...transcriptGaps)*100)/100});
   if(job.cacheKey) {try{writeTranscriptCache(supportRoot(),job.cacheKey,unique,fallbackText);}catch{/* cache is optional */}}
   const sourceSegments=unique.map(segment=>({...segment}));
   const placed=Array.isArray(job.sourceClips)?job.sourceClips:null;
@@ -2148,19 +2189,21 @@ async function finalizeAutoCaptionAnalysis(job, segments, duration, captionLines
   job.progress = 1;
 }
 
-export function startAutoCaptionAnalysis({ inputPath, duration, captionLines = 1, script = "", forcedAlignment = false, proofread = undefined, sourceClips, alignmentOnly = false,forceRecognition = false } = {}) {
+export function startAutoCaptionAnalysis({ inputPath, duration, captionLines = 1, script = "", forcedAlignment = false, proofread = undefined, sourceClips, alignmentOnly = false,forceRecognition = false,scriptLanguage = "" } = {}) {
   if (!canTranscribe()) throw new Error("请先配置当前选择的听写引擎，与匹配文案使用相同设置。");
   if (!inputPath) throw new Error("请先导入视频或音频。");
   const id = crypto.randomUUID();
   const tempDir = fs.mkdtempSync(path.join(supportRoot(), "auto-caption-"));
   const settings = loadSpeechSettings();
-  const effectiveSpeechLanguage = speechLanguageForManuscript(script, settings.speechLanguage);
+  const effectiveSpeechLanguage = resolveSpeechLanguage(script, settings.speechLanguage, scriptLanguage);
   assertSpeechModelSupportsLanguage(settings.engine, effectiveSpeechLanguage, settings.localModel);
   const engine = settings.engine;
   const audioPath = path.join(tempDir, engine === 'local' ? 'audio.wav' : 'audio.flac');
   const job = {
     id,
     kind: 'caption', engine, captionLines, forcedAlignment, proofread, inputPath,sourceClips,alignmentOnly,
+    forceRecognition:Boolean(forceRecognition),
+    manuscriptLanguage:String(scriptLanguage||''),
     speechLanguage: effectiveSpeechLanguage,
     cacheKey:transcriptCacheKey(inputPath,transcriptCacheSettings(effectiveSpeechLanguage)),
     state: "extracting",
@@ -2172,7 +2215,10 @@ export function startAutoCaptionAnalysis({ inputPath, duration, captionLines = 1
   };
   autoCaptionAnalyses.set(id, job);
   const cached=forceRecognition?null:readTranscriptCache(supportRoot(),job.cacheKey);
-  if(cached){fs.rmSync(tempDir,{recursive:true,force:true});job.cacheHit=true;
+  job.cacheHit=Boolean(cached);
+  job.cacheDecision=forceRecognition?'bypassed':cached?'hit':'miss';
+  logSpeechJob(job,'started',{cacheDecision:job.cacheDecision});
+  if(cached){fs.rmSync(tempDir,{recursive:true,force:true});
     void finalizeAutoCaptionAnalysis(job,cached.segments,Number(duration||0),captionLines,script,forcedAlignment,cached.fallbackText).catch(error=>{if(job.state==='cancelled')return;job.state="failed";job.error=error.message;});
     return {jobId:id};
   }

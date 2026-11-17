@@ -171,7 +171,7 @@
           <div class="status" id="vertexKeyHint"></div>
         </div>
         <div id="antigravitySettings" style="display:none">
-          <p class="small">走本机 agy 的 Gemini 套餐，不用 API Key。没装过先点「安装」，装好后点「登录」用浏览器授权，再点「检测」。</p>
+          <p class="small">走本机 agy 的 Gemini 套餐，不用 API Key。没装过先点「安装」，然后点「登录」完成 Google 浏览器授权；若页面显示授权码，把它粘贴到下方并提交。</p>
           <div class="row" style="margin-top:7px; flex-wrap:wrap; gap:6px">
             <button class="btn" type="button" id="checkAntigravity">检测</button>
             <button class="btn primary" type="button" id="installAntigravity">安装 agy</button>
@@ -179,6 +179,13 @@
             <button class="btn" type="button" id="browseAntigravityCli">浏览路径</button>
             <button class="btn" type="button" id="openAntigravityDocs">官方说明</button>
           </div>
+          <div class="row" style="align-items:end; gap:6px; margin-top:8px">
+            <label class="field grow" style="margin:0"><span class="small">浏览器授权码</span>
+              <input class="input" id="antigravityAuthCode" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="2048" placeholder="粘贴浏览器显示的授权码" />
+            </label>
+            <button class="btn primary" type="button" id="submitAntigravityCode">提交授权码</button>
+          </div>
+          <p class="small" style="margin:4px 0 0">授权码只提交给本机登录进程，不保存到设置。</p>
           <label class="field" style="margin-top:8px"><span class="small">agy 路径（可留空自动查找）</span>
             <input class="input" id="antigravityPath" placeholder="agy 或完整路径，官方一般在 %LOCALAPPDATA%\agy\bin\agy.exe" />
           </label>

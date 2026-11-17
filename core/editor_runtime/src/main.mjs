@@ -92,6 +92,7 @@ import {
   loadReviewSettings,
   openAntigravityDocs,
   openAntigravityLogin,
+  submitAntigravityAuthorizationCode,
   saveReviewSettings,
 } from "./ai-settings.mjs";
 import { translateAuxiliaryCaptions } from "./caption-translation.mjs";
@@ -1902,6 +1903,7 @@ nativeMethods = {
   checkAntigravityStatus: safe(() => checkAntigravityStatus()),
   installAntigravityCli: safe(() => installAntigravityCli()),
   openAntigravityLogin: safe(() => openAntigravityLogin()),
+  submitAntigravityAuthorizationCode: safe((input) => submitAntigravityAuthorizationCode(input || {})),
   openAntigravityDocs: safe(() => openAntigravityDocs()),
   clearGeminiKey: safe(() => clearGeminiKey()),
   clearVertexSecrets: safe(() => clearVertexSecrets()),

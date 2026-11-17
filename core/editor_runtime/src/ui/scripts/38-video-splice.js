@@ -319,7 +319,7 @@
         ? (Number(region.borderWidth || 0) > 0 ? region.borderColor || "#68A9A2" : "transparent")
         : "rgba(104,169,162,.88)";
       const width = region.kind === "pip"
-        ? Math.max(region.id === selectedId ? 2 : 0, Number(region.borderWidth || 0) * outputScale)
+        ? Number(region.borderWidth || 0) * outputScale
         : Math.max(1.5, Number(region.borderWidth || 0) * 2.3);
       return `<polygon class="splice-guide-region${region.id === selectedId ? " selected" : ""}" data-region-id="${escapeHtml(region.id)}" data-region-kind="${escapeHtml(region.kind || "pane")}" points="${points}" stroke="${stroke}" stroke-width="${width}" fill="${region.kind === "pip" ? "rgba(104,169,162,.035)" : "rgba(104,169,162,.018)"}"/>`;
     });

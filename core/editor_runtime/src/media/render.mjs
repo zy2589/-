@@ -85,11 +85,17 @@ function spliceShapeMaskExpression(region = {}, inset = 0, width = 1000, height 
   const shape = String(region.shape || "rect");
   let mask = "";
   if (shape === "circle") {
-    const radius = `(min(W,H)/2-${Math.max(0, Math.min(Number(inset || 0), Math.min(width,height)/2-1)).toFixed(3)})`;
-    mask = `lt(pow((X-W/2)/${radius},2)+pow((Y-H/2)/${radius},2),1)`;
+    const radius = Math.max(1, Math.min(width, height) / 2 - Math.max(0, Math.min(Number(inset || 0), Math.min(width, height) / 2 - 1)));
+    const inverseRadiusSquared = (1 / (radius * radius)).toFixed(12);
+    const dx = `(X-${(width / 2).toFixed(3)})`, dy = `(Y-${(height / 2).toFixed(3)})`;
+    mask = `lt(${dx}*${dx}*${inverseRadiusSquared}+${dy}*${dy}*${inverseRadiusSquared},1)`;
   } else if (shape === "ellipse") {
     const insetPx = Math.max(0, Math.min(Number(inset || 0), Math.min(width,height)/2-1));
-    mask = `lt(pow((X-W/2)/(W/2-${insetPx.toFixed(3)}),2)+pow((Y-H/2)/(H/2-${insetPx.toFixed(3)}),2),1)`;
+    const radiusX = Math.max(1, width / 2 - insetPx), radiusY = Math.max(1, height / 2 - insetPx);
+    const inverseRadiusXSquared = (1 / (radiusX * radiusX)).toFixed(12);
+    const inverseRadiusYSquared = (1 / (radiusY * radiusY)).toFixed(12);
+    const dx = `(X-${(width / 2).toFixed(3)})`, dy = `(Y-${(height / 2).toFixed(3)})`;
+    mask = `lt(${dx}*${dx}*${inverseRadiusXSquared}+${dy}*${dy}*${inverseRadiusYSquared},1)`;
   } else if (shape === "square") {
     const half = `(min(W,H)/2-${Math.max(0, Math.min(Number(inset || 0), Math.min(width,height)/2-1)).toFixed(3)})`;
     mask = `lt(abs(X-W/2),${half})*lt(abs(Y-H/2),${half})`;
@@ -109,9 +115,9 @@ function spliceShapeMaskExpression(region = {}, inset = 0, width = 1000, height 
   return mask;
 }
 
-function spliceShapeAlphaFilter(region = {}) {
+function spliceShapeAlphaFilter(region = {}, width = 1000, height = 1000) {
   if (String(region.shape || "rect") === "rect") return "";
-  const mask = spliceShapeMaskExpression(region, 0);
+  const mask = spliceShapeMaskExpression(region, 0, width, height);
   return `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(${mask},alpha(X,Y),0)'`;
 }
 
@@ -127,6 +133,67 @@ function spliceBorderColorFilter(region = {}, width = 0, height = 0) {
   const inner = spliceShapeMaskExpression(region, borderWidth, width, height);
   const edge = `(${outer})*not(${inner})`;
   return `geq=r='if(${edge},${red},r(X,Y))':g='if(${edge},${green},g(X,Y))':b='if(${edge},${blue},b(X,Y))':a='if(${outer},alpha(X,Y),0)'`;
+}
+
+function appendLoopedSpliceMask(graph, region, width, height, fps, duration, label) {
+  const mask = spliceShapeMaskExpression(region, 0, width, height);
+  graph.push(
+    `color=c=black:s=${width}x${height}:r=1:d=0.04,format=gray,geq=lum='if(${mask},255,0)',loop=loop=-1:size=1:start=0,fps=${fps},trim=duration=${Math.max(0.04, Number(duration || 0.04)).toFixed(5)}${label}`,
+  );
+}
+
+function appendLoopedSpliceBorder(graph, region, width, height, fps, duration, label) {
+  const borderWidth = Math.max(0, Number(region.borderWidth || 0));
+  const match = String(region.borderColor || "").match(/^#?([0-9a-f]{6})$/i);
+  const hex = match?.[1] || "68A9A2";
+  const red = Number.parseInt(hex.slice(0, 2), 16);
+  const green = Number.parseInt(hex.slice(2, 4), 16);
+  const blue = Number.parseInt(hex.slice(4, 6), 16);
+  const outer = spliceShapeMaskExpression(region, 0, width, height);
+  const inner = spliceShapeMaskExpression(region, borderWidth, width, height);
+  const edge = `(${outer})*not(${inner})`;
+  graph.push(
+    `color=c=black:s=${width}x${height}:r=1:d=0.04,format=rgba,geq=r='${red}':g='${green}':b='${blue}':a='if(${edge},255,0)',loop=loop=-1:size=1:start=0,fps=${fps},trim=duration=${Math.max(0.04, Number(duration || 0.04)).toFixed(5)}${label}`,
+  );
+}
+
+function appendLoopedSpliceAlpha(graph, inputLabel, region, width, height, fps, duration, namespace) {
+  const maskLabel = `[${namespace}mask]`;
+  const sourceColorLabel = `[${namespace}color]`;
+  const sourceAlphaLabel = `[${namespace}sourcealpha]`;
+  const sourceAlphaMaskedLabel = `[${namespace}maskedalpha]`;
+  const rgbLabel = `[${namespace}rgb]`;
+  const outputLabel = `[${namespace}shaped]`;
+  appendLoopedSpliceMask(graph, region, width, height, fps, duration, maskLabel);
+  graph.push(`${inputLabel}split=2${sourceColorLabel}${sourceAlphaLabel}`);
+  graph.push(`${sourceAlphaLabel}alphaextract${`[${namespace}alpha]`}`);
+  graph.push(`[${namespace}alpha]${maskLabel}blend=all_mode=multiply:shortest=1${sourceAlphaMaskedLabel}`);
+  graph.push(`${sourceColorLabel}format=rgb24${rgbLabel}`);
+  graph.push(`${rgbLabel}${sourceAlphaMaskedLabel}alphamerge${outputLabel}`);
+  return outputLabel;
+}
+
+function appendLoopedSpliceBorderOverlay(graph, inputLabel, region, width, height, fps, duration, namespace) {
+  const borderWidth = Math.max(0, Number(region.borderWidth || 0));
+  if (region.kind !== "pip" || borderWidth <= 0 || width < 2 || height < 2) return inputLabel;
+  const borderLabel = `[${namespace}border]`;
+  const outputLabel = `[${namespace}bordered]`;
+  appendLoopedSpliceBorder(graph, region, width, height, fps, duration, borderLabel);
+  graph.push(`${inputLabel}${borderLabel}overlay=shortest=1:format=auto${outputLabel}`);
+  return outputLabel;
+}
+
+function hasMatchingGlobalSpliceBorder(regions = [], region = {}, outputWidth = 1080) {
+  const close = (left, right) => Math.abs(Number(left || 0) - Number(right || 0)) < 1e-6;
+  const color = String(region.borderColor || "#68A9A2").toLowerCase();
+  return (regions || []).some((candidate) =>
+    Number(candidate.borderWidth || 0) > 0 &&
+    close(candidate.x, region.x) && close(candidate.y, region.y) &&
+    close(candidate.w, region.w) && close(candidate.h, region.h) &&
+    String(candidate.shape || "rect") === String(region.shape || "rect") &&
+    close(Math.round(Number(candidate.borderWidth || 0) * Number(outputWidth || 1080) / 1080), Number(region.borderWidth || 0)) &&
+    String(candidate.borderColor || "#68A9A2").toLowerCase() === color,
+  );
 }
 
 const colorSliceMap = Object.freeze({
@@ -292,6 +359,11 @@ export function buildExportGraph(config, info) {
   const firstClipColor = JSON.stringify(mainVideoClips[0]?.settings?.color || {});
   const uniformClipColor = mainVideoClips.every((clip) => JSON.stringify(clip.settings?.color || {}) === firstClipColor);
   const spliceVisualActive = mainVideoClips.some((clip) => clip.settings?.spliceRegion || ["freeze-resume", "freeze-hold"].includes(clip.settings?.splicePlaybackMode));
+  const sharedSpliceConcatMode = uniformClipColor && uniformSpeed && !linearCutMode && mainClipsUseSharedSpliceConcat(
+    mainVideoClips,
+    repairGeneratedTail ? lastVideoEnd : outputDuration,
+    speed,
+  );
   const sharedVisualConcatMode = !spliceVisualActive && uniformClipColor && uniformSpeed && !linearCutMode && mainClipsUseSharedVisualConcat(
     mainVideoClips,
     repairGeneratedTail ? lastVideoEnd : outputDuration,
@@ -352,6 +424,62 @@ export function buildExportGraph(config, info) {
         `[joinedv0]setpts=N/(${fps}*TB),tpad=stop_mode=clone:stop_duration=${Math.max(0.08, finalFrameHold).toFixed(5)},trim=end_frame=${targetFrameCount},setpts=PTS-STARTPTS[joinedv]`,
       );
     }
+  } else if (sharedSpliceConcatMode) {
+    // Pause-cut can leave many adjacent clips carrying the same PIP layout.
+    // Joining those source ranges first avoids repeating scale, shape-mask,
+    // border and full-canvas overlay filters for every fragment.
+    const labels = [];
+    [...mainVideoClips]
+      .sort((left, right) => Number(left.start || 0) - Number(right.start || 0))
+      .forEach((clip, index) => {
+        const sourceStart = Math.max(0, Number(clip.sourceStart || 0));
+        const sourceEnd = Math.max(sourceStart + 0.002, Number(clip.sourceEnd || sourceStart));
+        const clipSpeed = Number(clip.playbackRate || speed);
+        const timelineDuration = Math.max(frameDuration, Number(clip.end || 0) - Number(clip.start || 0));
+        graph.push(
+          `[0:v]trim=start=${sourceStart.toFixed(5)}:end=${sourceEnd.toFixed(5)},setpts=(PTS-STARTPTS)/${clipSpeed.toFixed(7)},fps=${fps},tpad=stop_mode=clone:stop_duration=${frameDuration.toFixed(7)},trim=end_frame=${Math.round(timelineDuration * fps)},setpts=N/(${fps}*TB),format=yuv420p[sharedsplicecut${index}]`,
+        );
+        labels.push(`[sharedsplicecut${index}]`);
+      });
+    if (labels.length === 1) graph.push(`${labels[0]}null[sharedsplicesource]`);
+    else graph.push(`${labels.join("")}concat=n=${labels.length}:v=1:a=0[sharedsplicesource]`);
+
+    const settings = mainVideoClips[0]?.settings || {};
+    const region = settings.spliceRegion;
+    const targetW = Math.max(8, Math.round(width * Number(region.w)));
+    const targetH = Math.max(8, Math.round(height * Number(region.h)));
+    const clipScale = Math.max(0.05, Number(settings.scale || 1));
+    const cropTop = Math.max(0, Math.min(95, Number(settings.cropTop || 0)));
+    const cropBottom = Math.max(0, Math.min(95, Number(settings.cropBottom || 0)));
+    const cropLeft = Math.max(0, Math.min(95, Number(settings.cropLeft || 0)));
+    const cropRight = Math.max(0, Math.min(95, Number(settings.cropRight || 0)));
+    const cropW = Math.max(0.01, 1 - (cropLeft + cropRight) / 100);
+    const cropH = Math.max(0.01, 1 - (cropTop + cropBottom) / 100);
+    const transformFilters = [...oriented.filters, ...colorRecipeFilters(settings.color || {})];
+    if (cropTop > 0 || cropBottom > 0 || cropLeft > 0 || cropRight > 0)
+      transformFilters.push(`crop=w=iw*${cropW.toFixed(4)}:h=ih*${cropH.toFixed(4)}:x=iw*${(cropLeft / 100).toFixed(4)}:y=ih*${(cropTop / 100).toFixed(4)}`);
+    const rotation = Math.max(-360, Math.min(360, Number(settings.rotation || 0)));
+    if (Math.abs(rotation) > 0.001)
+      transformFilters.push(`rotate=${rotation.toFixed(4)}*PI/180:ow=rotw(iw):oh=roth(ih):c=none`);
+    transformFilters.push(
+      `scale=w=${Math.max(8, Math.round(targetW * clipScale))}:h=${Math.max(8, Math.round(targetH * clipScale))}:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd`,
+      `crop=w=${targetW}:h=${targetH}:x='max(0,min(iw-ow,(iw-ow)/2-${Number(settings.x || 0).toFixed(3)}))':y='max(0,min(ih-oh,(ih-oh)/2-${Number(settings.y || 0).toFixed(3)}))'`,
+    );
+    const shapeMask = spliceShapeAlphaFilter(region, targetW, targetH);
+    if (shapeMask) transformFilters.push("format=rgba", shapeMask);
+    const borderFilter = spliceBorderColorFilter(region, targetW, targetH);
+    if (borderFilter) transformFilters.push("format=rgba", borderFilter);
+    const opacity = Math.max(0, Math.min(1, Number(settings.opacity ?? 1)));
+    if (opacity < 0.999)
+      transformFilters.push("format=rgba", `colorchannelmixer=aa=${opacity.toFixed(4)}`);
+
+    graph.push(
+      `[sharedsplicesource]setpts=PTS-STARTPTS,${transformFilters.join(",")},tpad=stop_mode=clone:stop_duration=${finalFrameHold.toFixed(5)},trim=duration=${outputDuration.toFixed(5)}[sharedsplicevisual]`,
+    );
+    graph.push(`color=c=black:s=${oriented.displayWidth}x${oriented.displayHeight}:r=${fps}:d=${outputDuration.toFixed(5)}[sharedsplicecanvas]`);
+    graph.push(
+      `[sharedsplicecanvas][sharedsplicevisual]overlay=x=${Math.round(Number(region.x || 0) * width)}:y=${Math.round(Number(region.y || 0) * height)}:eof_action=pass:shortest=0[joinedv]`,
+    );
   } else if (sharedVisualConcatMode) {
     // Pause-cut commonly creates dozens of fragments with exactly the same
     // canvas transform. Concatenate the source cuts first and apply scale/crop/
@@ -434,7 +562,7 @@ export function buildExportGraph(config, info) {
       transformFilters.push(`scale=w=${Math.max(8, Math.round(targetW * clipScale))}:h=${Math.max(8, Math.round(targetH * clipScale))}:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd`);
       const panX = Number(settings.x || 0), panY = Number(settings.y || 0);
       transformFilters.push(`crop=w=${targetW}:h=${targetH}:x='max(0,min(iw-ow,(iw-ow)/2-${panX.toFixed(3)}))':y='max(0,min(ih-oh,(ih-oh)/2-${panY.toFixed(3)}))'`);
-      const shapeMask = spliceShapeAlphaFilter(spliceRegion);
+      const shapeMask = spliceShapeAlphaFilter(spliceRegion, targetW, targetH);
       if (shapeMask) transformFilters.push("format=rgba", shapeMask);
       const borderFilter = spliceBorderColorFilter(spliceRegion, targetW, targetH);
       if (borderFilter) transformFilters.push("format=rgba", borderFilter);
@@ -583,6 +711,7 @@ export function buildExportGraph(config, info) {
     const cropW = Math.max(0.01, 1 - (cropLeft + cropRight) / 100);
     const cropH = Math.max(0.01, 1 - (cropTop + cropBottom) / 100);
     const spliceRegion = video.spliceRegion;
+    let spliceVideoOutput = null;
     if (spliceRegion && Number(spliceRegion.w) > 0 && Number(spliceRegion.h) > 0) {
       if (cropTop > 0 || cropBottom > 0 || cropLeft > 0 || cropRight > 0)
         videoFilters.push(`crop=w=iw*${cropW.toFixed(4)}:h=ih*${cropH.toFixed(4)}:x=iw*${(cropLeft / 100).toFixed(4)}:y=ih*${(cropTop / 100).toFixed(4)}`);
@@ -592,10 +721,7 @@ export function buildExportGraph(config, info) {
       const targetH = Math.max(8, Math.round(height * Number(spliceRegion.h)));
       videoFilters.push(`scale=w=${Math.max(8, Math.round(targetW * videoScale))}:h=${Math.max(8, Math.round(targetH * videoScale))}:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd`);
       videoFilters.push(`crop=w=${targetW}:h=${targetH}:x='max(0,min(iw-ow,(iw-ow)/2-${Number(video.x || 0).toFixed(3)}))':y='max(0,min(ih-oh,(ih-oh)/2-${Number(video.y || 0).toFixed(3)}))'`);
-      const shapeMask = spliceShapeAlphaFilter(spliceRegion);
-      if (shapeMask) videoFilters.push("format=rgba", shapeMask);
-      const borderFilter = spliceBorderColorFilter(spliceRegion, targetW, targetH);
-      if (borderFilter) videoFilters.push("format=rgba", borderFilter);
+      spliceVideoOutput = { region: spliceRegion, width: targetW, height: targetH };
     } else {
       videoFilters.push(
         `scale=w=${Math.max(8, Math.round(width * videoScale))}:h=${Math.max(8, Math.round(height * videoScale))}:force_original_aspect_ratio=decrease:flags=lanczos+accurate_rnd`,
@@ -605,10 +731,36 @@ export function buildExportGraph(config, info) {
     }
     if (Math.abs(Number(video.rotation || 0)) > 0.001)
       if (!spliceRegion) videoFilters.push(`rotate=${Number(video.rotation).toFixed(4)}*PI/180:ow=rotw(iw):oh=roth(ih):c=none`);
-    videoFilters.push(
-      "format=rgba",
-      `colorchannelmixer=aa=${Math.max(0, Math.min(1, Number(video.opacity ?? 1))).toFixed(3)}`,
-    );
+    videoFilters.push("format=rgba");
+    const videoOpacity = Math.max(0, Math.min(1, Number(video.opacity ?? 1)));
+    if (!spliceVideoOutput) videoFilters.push(`colorchannelmixer=aa=${videoOpacity.toFixed(3)}`);
+    const emitOverlay = (sourcePrefix) => {
+      const timelineLabel = `[overlayv${index}]`;
+      const separator = sourcePrefix.endsWith("]") ? "" : ",";
+      if (!spliceVideoOutput) {
+        graph.push(`${sourcePrefix}${separator}${videoFilters.join(",")},tpad=stop_mode=clone:stop_duration=${(1/fps).toFixed(7)},setpts=PTS-STARTPTS+${overlayStart.toFixed(7)}/TB${timelineLabel}`);
+        return;
+      }
+      const preShapeLabel = `[overlaypre${index}]`;
+      graph.push(`${sourcePrefix}${separator}${videoFilters.join(",")}${preShapeLabel}`);
+      let currentLabel = preShapeLabel;
+      if (String(spliceVideoOutput.region.shape || "rect") !== "rect")
+        currentLabel = appendLoopedSpliceAlpha(
+          graph, currentLabel, spliceVideoOutput.region, spliceVideoOutput.width,
+          spliceVideoOutput.height, fps, clipDuration, `videolayer${index}`,
+        );
+      if (!hasMatchingGlobalSpliceBorder(config.spliceRegions, spliceVideoOutput.region, width))
+        currentLabel = appendLoopedSpliceBorderOverlay(
+          graph, currentLabel, spliceVideoOutput.region, spliceVideoOutput.width,
+          spliceVideoOutput.height, fps, clipDuration, `videolayer${index}`,
+        );
+      if (videoOpacity < 0.999) {
+        const opacityLabel = `[overlayopacity${index}]`;
+        graph.push(`${currentLabel}colorchannelmixer=aa=${videoOpacity.toFixed(3)}${opacityLabel}`);
+        currentLabel = opacityLabel;
+      }
+      graph.push(`${currentLabel}tpad=stop_mode=clone:stop_duration=${(1/fps).toFixed(7)},setpts=PTS-STARTPTS+${overlayStart.toFixed(7)}/TB${timelineLabel}`);
+    };
     const overlayStart = Math.max(0, Number(video.start || 0));
     const playbackMode = video.splicePlaybackMode || "normal-audio";
     const freezeDuration = playbackMode === "freeze-hold"
@@ -629,14 +781,12 @@ export function buildExportGraph(config, info) {
         const resumeLabel = `[overlayresume${index}]`;
         graph.push(`[${inputIndex}:v]trim=start=${resumeSource.toFixed(7)}:duration=${(resumeDuration * clipSpeed).toFixed(7)},setpts=(PTS-STARTPTS)/${clipSpeed.toFixed(7)},fps=${fps},tpad=stop_mode=clone:stop_duration=${frameDuration.toFixed(7)},trim=duration=${resumeDuration.toFixed(7)}${resumeLabel}`);
         graph.push(`${holdLabel}${resumeLabel}concat=n=2:v=1:a=0[overlaysplice${index}]`);
-        graph.push(`[overlaysplice${index}]${videoFilters.join(",")},tpad=stop_mode=clone:stop_duration=${(1/fps).toFixed(7)},setpts=PTS-STARTPTS+${overlayStart.toFixed(7)}/TB[overlayv${index}]`);
+        emitOverlay(`[overlaysplice${index}]`);
       } else {
-        graph.push(`${holdLabel}${videoFilters.join(",")},tpad=stop_mode=clone:stop_duration=${(1/fps).toFixed(7)},setpts=PTS-STARTPTS+${overlayStart.toFixed(7)}/TB[overlayv${index}]`);
+        emitOverlay(holdLabel);
       }
     } else {
-      graph.push(
-        `[${inputIndex}:v]trim=start=${Math.max(0,Number(video.sourceStart||0)).toFixed(7)}:duration=${sourceDuration.toFixed(7)},setpts=(PTS-STARTPTS)/${clipSpeed.toFixed(7)},${videoFilters.join(",")},tpad=stop_mode=clone:stop_duration=${(1/fps).toFixed(7)},setpts=PTS-STARTPTS+${overlayStart.toFixed(7)}/TB[overlayv${index}]`,
-      );
+      emitOverlay(`[${inputIndex}:v]trim=start=${Math.max(0,Number(video.sourceStart||0)).toFixed(7)}:duration=${sourceDuration.toFixed(7)},setpts=(PTS-STARTPTS)/${clipSpeed.toFixed(7)}`);
     }
     inputIndex += 1;
     return { video, label: `[overlayv${index}]` };
@@ -660,7 +810,7 @@ export function buildExportGraph(config, info) {
       const targetH = Math.max(8, Math.round(height * Number(spliceRegion.h)));
       imageFilters.push(`scale=w=${Math.max(8, Math.round(targetW * imageScale))}:h=${Math.max(8, Math.round(targetH * imageScale))}:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd`);
       imageFilters.push(`crop=w=${targetW}:h=${targetH}:x='max(0,min(iw-ow,(iw-ow)/2-${Number(image.x || 0).toFixed(3)}))':y='max(0,min(ih-oh,(ih-oh)/2-${Number(image.y || 0).toFixed(3)}))'`);
-      const shapeMask = spliceShapeAlphaFilter(spliceRegion);
+      const shapeMask = spliceShapeAlphaFilter(spliceRegion, targetW, targetH);
       if (shapeMask) imageFilters.push("format=rgba", shapeMask);
       const borderFilter = spliceBorderColorFilter(spliceRegion, targetW, targetH);
       if (borderFilter) imageFilters.push("format=rgba", borderFilter);
@@ -1023,12 +1173,17 @@ export function buildExportGraph(config, info) {
     const regionWidth = Math.max(8, Math.round(width * Number(region.w)));
     const regionHeight = Math.max(8, Math.round(height * Number(region.h)));
     const borderWidth = Math.max(1, Math.round(Number(region.borderWidth || 1) * width / 1080));
-    const color = /^#[0-9a-f]{6}$/i.test(String(region.borderColor || "")) ? `0x${String(region.borderColor).slice(1)}` : "0x68A9A2";
-    const outer = spliceShapeMaskExpression(region, 0, regionWidth, regionHeight);
-    const inner = spliceShapeMaskExpression(region, borderWidth, regionWidth, regionHeight);
-    const alpha = `if((${outer})*(1-(${inner})),255,0)`;
+    const color = /^#[0-9a-f]{6}$/i.test(String(region.borderColor || "")) ? String(region.borderColor) : "#68A9A2";
     const label = `[spliceBorder${index}]`;
-    graph.push(`color=c=${color}:s=${regionWidth}x${regionHeight}:r=${fps}:d=${outputDuration.toFixed(5)},format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='${alpha}'${label}`);
+    appendLoopedSpliceBorder(
+      graph,
+      { ...region, borderWidth, borderColor: color },
+      regionWidth,
+      regionHeight,
+      fps,
+      outputDuration,
+      label,
+    );
     layer += 1;
     graph.push(`[layer${layer - 1}]${label}overlay=x=${Math.round(Number(region.x || 0) * width)}:y=${Math.round(Number(region.y || 0) * height)}:shortest=0[layer${layer}]`);
   });
@@ -1096,6 +1251,40 @@ export function mainClipsUseSharedVisualConcat(clips = [], outputDuration = 0) {
     if ((clip.trackId || "video") !== track) return false;
     if (JSON.stringify(comparableVisualSettings(clip.settings)) !== signature) return false;
     if ((clip.settings?.blendMode || "normal") !== "normal") return false;
+    if (index > 0 && Math.abs(Number(clip.start || 0) - Number(list[index - 1].end || 0)) > 0.04) return false;
+  }
+  const end = Number(list[list.length - 1].end || 0);
+  return !outputDuration || Math.abs(end - Number(outputDuration || end)) <= 0.05;
+}
+
+export function mainClipsUseSharedSpliceConcat(clips = [], outputDuration = 0, speed = 1) {
+  const list = [...(clips || [])].sort((a, b) => Number(a.start || 0) - Number(b.start || 0));
+  if (list.length < 2) return false;
+  const first = list[0];
+  const settings = first.settings || {};
+  const region = settings.spliceRegion;
+  if (!region || !(Number(region.w) > 0) || !(Number(region.h) > 0)) return false;
+  const track = first.trackId || "video";
+  const signature = JSON.stringify({
+    visual: comparableVisualSettings(settings),
+    color: settings.color || {},
+    spliceRegion: region,
+    playbackMode: settings.splicePlaybackMode || "normal-audio",
+  });
+  if (Number(first.start || 0) > 0.01) return false;
+  for (let index = 0; index < list.length; index += 1) {
+    const clip = list[index];
+    const clipSettings = clip.settings || {};
+    if ((clip.trackId || "video") !== track) return false;
+    if (JSON.stringify({
+      visual: comparableVisualSettings(clipSettings),
+      color: clipSettings.color || {},
+      spliceRegion: clipSettings.spliceRegion || null,
+      playbackMode: clipSettings.splicePlaybackMode || "normal-audio",
+    }) !== signature) return false;
+    if ((clipSettings.blendMode || "normal") !== "normal") return false;
+    if (["freeze-resume", "freeze-hold"].includes(clipSettings.splicePlaybackMode)) return false;
+    if (Math.abs(Number(clip.playbackRate || speed) - Number(speed || 1)) > 1e-7) return false;
     if (index > 0 && Math.abs(Number(clip.start || 0) - Number(list[index - 1].end || 0)) > 0.04) return false;
   }
   const end = Number(list[list.length - 1].end || 0);

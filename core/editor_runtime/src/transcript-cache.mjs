@@ -3,8 +3,10 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 export function transcriptCacheKey(inputPath, settings = {}) {
   const stat=fs.statSync(inputPath);
-  return crypto.createHash('sha256').update(JSON.stringify({version:1,path:path.resolve(inputPath),size:stat.size,mtime:stat.mtimeMs,
-    engine:settings.engine,language:settings.language,model:settings.engine==='local'?settings.localModel:settings.reviewModel || ''})).digest('hex');
+  const context={version:1,path:path.resolve(inputPath),size:stat.size,mtime:stat.mtimeMs,
+    engine:settings.engine,language:settings.language,model:settings.engine==='local'?settings.localModel:settings.reviewModel || ''};
+  if(settings.engine==='deepgram'&&Number.isFinite(Number(settings.deepgramChunkSeconds)))context.deepgramChunkSeconds=Number(settings.deepgramChunkSeconds);
+  return crypto.createHash('sha256').update(JSON.stringify(context)).digest('hex');
 }
 export function readTranscriptCache(root,key) {
   try {

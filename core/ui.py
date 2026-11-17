@@ -80,6 +80,18 @@ class ClipAssistant:
         # filling it made startup look like a page refresh.
         self.root.withdraw()
         self._startup_window_revealed = False
+        self._startup_alpha_mask = False
+        self._startup_alpha_paint_seen = False
+        self._startup_alpha_pending_since = None
+        if os.name == "nt":
+            # Windows can expose the client area before Tk has completed the
+            # first mapped paint, even though the dark palette is configured
+            # before the window is shown. Keep that first native paint hidden.
+            try:
+                self.root.attributes("-alpha", 0.0)
+                self._startup_alpha_mask = True
+            except tk.TclError:
+                pass
         self._startup_window_started_at = time.monotonic()
         self.root.title("剪辑助手")
         screen_width = self.root.winfo_screenwidth()
@@ -182,6 +194,7 @@ class ClipAssistant:
         self._rotoscope_import_started_at = None
         self.downloader_app = None
         self.download_host = None
+        self.download_mount_count = 0
         self.download_loading = False
         self.downloader_importing = False
         self.downloader_import_ready = False
@@ -510,6 +523,18 @@ class ClipAssistant:
                 )
             except Exception:
                 editor_state = "unavailable"
+        downloader_state = "absent"
+        if self.downloader_app is not None:
+            host_exists = False
+            try:
+                host_exists = bool(self.download_host and self.download_host.winfo_exists())
+            except tk.TclError:
+                pass
+            downloader_state = (
+                f"id={id(self.downloader_app):x},stopped={int(bool(self.downloader_app._stopped))},"
+                f"rows={len(self.downloader_app.rows)},rows_ready={int(bool(self.downloader_app.rows_ready))},"
+                f"host={int(host_exists)},mounts={self.download_mount_count}"
+            )
         cutout = []
         for index, item in enumerate(self.cutout_pages):
             host = item.get("host")
@@ -525,7 +550,8 @@ class ClipAssistant:
         self._page_diag_events.clear()
         self._write_ui_log(
             f"PAGE_SNAPSHOT generation={generation} phase={phase} active={self.current_page} "
-            f"editor=({editor_state}) pages=[{'|'.join(details)}] cutout=[{'|'.join(cutout)}] "
+            f"editor=({editor_state}) downloader=({downloader_state}) "
+            f"pages=[{'|'.join(details)}] cutout=[{'|'.join(cutout)}] "
             f"events=[{events}]"
         )
 
@@ -561,7 +587,7 @@ class ClipAssistant:
         self.page_body = target
         self.current_page = name
         self._activate_nav(nav)
-        if self.downloader_app:
+        if self.downloader_app and page_changed:
             if name != "download":
                 self.downloader_app.hide_title_preview()
             self.downloader_app.set_view_active(name == "download")
@@ -594,6 +620,58 @@ class ClipAssistant:
             self._begin_page_diagnostics("hidden", "startup-download")
             self._startup_window_revealed = True
             self.root.deiconify()
+            if self._startup_alpha_mask:
+                self._startup_alpha_pending_since = time.monotonic()
+                self.root.after(20, self._finish_startup_window_reveal)
+        except tk.TclError:
+            return
+
+    def _finish_startup_window_reveal(self):
+        """Unhide the native window only after its dark page has mapped and painted."""
+        if not self._startup_alpha_mask:
+            return
+        try:
+            if not self.root.winfo_exists():
+                return
+            page = self.page_frames.get(self.current_page)
+            app = self.downloader_app if self.current_page == "download" else None
+            controls_mapped = True
+            if app is not None:
+                controls = [
+                    self.download_host,
+                    getattr(app, "bulk_text", None),
+                    *getattr(app, "input_entries", ()),
+                    *getattr(app, "title_layout_picks", ()),
+                    *getattr(app, "denoise_picks", ()),
+                ]
+                try:
+                    controls_mapped = bool(app.rows_ready) and all(
+                        widget is not None
+                        and widget.winfo_exists()
+                        and widget.winfo_ismapped()
+                        for widget in controls
+                    )
+                except tk.TclError:
+                    controls_mapped = False
+            mapped = bool(
+                self.root.winfo_ismapped()
+                and self.main.winfo_ismapped()
+                and page is not None
+                and page.winfo_ismapped()
+                and controls_mapped
+                and self.root.winfo_width() > 1
+                and self.root.winfo_height() > 1
+            )
+            waited = time.monotonic() - (self._startup_alpha_pending_since or time.monotonic())
+            if not mapped and waited < 5.0:
+                self.root.after(20, self._finish_startup_window_reveal)
+                return
+            if mapped and not self._startup_alpha_paint_seen:
+                self._startup_alpha_paint_seen = True
+                self.root.after(100, self._finish_startup_window_reveal)
+                return
+            self.root.attributes("-alpha", 1.0)
+            self._startup_alpha_mask = False
         except tk.TclError:
             return
 
@@ -691,6 +769,26 @@ class ClipAssistant:
         if self.current_page != "download" or self.downloader_module is None:
             self.download_loading = False
             return
+        if self.downloader_app is not None and not self.downloader_app._stopped:
+            try:
+                host_exists = bool(self.download_host and self.download_host.winfo_exists())
+            except tk.TclError:
+                host_exists = False
+            if host_exists:
+                # The downloader owns long-lived Tk variables, task rows,
+                # history and cookie state. A navigation callback must never
+                # rebuild its host after the first successful mount.
+                self._write_ui_log(
+                    f"DOWNLOAD_MOUNT_REUSE id={id(self.downloader_app):x} "
+                    f"rows={len(self.downloader_app.rows)} mounts={self.download_mount_count}"
+                )
+                self.download_loading = False
+                return
+            self._write_ui_log(
+                f"DOWNLOAD_MOUNT_INVARIANT host_missing id={id(self.downloader_app):x}; rebuild_skipped"
+            )
+            self.download_loading = False
+            return
         try:
             page = self.page_frames["download"]
             for child in page.winfo_children():
@@ -704,6 +802,11 @@ class ClipAssistant:
                 resource_dir=self.resource_dir,
                 editor_callback=self.show_projects,
                 cutout_callback=self.open_cutout,
+            )
+            self.download_mount_count += 1
+            self._write_ui_log(
+                f"DOWNLOAD_MOUNT_CREATED id={id(self.downloader_app):x} "
+                f"rows={len(self.downloader_app.rows)} mounts={self.download_mount_count}"
             )
         except Exception as exc:
             self._show_downloader_error(exc)

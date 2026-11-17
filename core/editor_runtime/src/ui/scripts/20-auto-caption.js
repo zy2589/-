@@ -42,6 +42,7 @@
           timelineSignature: autoCaptionTimelineSignature(),
           transcriptSourcePath: autoCaptionSourcePath(),
           scriptText:$("scriptText")?.value || "",
+          manuscriptLanguage:$("manuscriptLanguage")?.value || "",
         };
       }
       function bindMatchedReviewSources(reviews, clips = manuscriptSourceClips()) {
@@ -150,7 +151,8 @@
             autoCaptionMediaSignature() !== context.mediaSignature ||
             autoCaptionTimelineSignature() !== context.timelineSignature ||
             autoCaptionSourcePath() !== context.transcriptSourcePath ||
-            ($("scriptText")?.value || "") !== context.scriptText)
+            ($("scriptText")?.value || "") !== context.scriptText ||
+            ($("manuscriptLanguage")?.value || "") !== context.manuscriptLanguage)
           throw new Error("工程、源素材或时间线已经变化，旧转录结果已安全丢弃");
       }
       function locallyRetimeEditedCaptionWords(existing, tokens, caption) {
@@ -366,6 +368,7 @@
             duration: state.sourceDuration || state.duration,
             captionLines: state.captionLines,
             script: correctScript,
+            scriptLanguage: $("manuscriptLanguage")?.value || "",
             proofread,
             forceRecognition,
             sourceClips:manuscriptSourceClips(),
@@ -476,6 +479,7 @@
             duration: state.sourceDuration || state.duration,
             captionLines: state.captionLines,
             script,
+            scriptLanguage: $("manuscriptLanguage")?.value || "en",
             forcedAlignment: true,
           }));
           jobId = started.jobId;

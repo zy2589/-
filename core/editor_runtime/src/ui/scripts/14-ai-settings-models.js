@@ -45,12 +45,26 @@ function filterSpeechLanguageList(query, languages) {
               .join("")
           : `<div class="small" style="padding:8px">没有匹配的语种</div>`;
       }
+      function renderManuscriptLanguageOptions(selected = state.manuscriptLanguage || "en") {
+        const select = $("manuscriptLanguage");
+        if (!select) return;
+        const options = [
+          new Option("英语（默认）", "en"),
+          new Option("自动检测口播语种", "auto"),
+          ...speechLanguageCatalog
+            .filter((item) => item.id !== "auto" && item.id !== "en")
+            .map((item) => new Option(`${item.label} · ${item.english || item.id}`, item.id)),
+        ];
+        select.replaceChildren(...options);
+        select.value = selected === "en" || selected === "auto" || speechLanguageCatalog.some((item) => item.id === selected) ? selected : "en";
+      }
       async function checkModel() {
         try {
           const s = unwrap(await window.native.modelStatus());
           const engine = s.preferredEngine || s.engine || "groq";
           if ($("speechEngine")) $("speechEngine").value = engine;
           speechLanguageCatalog = Array.isArray(s.speechLanguages) ? s.speechLanguages : [];
+          renderManuscriptLanguageOptions(state.manuscriptLanguage || "en");
           const selectedLanguage = s.speechLanguage || "en";
           renderSpeechLanguageOptions(
             selectedLanguage,
@@ -328,7 +342,7 @@ function filterSpeechLanguageList(query, languages) {
           return false;
         }
       }
-      async function matchScript({alignmentOnly = false} = {}) {
+      async function matchScript({alignmentOnly = false, forceRecognition = false} = {}) {
         if (!state.video) {
           toast("请先导入视频");
           return false;
@@ -370,9 +384,11 @@ function filterSpeechLanguageList(query, languages) {
               inputPath: state.video.path,
               duration: state.sourceDuration,
               script: $("scriptText").value,
+              scriptLanguage: $("manuscriptLanguage")?.value || "",
               removals: [],
               sourceClips,
               alignmentOnly,
+              forceRecognition,
               captionLines: state.captionLines,
               naturalPunctuation: !!state.naturalCaptionPunctuation,
             }),

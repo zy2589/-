@@ -616,9 +616,9 @@
           state.audioMutes = [];
           state.audioCuts = [];
           state.waveform = [];
-          state.captions = [];
-          state.reviewCaptions = [];
-          state.issues = [];
+          // Removing the last video clip must not erase independent subtitle
+          // overlays. The delete path detaches their source ownership before
+          // this fallback runs, so they remain editable on the timeline.
           $("video").removeAttribute("src");
           $("video").load?.();
           $("stage").classList.toggle(
@@ -655,10 +655,30 @@
         let selected = expandLinkedSelection(
           requested.filter((item) => !selectionIsLocked(item.type, item.id)),
         ).filter((item) => !selectionIsLocked(item.type, item.id));
+        const explicitlySelectedCaptionIds = new Set(
+          requested.filter(item => item.type === 'caption').map(item => item.id),
+        );
+        if (explicitlySelectedCaptionIds.size) {
+          selected = selected.filter(item => item.type !== 'caption' || explicitlySelectedCaptionIds.has(item.id));
+        }
         if (!selected.length) {
           const gap = findTimelineGap(timelineGapItems("video"), state.currentTime);
           if (ripple && gap) return rippleDeleteTimelineGap("video", gap);
           toast(requested.length ? "所选轨道已锁定" : "请先选择一个或多个片段");
+          return;
+        }
+        const selectedCaptionIds = new Set(
+          selected.filter(item => item.type === 'caption').map(item => item.id),
+        );
+        const hasCaptionText = (state.captions || []).some(caption =>
+          (caption.words || []).length || String(caption.text || '').trim(),
+        );
+        const remainingCaptionText = (state.captions || []).some(caption =>
+          !selectedCaptionIds.has(caption.id) &&
+          ((caption.words || []).length || String(caption.text || '').trim()),
+        );
+        if (selectedCaptionIds.size && hasCaptionText && !remainingCaptionText) {
+          toast('此次删除会清空全部字幕，已取消操作以保护工程');
           return;
         }
         if (record) snapshot();

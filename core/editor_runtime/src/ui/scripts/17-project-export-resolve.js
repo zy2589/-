@@ -115,6 +115,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
           ignoredPolishIds: Array.from(window.__ignoredPolishIds || state.ignoredPolishIds || []),
           layout: state.layout,
           script: $("scriptText").value,
+          manuscriptLanguage: String(state.manuscriptLanguage || "en"),
           autoCaptionScript: state.legacyAutoCaptionScript || "",
         };
       }
@@ -230,6 +231,8 @@ function persistedMediaItem(item, preserveWaveform = false) {
             };
           }
           $("scriptText").value = d.script || d.autoCaptionScript || "";
+          state.manuscriptLanguage = String(d.manuscriptLanguage || "en");
+          if ($("manuscriptLanguage")) $("manuscriptLanguage").value = state.manuscriptLanguage;
           state.legacyAutoCaptionScript = d.autoCaptionScript || "";
           setRatio(d.ratio || "9:16");
           if (state.captions.length) {

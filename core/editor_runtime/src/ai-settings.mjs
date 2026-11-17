@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { supportRoot } from "./media.mjs";
 
 const GEMINI_API_ROOT = "https://generativelanguage.googleapis.com";
@@ -12,6 +14,30 @@ const INTERACTIONS_PATH = "/v1beta/interactions";
 const MODELS_LIST_PATH = "/v1beta/models";
 const MODEL_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const NOT_TEXT_MODEL = /image|tts|live|embed|robot|computer-use|veo|lyria|omni|native-audio|imagen|aqa|gemma/i;
+const require = createRequire(import.meta.url);
+let antigravityLoginSession = null;
+
+function stripTerminalControl(value = "") {
+  return String(value || "")
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "");
+}
+
+function stopAntigravityLoginChild() {
+  const session = antigravityLoginSession;
+  antigravityLoginSession = null;
+  if (!session || session.exited) return;
+  session.exited = true;
+  if (session.startupTimer) clearTimeout(session.startupTimer);
+  try {
+    session.terminal.kill();
+  } catch {
+    /* already closed */
+  }
+}
+
+process.once("exit", stopAntigravityLoginChild);
 
 export const GEMINI_MODELS = [
   { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash（推荐）" },
@@ -1244,7 +1270,7 @@ export async function checkAntigravityStatus() {
     const listed = await runAntigravityCli(["models"], {
       timeoutMs: 45_000,
       timeoutMessage:
-        "检测超时：agy 没有响应。请点「登录」在可见终端完成 Gemini 套餐授权，然后再点「检测」。",
+        "检测超时：agy 没有响应。请重新点「登录」启动 Google OAuth 浏览器流程，然后再点「检测」。",
     });
     const combined = `${listed.stdout || ""}\n${listed.stderr || ""}`;
     if (antigravityAuthFailed(combined, listed.status)) {
@@ -1254,7 +1280,7 @@ export async function checkAntigravityStatus() {
         antigravityReady: true,
         antigravityLoggedIn: false,
         antigravityState: "need-login",
-        antigravityHint: "agy 已安装，但还没登录。点「登录」打开终端，用浏览器完成 Gemini 套餐授权，回来再点「检测」。",
+        antigravityHint: "agy 已安装，但还没登录。点「登录」启动 Google OAuth 浏览器流程，完成后再点「检测」。",
       };
     }
     if (listed.status !== 0) {
@@ -1268,6 +1294,7 @@ export async function checkAntigravityStatus() {
       };
     }
     const live = parseAgyModels(listed.stdout);
+    stopAntigravityLoginChild();
     return {
       ...settings,
       antigravityCli: cli,
@@ -1287,7 +1314,7 @@ export async function checkAntigravityStatus() {
       antigravityLoggedIn: false,
       antigravityState: antigravityAuthFailed(message) ? "need-login" : "error",
       antigravityHint: antigravityAuthFailed(message)
-        ? "agy 已安装，但还没登录。点「登录」用浏览器完成 Gemini 套餐授权。"
+        ? "agy 已安装，但还没登录。点「登录」启动 Google OAuth 浏览器流程。"
         : message,
     };
   }
@@ -1318,43 +1345,80 @@ export function openAntigravityLogin() {
   if (typeof antigravityTestHooks.login === "function") {
     return antigravityTestHooks.login();
   }
+  if (antigravityLoginSession && !antigravityLoginSession.exited) {
+    return { opened: true, waitingForCode: true, alreadyOpen: true };
+  }
   const cli = findAntigravityCli(loadReviewSettings().antigravityPath);
   if (!cli) throw new Error("还没安装 Antigravity CLI。请先点「安装 agy」。");
-  if (process.platform === "win32") {
-    const cleanCli = cli.replace(/"/g, "");
-    const batPath = path.join(os.tmpdir(), `clipassistant-agy-login-${Date.now()}.bat`);
-    const batContent = `@echo off
-chcp 65001 >nul
-title Antigravity 登录
-cls
-echo =======================================================
-echo   请在下方终端中登录 Antigravity (Gemini 套餐)
-echo =======================================================
-echo.
-"${cleanCli}"
-echo.
-echo =======================================================
-echo   登录完成或结束后，请关闭此窗口并回到剪辑助手点击「检测」
-echo =======================================================
-echo.
-pause
-`;
-    fs.writeFileSync(batPath, batContent, { encoding: "utf8" });
-    spawn("cmd.exe", ["/c", "start", "Antigravity 登录", batPath], {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: false,
-    }).unref();
-  } else if (process.platform === "darwin") {
-    spawn(
-      "/usr/bin/osascript",
-      ["-e", `tell application "Terminal" to do script ${JSON.stringify(cli)}`],
-      { detached: true, stdio: "ignore" },
-    ).unref();
-  } else {
-    spawn(cli, [], { detached: true, stdio: "ignore" }).unref();
+  const ptyPackagePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../vendor/node-pty");
+  const nodePty = require(ptyPackagePath);
+  const terminal = nodePty.spawn(cli, [], {
+    name: "xterm-256color",
+    cols: 220,
+    rows: 48,
+    cwd: path.dirname(cli),
+    useConpty: process.platform === "win32" ? false : undefined,
+    env: { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor" },
+  });
+  const session = {
+    terminal,
+    exited: false,
+    oauthSelectionSent: false,
+    outputTail: "",
+    startupTimer: null,
+  };
+  antigravityLoginSession = session;
+  terminal.onData((chunk) => {
+    if (session.exited) return;
+    session.outputTail = `${session.outputTail}${stripTerminalControl(chunk)}`.slice(-8192);
+    if (
+      !session.oauthSelectionSent &&
+      /Select login method:/i.test(session.outputTail) &&
+      /1\.\s*Google OAuth/i.test(session.outputTail)
+    ) {
+      session.oauthSelectionSent = true;
+      setTimeout(() => {
+        if (antigravityLoginSession !== session || session.exited) return;
+        try {
+          terminal.write("1\r");
+        } catch {
+          session.exited = true;
+          antigravityLoginSession = null;
+        }
+      }, 100);
+    }
+  });
+  terminal.onExit(() => {
+    session.exited = true;
+    if (session.startupTimer) clearTimeout(session.startupTimer);
+    if (antigravityLoginSession === session) antigravityLoginSession = null;
+  });
+  session.startupTimer = setTimeout(() => {
+    if (antigravityLoginSession !== session || session.oauthSelectionSent) return;
+    session.exited = true;
+    antigravityLoginSession = null;
+    try {
+      terminal.kill();
+    } catch {
+      /* already closed */
+    }
+  }, 30_000);
+  session.startupTimer.unref?.();
+  return { opened: true, waitingForCode: true, loginMethod: "google-oauth" };
+}
+
+export function submitAntigravityAuthorizationCode(input = {}) {
+  const code = String(typeof input === "string" ? input : input?.code || "").trim();
+  if (!code) throw new Error("请先粘贴浏览器显示的授权码。");
+  if (code.length > 2048 || /[\r\n\0]/.test(code)) {
+    throw new Error("授权码格式无效，请重新复制后再试。");
   }
-  return { opened: true, path: cli };
+  const session = antigravityLoginSession;
+  if (!session || session.exited) {
+    throw new Error("登录流程没有在等待授权。请先点「登录」重新启动浏览器授权。");
+  }
+  session.terminal.write(`${code}\r`);
+  return { submitted: true };
 }
 
 export function openAntigravityDocs() {

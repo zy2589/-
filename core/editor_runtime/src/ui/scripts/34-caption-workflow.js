@@ -8,10 +8,10 @@ function refreshCaptionMeaningDialog() {
 var captionReviewShowAll=false;
 $('reviewPendingOnly').onclick=()=>{captionReviewShowAll=false;renderIssues();};
 $('reviewAll').onclick=()=>{captionReviewShowAll=true;renderIssues();};
-$('realignCaptions').onclick=async()=>{
+$('realignCaptions').onclick=async(event)=>{
   if(state.autoTranscript?.trackId && isTrackLocked(state.autoTranscript.trackId))return toast('请先解锁字幕轨道');
   const button=$('realignCaptions');button.disabled=true;button.textContent='对齐中…';
-  try{await matchScript({alignmentOnly:true});}finally{button.disabled=false;button.textContent='字幕对齐';}
+  try{await matchScript({alignmentOnly:true,forceRecognition:event.shiftKey});}finally{button.disabled=false;button.textContent='字幕对齐';}
 };
 
 function showCaptionDetails(caption) {

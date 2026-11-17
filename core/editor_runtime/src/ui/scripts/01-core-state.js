@@ -220,6 +220,7 @@
         captions: [],
         autoTranscript: null,
         recognizedText: "", recognizedTextCleared: false,
+        manuscriptLanguage: "en",
         captionRecoveryArchive: [],
         auxSubtitles: defaultAuxSubtitleSettings(),
         reviewCaptions: [],
@@ -1679,6 +1680,8 @@
         applyLayout();
         $("projectName").textContent = state.projectName;
         $("scriptText").value = data.script || data.autoCaptionScript || "";
+        state.manuscriptLanguage = String(data.manuscriptLanguage || "en");
+        if ($("manuscriptLanguage")) $("manuscriptLanguage").value = state.manuscriptLanguage;
         state.legacyAutoCaptionScript = data.autoCaptionScript || "";
         if (state.video?.url) {
           $("video").src = state.video.url;
