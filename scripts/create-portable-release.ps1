@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $Root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $Baseline = Join-Path $Root 'release\剪辑助手'
 $ProgramsInstallRoot = Join-Path $env:LOCALAPPDATA 'Programs\剪辑助手'

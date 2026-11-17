@@ -1,4 +1,4 @@
-param([Parameter(Mandatory = $true)][string]$Timestamp)
+﻿param([Parameter(Mandatory = $true)][string]$Timestamp)
 $ErrorActionPreference = 'Stop'
 $Root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $AppSource = Join-Path $Root 'release\剪辑助手'
