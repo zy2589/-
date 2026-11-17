@@ -239,6 +239,8 @@ Push-Location $EngineEditor
 try {
     & $LocalNode (Join-Path $EngineEditorSource 'ui\build.mjs')
     if ($LASTEXITCODE -ne 0) { throw '剪辑界面资源生成失败。' }
+    & $LocalNode --test (Join-Path $Root 'tests\security.test.mjs')
+    if ($LASTEXITCODE -ne 0) { throw '安全回归检查失败，已中止打包。' }
     $GeneratedUi = Join-Path $EngineEditorSource 'ui.html'
     $GeneratedUiText = [IO.File]::ReadAllText($GeneratedUi)
     foreach ($RequiredUiToken in @(

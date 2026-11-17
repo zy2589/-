@@ -11,3 +11,8 @@ export function sanitizePresetStyle(style) {
   }
   return safe;
 }
+
+export function sanitizeSvgPaint(value, fallback = "#68A9A2") {
+  const color = String(value ?? "").trim();
+  return /^#[0-9a-f]{3}(?:[0-9a-f]{3})?$/i.test(color) ? color : fallback;
+}

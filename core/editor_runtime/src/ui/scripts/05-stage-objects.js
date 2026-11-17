@@ -95,7 +95,7 @@ async function placeLibraryAsset(
                 : asset.kind === "image"
                   ? "◆"
                   : "CC";
-        return `<div class="thumb media-preview"><span class="thumb-fallback">${icon}</span>${previewUrl ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "素材预览")}" onerror="this.remove()">` : ""}</div>`;
+        return `<div class="thumb media-preview"><span class="thumb-fallback">${icon}</span>${previewUrl ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "素材预览")}" data-remove-on-error>` : ""}</div>`;
       }
       let libraryMediaRenderKey = "";
       function mediaList() {

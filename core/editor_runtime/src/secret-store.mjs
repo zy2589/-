@@ -118,7 +118,8 @@ export function readProtectedSecret(file) {
       writeProtectedSecret(file, stored);
       return readProtectedSecret(file);
     } catch {
-      // A temporary DPAPI failure must not destroy an existing credential.
+      // Preserve the legacy file, but do not silently use it without DPAPI.
+      throw new Error('Windows 凭证保护不可用，未加载未保护的凭证；现有凭证文件已保留。');
     }
   }
   return stored;

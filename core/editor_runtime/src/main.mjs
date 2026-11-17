@@ -8,8 +8,8 @@ import { renderTimelineStill } from './media/render.mjs';
 import { recommendedExportBitrate } from './export-bitrate.mjs';
 import { defaultDownloadsDirectory } from './platform.mjs';
 import { scanSafeCache, cleanSafeCache, notifyCacheActivity } from './cache-service.mjs';
-import { authorizeRequest, validateRequestFraming, sanitizeUploadName, assertNotSecret, writeRaster } from './security.mjs';
-import { sanitizePresetStyle } from './preset-safety.mjs';
+import { authorizeRequest, contentSecurityPolicy, addScriptNonce, validateRequestFraming, sanitizeUploadName, assertNotSecret, writeRaster } from './security.mjs';
+import { sanitizePresetStyle, sanitizeSvgPaint } from './preset-safety.mjs';
 import { renderGradePreview } from './media/render.mjs';
 import fs from "node:fs";
 import path from "node:path";
@@ -206,26 +206,6 @@ function safe(action) {
 
 
 
-async function saveProjectFile(data, existingPath = "") {
-  const destination = existingPath || await chooseOutput("剪辑助手工程.zpe", "zpe");
-  if (!destination) return null;
-  fs.writeFileSync(
-    destination,
-    JSON.stringify(
-      {
-        format: "SubtitleProofreaderEditor",
-        version: 1,
-        savedAt: new Date().toISOString(),
-        ...data,
-      },
-      null,
-      2,
-    ),
-    { mode: 0o600 },
-  );
-  return destination;
-}
-
 function mimeType(filePath) {
   const extension = path.extname(filePath).toLowerCase();
   return (
@@ -377,9 +357,10 @@ function startAssetServer() {
     const server = http.createServer((request, response) => {
       const authorized = authorizeRequest(request, serverPort, sessionToken);
       if (authorized.status) { response.writeHead(authorized.status); response.end('Request rejected'); return; }
+      const scriptNonce = crypto.randomBytes(24).toString('base64');
       response.setHeader('X-Content-Type-Options', 'nosniff');
       response.setHeader('Referrer-Policy', 'no-referrer');
-      response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'");
+      response.setHeader('Content-Security-Policy', contentSecurityPolicy(scriptNonce));
       const requestUrl = authorized.url;
       if (
         request.method === "PUT" &&
@@ -439,7 +420,7 @@ function startAssetServer() {
             .replaceAll("__CLIPASSIST_ICON__", iconUrl)
             .replaceAll("__CLIPASSIST_FILTER_PREVIEW__", filterPreviewUrl)
             .replace("</head>", browserTextLayoutScript() + browserCaptionEffectsScript() + bridgeScript + "</head>");
-          response.end(freshHtml);
+          response.end(addScriptNonce(freshHtml, scriptNonce));
         } catch {
           response.end(embeddedHtml || "<html><body>编辑器正在启动…</body></html>");
         }
@@ -516,7 +497,7 @@ const filterPreviewPath = path.resolve(
 const filterPreviewUrl = fs.existsSync(filterPreviewPath)
   ? registerAsset(filterPreviewPath).url
   : "";
-const bridgeScript = `<script>window.ClipAssistantPresetSafety = {sanitizePresetStyle: ${sanitizePresetStyle.toString()}};
+const bridgeScript = `<script>window.ClipAssistantPresetSafety = {sanitizePresetStyle: ${sanitizePresetStyle.toString()}, sanitizeSvgPaint: ${sanitizeSvgPaint.toString()}};
 (() => {
   ${fs.readFileSync(path.join(currentDir,"large-json-codec.mjs"),"utf8").replace(/^export /gm, "")}
   const rpc = async (name, args) => {
@@ -1963,8 +1944,6 @@ nativeMethods = {
     const font = await installFont(id);
     return { ...font, ...registerAsset(font.path) };
   }),
-  registerAsset: safe((filePath) => registerAsset(filePath)),
-  saveProject: safe((data) => saveProjectFile(data, data?.projectPath || "")),
   openProject: safe(async () => {
     const selected = await chooseFile("project");
     return selected

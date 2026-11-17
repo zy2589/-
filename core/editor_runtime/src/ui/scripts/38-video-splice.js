@@ -316,7 +316,9 @@
     const shapes = regions.map((region) => {
       const points = geometryPoints(region).map(([x,y]) => `${(x * 1000).toFixed(1)},${(y * 1000).toFixed(1)}`).join(" ");
       const stroke = region.kind === "pip"
-        ? (Number(region.borderWidth || 0) > 0 ? region.borderColor || "#68A9A2" : "transparent")
+        ? (Number(region.borderWidth || 0) > 0
+            ? window.ClipAssistantPresetSafety.sanitizeSvgPaint(region.borderColor)
+            : "transparent")
         : "rgba(104,169,162,.88)";
       const width = region.kind === "pip"
         ? Number(region.borderWidth || 0) * outputScale

@@ -18,6 +18,18 @@ export function authorizeRequest(request, port, token) {
   return { url };
 }
 
+export function contentSecurityPolicy(scriptNonce) {
+  const nonce = String(scriptNonce || '');
+  if (!/^[A-Za-z0-9+/_=-]{16,128}$/.test(nonce)) throw new Error('Invalid script nonce.');
+  return `default-src 'self'; script-src 'self' 'nonce-${nonce}' 'wasm-unsafe-eval'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'`;
+}
+
+export function addScriptNonce(html, scriptNonce) {
+  const nonce = String(scriptNonce || '');
+  if (!/^[A-Za-z0-9+/_=-]{16,128}$/.test(nonce)) throw new Error('Invalid script nonce.');
+  return String(html).replace(/<script\b(?![^>]*\bnonce\s*=)([^>]*)>/gi, `<script nonce="${nonce}"$1>`);
+}
+
 export function validateRequestFraming(headers) {
   const transferEncoding = headers['transfer-encoding'];
   const contentLength = headers['content-length'];

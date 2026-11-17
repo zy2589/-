@@ -1,6 +1,12 @@
 
       const $ = (id) => document.getElementById(id);
       const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+      document.addEventListener("error", (event) => {
+        const image = event.target;
+        if (!(image instanceof HTMLImageElement)) return;
+        if (image.hasAttribute("data-remove-on-error")) image.remove();
+        else if (image.hasAttribute("data-hide-on-error")) image.style.display = "none";
+      }, true);
       window.__clipAssistantWorkspaceMode = "edit";
       function rangeButtonStep(input) {
         const explicit = Number(input.dataset.buttonStep);
@@ -1279,7 +1285,7 @@
         for (const [day, projects] of groups.entries()) {
           template.innerHTML = `<section class="projectday"><div class="projectdayhead"><span>📁 ${escapeHtml(day)}</span><span class="small">${projects.length} 个工程</span></div><div class="projectdaygrid">${projects.map(
             (item) =>
-              `<div class="projectcard" data-project-id="${item.id}" tabindex="0">${homeSelectionMode ? `<input type="checkbox" data-select-project="${item.id}" aria-label="选择 ${escapeHtml(item.name)}" style="position:absolute;top:10px;left:10px;z-index:3;width:18px;height:18px;accent-color:#df6666">` : `<button type="button" class="projectrename" data-rename-project="${item.id}" title="修改工程名称">✎</button><button type="button" class="projectdelete" data-delete-project="${item.id}" title="删除工程">×</button>`}<div class="projectthumb">${item.thumbnailUrl ? `<img loading="lazy" decoding="async" src="${escapeHtml(item.thumbnailUrl)}" alt="工程预览" onerror="this.style.display='none'">` : escapeHtml(item.ratio || "9:16")}</div><b class="ellipsis" title="${escapeHtml(item.name || "未命名工程")}">${escapeHtml(item.name || "未命名工程")}</b><div class="projectmeta ellipsis">${escapeHtml(item.videoName || "尚未导入视频")}</div><div class="projectmeta">更新于 ${projectDate(item.updatedAt)}</div></div>`,
+              `<div class="projectcard" data-project-id="${item.id}" tabindex="0">${homeSelectionMode ? `<input type="checkbox" data-select-project="${item.id}" aria-label="选择 ${escapeHtml(item.name)}" style="position:absolute;top:10px;left:10px;z-index:3;width:18px;height:18px;accent-color:#df6666">` : `<button type="button" class="projectrename" data-rename-project="${item.id}" title="修改工程名称">✎</button><button type="button" class="projectdelete" data-delete-project="${item.id}" title="删除工程">×</button>`}<div class="projectthumb">${item.thumbnailUrl ? `<img loading="lazy" decoding="async" src="${escapeHtml(item.thumbnailUrl)}" alt="工程预览" data-hide-on-error>` : escapeHtml(item.ratio || "9:16")}</div><b class="ellipsis" title="${escapeHtml(item.name || "未命名工程")}">${escapeHtml(item.name || "未命名工程")}</b><div class="projectmeta ellipsis">${escapeHtml(item.videoName || "尚未导入视频")}</div><div class="projectmeta">更新于 ${projectDate(item.updatedAt)}</div></div>`,
           ).join("")}</div></section>`;
           fragment.appendChild(template.content.firstElementChild);
         }

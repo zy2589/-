@@ -26,6 +26,10 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
   // Parse the exact JavaScript that will be inlined into ui.html, including
   // kernels and the individual UI modules, before writing a package artifact.
   new vm.Script(combinedJs, { filename: 'generated-ui-inline.js' });
+  requireBuildCheck(
+    !/\bon(?:error|load|click|pointerdown|change|input|contextmenu|dragstart|drop|keydown|ended|timeupdate)\s*=\s*["']/i.test(`${combinedBody}\n${combinedJs}`),
+    '页面使用 nonce CSP；禁止在静态 HTML/模板中添加内联事件处理器。',
+  );
 
   const inspectorPath = path.join(uiDir, 'html/06-inspector.html');
   const inspector = fs.readFileSync(inspectorPath, 'utf8');
