@@ -69,8 +69,6 @@ foreach ($RequiredFile in @($Python, $PyInstaller, $Entry,
         (Join-Path $EditorWebViewSource 'WebView2Loader.dll'),
         $Csc,
         (Join-Path $Resources 'ffmpeg\LICENSE.txt'),
-        (Join-Path $Resources 'denoise-dpdfnet\sherpa-onnx-offline-denoiser.exe'),
-        (Join-Path $Resources 'denoise-dpdfnet\dpdfnet2_48khz_hr.onnx'),
         (Join-Path $Resources 'matting_models\rvm_mobilenetv3_fp32.onnx'),
         (Join-Path $Resources 'matting_models\human_segmentation_segformer_b0_ps_512.onnx'))) {
     if (!(Test-Path -LiteralPath $RequiredFile -PathType Leaf)) {
@@ -112,6 +110,8 @@ Write-Host "媒体安全基线：Python $PythonRuntimeVersion / FFmpeg $($Ffmpeg
 # misleading "completed" states before an installer can be produced.
 & $Python (Join-Path $Root 'core\preflight_media.py')
 if ($LASTEXITCODE -ne 0) { throw '媒体与标题图预检失败，已中止打包。' }
+& $Python (Join-Path $Root 'tests\test_downloader_template_fallback.py')
+if ($LASTEXITCODE -ne 0) { throw '下载器共享模板权限回归失败，已中止打包。' }
 
 New-Item -ItemType Directory -Force -Path $Output, $Build | Out-Null
 $ResolvedBuildRoot = [IO.Path]::GetFullPath($Build).TrimEnd('\') + '\'
@@ -153,15 +153,11 @@ foreach ($PrivateSeedPath in @(
         Remove-Item -LiteralPath $PrivateSeedPath -Recurse -Force
     }
 }
-foreach ($Directory in @('ffmpeg','denoise-dpdfnet','matting_models')) {
+foreach ($Directory in @('ffmpeg','matting_models')) {
     New-Item -ItemType Directory -Force -Path (Join-Path $PackageResources $Directory) | Out-Null
 }
 foreach ($RelativeFile in @(
     'ffmpeg\LICENSE.txt',
-    'denoise-dpdfnet\dpdfnet2_48khz_hr.onnx','denoise-dpdfnet\sherpa-onnx-offline-denoiser.exe',
-    'denoise-dpdfnet\onnxruntime.dll','denoise-dpdfnet\onnxruntime_providers_shared.dll',
-    'denoise-dpdfnet\DPDFNet-LICENSE.txt','denoise-dpdfnet\onnxruntime-LICENSE.txt',
-    'denoise-dpdfnet\sherpa-LICENSE.txt','denoise-dpdfnet\sources.json',
     'matting_models\rvm_mobilenetv3_fp32.onnx','matting_models\human_segmentation_segformer_b0_ps_512.onnx',
     'matting_models\EasyPortrait-ONNX-ATTRIBUTION.txt','matting_models\EasyPortrait-ONNX-LICENSE.txt',
     'matting_models\PPHumanSeg-LICENSE'
@@ -172,6 +168,7 @@ foreach ($RelativeFile in @(
 }
 Copy-Item -LiteralPath $FfmpegExecutable -Destination (Join-Path $PackageResources 'ffmpeg\ffmpeg.exe') -Force
 Copy-Item -LiteralPath $FfprobeExecutable -Destination (Join-Path $PackageResources 'ffmpeg\ffprobe.exe') -Force
+Copy-Item -LiteralPath (Join-Path $EditorRuntimeSource 'deep-filter.exe') -Destination (Join-Path $PackageResources 'deep-filter.exe') -Force
 $EditorStage = Join-Path $Build '剪辑助手内核'
 if (Test-Path -LiteralPath $EditorStage) {
     $ResolvedStage = [IO.Path]::GetFullPath($EditorStage)

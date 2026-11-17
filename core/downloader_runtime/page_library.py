@@ -6,10 +6,13 @@ from pathlib import Path
 
 from page_cache import (read_pages, ordered_page_numbers, page_footer, page_design,
                         read_style, save_style, save_phone, save_footer,
-                        save_page_name, save_page_content)
+                        save_page_name, save_page_content, resolved_cache_path,
+                        language_template_numbers, duplicate_language_template,
+                        template_footer_with_phone)
 from local_design import LocalEditor
 from build_cache_catalog import build
 from desktop_ui import PALETTES, apply_appearance, style_menu
+from template_translation import LANGUAGES, LANGUAGE_CODES
 
 
 class PageLibrary:
@@ -35,6 +38,14 @@ class PageLibrary:
         self.preview=ttk.Label(preview_panel,text='正在生成预览...');self.preview.pack(fill='both',expand=True)
         self.preview_size=(360,240) if height < 760 or width < 1120 else (480,320)
         left=ttk.Frame(self.window,padding=8);left.pack(side='left',fill='y')
+        language_tools=ttk.Frame(left)
+        language_tools.pack(fill='x',pady=(0,6))
+        ttk.Label(language_tools,text='新模板语种').pack(anchor='w')
+        self.new_template_language=tk.StringVar(master=self.window,value='法语')
+        ttk.Combobox(language_tools,textvariable=self.new_template_language,
+                     values=list(LANGUAGES),state='readonly',width=18).pack(fill='x',pady=(3,4))
+        ttk.Button(language_tools,text='从英语模板复制并新建',
+                   command=self.create_language_template).pack(fill='x')
         self.listing=tk.Listbox(left,width=22,exportselection=False,background=colors['field'],
                                 foreground=colors['fg'],selectbackground=colors['select'],
                                 selectforeground='#ffffff',highlightbackground=colors['border'],
@@ -128,16 +139,24 @@ class PageLibrary:
         try:menu.tk_popup(event.x_root,event.y_root)
         finally:menu.grab_release()
 
+    def template_label(self,number,position):
+        page=self.pages.get(number,{})
+        name=' '.join(str(page.get('page_name') or '').split())
+        language=page.get('template_language','en')
+        language_name=next((label for label,code in LANGUAGE_CODES.items() if code==language),str(language))
+        if name and name!=f'模板 {position}':return name
+        return f'模板 {position} · {language_name}'
+
     def edit_content(self):
         self.tabs.select(self.info_tab)
         (self.phone if self.selected==-1 else self.text).focus_set()
 
     def reload(self,number=None):
         self.pages=read_pages(self.path)
-        source_numbers=ordered_page_numbers(self.pages)
-        self.numbers=([source_numbers[0]] if source_numbers else [])
+        self.numbers=language_template_numbers(self.pages)
         self.listing.delete(0,'end')
-        for position,_ in enumerate(self.numbers,1):self.listing.insert('end',f'模板 {position}')
+        for position,item_number in enumerate(self.numbers,1):
+            self.listing.insert('end',self.template_label(item_number,position))
         if not self.numbers:
             self.selected=None;self.phone.set('');self.text.delete('1.0','end')
             self.notice.configure(text='没有模板，点击“新增模板”建立。');return
@@ -186,13 +205,18 @@ class PageLibrary:
         self.text.configure(state='normal')
         self.text.pack(fill='both',expand=True)
         try:
-            footer,source_phone=page_footer(page);phone=self.template_1_phone();self.phone.set(phone)
+            footer,source_phone=page_footer(page)
+            phone=source_phone if page.get('template_language') else self.template_1_phone()
+            self.phone.set(phone)
             design=page_design(self.pages,str(number),self.app.theme.get(),self.app.layout.get(),read_style(self.path))
-            design['footer']=design['footer'].replace(source_phone,phone,1);design['phone']=phone
-            self.notice.configure(text='模板 1 · 白天：白色底板、黑字、橙色高亮；黑天：黑色底板、白字、黄色高亮。号码按模板独立保存。')
+            design['footer']=design['footer'].replace(source_phone,phone,1);design['phone']=phone;design['phone_input']=phone
+            design['template_language']=page.get('template_language','en')
+            language_name=labels.get(design['template_language'],design['template_language'])
+            self.notice.configure(text=f'{language_name}模板 · 文案和号码独立保存；标题里的神、耶稣、圣灵会按所选语种自动高亮。白天/黑天主题会沿用当前设置。')
         except ValueError:
             footer='';self.phone.set(self.template_1_phone())
-            design={'footer':'','lines':[{'size':52,'bold':True,'runs':[{'text':'标题预览','color':'#000000'}]}],**read_style(self.path)}
+            design={'footer':'','lines':[{'size':52,'bold':True,'runs':[{'text':'标题预览','color':'#000000'}]}],**read_style(self.path),
+                    'template_language':page.get('template_language','en')}
             self.notice.configure(text='该模板缺少有效引流文案，请补充文案和带国家区号的号码。')
         self.text.delete('1.0','end');self.text.insert('1.0',footer);self.text.edit_reset();self.text.edit_modified(False)
         self.editor.style_save_button.configure(text='保存当前版本样式' if 'local_style' in page else '保存样式并应用所有模板')
@@ -211,6 +235,8 @@ class PageLibrary:
             value=(design['footer'].replace(design['phone'],self.phone.get(),1)
                    if design['phone'] else design['footer'])
             self.editor.design['footer']=value
+            self.editor.design['phone_input']=self.phone.get()
+            self.editor.phone_input.set(self.phone.get())
             self.editor.footer.configure(state='normal');self.editor.footer.delete('1.0','end')
             self.editor.footer.insert('1.0',value);self.editor.footer.edit_modified(False);self.editor.preview()
         except (ValueError,tk.TclError):pass
@@ -239,21 +265,79 @@ class PageLibrary:
                 save_template_2(self.config_path,self.phone.get(),self.promo_scale.get(),self.promo_padding.get(),self.template_2_title_var.get())
                 self.notice.configure(text='模板 2 的标题、号码、引流字号比例和底板留白已保存。')
                 self.preview_phone();return
-            save_footer(self.path,self.selected,self.text.get('1.0','end-1c'))
-            self.save_template_1_phone(self.phone.get())
+            page=self.pages[self.selected]
+            footer=self.text.get('1.0','end-1c')
+            if page.get('template_language'):
+                old_phone=page_footer(page)[1]
+                footer=template_footer_with_phone(footer,self.phone.get(),old_phone)
+                phone=page_footer({'text_elements':[{'type':'TEXT','role':'LOCAL_FOOTER','text':footer}]})[1]
+                save_footer(self.path,self.selected,footer)
+                save_phone(self.path,self.selected,phone)
+            else:
+                save_footer(self.path,self.selected,footer)
+                self.save_template_1_phone(self.phone.get())
             self.catalog();self.reload(self.selected);self.notice.configure(text='引流文案和号码已保存。')
         except Exception as exc:messagebox.showerror('无法保存模板',str(exc),parent=self.window)
+
+    def create_language_template(self):
+        if not self.allowed():return
+        language=self.new_template_language.get().strip()
+        code=LANGUAGE_CODES.get(language)
+        if not code or code=='en':
+            messagebox.showinfo('新建语种模板','英语模板已存在；请选择其他语种来复制。',parent=self.window)
+            return
+        try:
+            self.pages=read_pages(self.path)
+            existing=next((number for number,page in self.pages.items()
+                           if page.get('template_language')==code),None)
+            if existing is not None:
+                self.reload(existing)
+                self.notice.configure(text=f'{language}模板已存在。你可以直接编辑并保存。')
+                return
+            english=next((number for number in ordered_page_numbers(self.pages)
+                          if not self.pages[number].get('template_language')),None)
+            if english is None:
+                raise ValueError('找不到英语模板，无法复制。')
+            source_page=self.pages[english]
+            if self.selected==english:
+                source_footer=self.text.get('1.0','end-1c')
+                source_phone=self.phone.get()
+                source_style=self.editor.collect()
+            else:
+                source_footer,source_phone=page_footer(source_page)
+                source_style=source_page.get('local_style')
+                if source_style is None:source_style=read_style(self.path)
+            number=duplicate_language_template(
+                self.path,english,code,language,source_style,
+                footer=source_footer,phone=source_phone)
+            self.reload(number)
+            self.notice.configure(text=f'已复制英语模板的页面、文案、号码和样式，并创建独立的{language}副本。修改文案或号码后点“保存引流模板”；下载时选择{language}即可使用。')
+        except Exception as exc:
+            messagebox.showerror('无法新建语种模板',str(exc),parent=self.window)
 
     def copy_page(self,kind):
         if self.selected is None:return
         page=self.pages.get(self.selected,{})
-        values={'name':f'模板 {self.position(self.selected)}','phone':self.phone.get(),
+        values={'name':self.template_label(self.selected,self.position(self.selected)),'phone':self.phone.get(),
                 'content':self.text.get('1.0','end-1c')}
         value=values.get(kind,'')
         self.window.clipboard_clear();self.window.clipboard_append(value)
 
     def rename_page(self):
-        return
+        if not self.allowed() or self.selected is None:return
+        if self.selected==-1:
+            messagebox.showinfo('重命名模板','内置模板 2 不支持重命名。',parent=self.window)
+            return
+        current=self.template_label(self.selected,self.position(self.selected))
+        name=simpledialog.askstring('重命名模板','请输入模板名称：',initialvalue=current,parent=self.window)
+        if name is None:return
+        try:
+            save_page_name(self.path,self.selected,name)
+            selected=self.selected
+            self.reload(selected)
+            self.catalog()
+            self.notice.configure(text='模板名称已保存。')
+        except Exception as exc:messagebox.showerror('无法重命名模板',str(exc),parent=self.window)
 
     def template_1_phone(self):
         try:return json.loads(self.template_1_config.read_text(encoding='utf-8')).get('phone','+1(240)726-0061')
@@ -283,7 +367,16 @@ class PageLibrary:
         if not self.allowed():raise ValueError('下载期间无法更改模板')
         if self.selected==-1:raise ValueError('模板 2 的底图、字体和位置固定。')
         if self.selected is not None and design.get('footer','').strip():
-            save_footer(self.path,self.selected,design['footer']);self.pages=read_pages(self.path);self.catalog()
+            footer=design['footer']
+            page=self.pages[self.selected]
+            if page.get('template_language'):
+                old_phone=page_footer(page)[1]
+                footer=template_footer_with_phone(footer,design.get('phone_input') or old_phone,old_phone)
+                phone=page_footer({'text_elements':[{'type':'TEXT','role':'LOCAL_FOOTER','text':footer}]})[1]
+                save_footer(self.path,self.selected,footer)
+                save_phone(self.path,self.selected,phone)
+            else:save_footer(self.path,self.selected,footer)
+            self.pages=read_pages(self.path);self.catalog()
         if self.selected is not None and 'local_style' in self.pages[self.selected]:
             from page_cache import save_local_style
             save_local_style(self.path,self.selected,design);self.pages=read_pages(self.path)
@@ -330,7 +423,7 @@ class PageLibrary:
 
     def write_catalog(self):
         self.catalog_timer=None
-        try:build(self.path,self.path.parent/'Canva本地页面信息.html')
+        try:build(resolved_cache_path(self.path),self.path.parent/'Canva本地页面信息.html')
         except OSError as exc:self.notice.configure(text=str(exc))
 
     def close_library(self,event):
@@ -339,5 +432,5 @@ class PageLibrary:
         if timer is not None:
             try:self.window.after_cancel(timer)
             except tk.TclError:pass
-        try:build(self.path,self.path.parent/'Canva本地页面信息.html')
+        try:build(resolved_cache_path(self.path),self.path.parent/'Canva本地页面信息.html')
         except OSError:pass

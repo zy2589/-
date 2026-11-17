@@ -67,10 +67,12 @@ def normalize_manual_title_lines(title, lines):
     return cleaned
 
 
-def replace_title(template, title):
+def replace_title(template, title, language=None):
     source_title=str(title)
     title = unicodedata.normalize('NFKC',source_title).translate(str.maketrans({'“':'"','”':'"','‘':"'",'’':"'",'—':'-','–':'-'}))
     design = copy.deepcopy(template)
+    if language:
+        design['template_language']=language
     original = design.get('lines') or [{'size':52,'bold':True}]
     # The saved selection formatting belongs to the sample title. Replacement
     # titles inherit that style, so use it while measuring and wrapping too.
@@ -94,10 +96,11 @@ def replace_title(template, title):
     if manual_lines is not None:
         values=normalize_manual_title_lines(source_title,manual_lines)
     else:
-        values = fit_title_lines(title,requested,lambda value:measure_line(value,0))
+        active_language=language or design.get('template_language','en')
+        values = fit_title_lines(title,requested,lambda value:measure_line(value,0),language=active_language)
         if exact_layout and len(values)>requested:
-            values=balanced_lines(title,requested,lambda value:measure_line(value,0))
-    colored=title_line_runs(values)
+            values=balanced_lines(title,requested,lambda value:measure_line(value,0),language=active_language)
+    colored=title_line_runs(values,language or design.get('template_language','en'))
     design['lines']=[dict(original[min(i,len(original)-1)],**inherited,runs=colored[i]) for i,value in enumerate(values)]
     if inherited:
         for line in design['lines']:
@@ -210,7 +213,7 @@ def font(size, bold=True, path=None, sans=False):
     return face
 
 
-def balanced_lines(text, count, measure):
+def balanced_lines(text, count, measure, language='en'):
     raw_words=text.split()
     words=[];index=0
     while index<len(raw_words):
@@ -255,17 +258,17 @@ def balanced_lines(text, count, measure):
     return solve(0, count)[1]
 
 
-def fit_title_lines(text, minimum, measure, max_width=AUTO_TITLE_MAX_WIDTH):
+def fit_title_lines(text, minimum, measure, max_width=AUTO_TITLE_MAX_WIDTH, language='en'):
     """Keep short titles to one line and allow wider lines when wrapping longer titles."""
     words=text.split()
     if not words:return ['']
     minimum=max(1,min(4,int(minimum)))
     for count in range(minimum,5):
-        lines=balanced_lines(text,count,measure)
+        lines=balanced_lines(text,count,measure,language)
         line_width_limit=AUTO_TITLE_SINGLE_LINE_MAX_WIDTH if count==1 else max_width
         if max(measure(line) for line in lines)<=line_width_limit:
             return lines
-    return balanced_lines(text,4,measure)
+    return balanced_lines(text,4,measure,language)
 
 
 def render(design, green_preview=False, output_size='1080x1920'):
@@ -338,9 +341,10 @@ def render(design, green_preview=False, output_size='1080x1920'):
         role=footer_roles[index] if index<len(footer_roles) else ''
         size=design.get('phone_size',68) if role=='phone' or re.search(r'\d{3}',text) else design.get('link_size',48) if role=='cta' or text.strip()=='LINK IN MY BIO' else design.get('footer_size',38)
         try:
-            auto_spans=footer_auto_highlights.get(str(index),[])
+            auto_spans=list(footer_auto_highlights.get(str(index),[]))
         except AttributeError:
             auto_spans=[]
+        auto_spans.extend(salient_title_spans(text,design.get('template_language','en')))
         runs=[]
         for j,char in enumerate(text):
             color=highlight if role=='phone' or role=='cta' or text.startswith('+') or text.strip()=='LINK IN MY BIO' or any(match.start()<=j<match.end() for match in re.finditer('FREE',text,re.IGNORECASE)) or any(
@@ -358,19 +362,57 @@ def render(design, green_preview=False, output_size='1080x1920'):
     return image
 
 
-# Only these faith terms receive automatic title color. Other emphasis remains
-# manual through the existing text selection/color controls.
+# These are the equivalents of God, Jesus, and Holy Spirit in every language
+# offered by the downloader.  The selected row language controls matching.
+RELIGIOUS_TERMS = {
+    'en': (r"GOD(?:['’]s?)?", r"JESUS(?:['’]s?)?", r"HOLY\s+SPIRIT(?:['’]s?)?"),
+    'fr': ('DIEU', 'JÉSUS', 'SAINT[\s-]+ESPRIT', 'ESPRIT[\s-]+SAINT'),
+    'es': ('DIOS', 'JES[ÚU]S', 'ESPÍRITU\s+SANTO'),
+    'pt': ('DEUS', 'JESUS', 'ESPÍRITO\s+SANTO'),
+    'de': (r'GOTT(?:ES)?', 'JESUS', 'HEILIGER\s+GEIST'),
+    'it': ('DIO', 'GES[ÙU]', 'SPIRITO\s+SANTO'),
+    'nl': ('GOD', 'JEZUS', 'HEILIGE\s+GEEST'),
+    'ar': ('الله', 'يسوع', 'عيسى', 'الروح\s+القدس'),
+    'ja': ('神', 'イエス(?:・キリスト)?', '聖霊'),
+    'ko': ('하나님', '하느님', '예수님?', '성령'),
+    'hi': ('परमेश्वर', 'ईश्वर', 'भगवान', 'यीशु', 'ईसा(?:\s+मसीह)?', 'पवित्र\s+आत्मा'),
+    'id': ('ALLAH', 'TUHAN', 'YESUS', 'ROH\s+KUDUS'),
+    'vi': ('ĐỨC\s+CHÚA\s+TRỜI', 'THIÊN\s+CHÚA', 'CHÚA\s+GIÊ[- ]?SU', 'CHÚA\s+GIÊ[- ]?XU', 'ĐỨC\s+THÁNH\s+LINH', 'CHÚA'),
+    'th': ('พระเจ้า', 'พระเยซู', 'พระวิญญาณบริสุทธิ์'),
+    'fil': ('DIYOS', 'HESUS', 'JESUS', 'BANAL\s+NA\s+ESPIRITU', 'ESPIRITU\s+SANTO'),
+    'ru': ('БОГ(?:А|У|ОМ|Е)?', 'ИИСУС(?:А|У|ОМ|Е)?', 'СВЯТ(?:ОЙ|ОГО)\s+ДУХ(?:А)?'),
+    'zh-Hans': ('上帝', '神', '耶稣', '圣灵'),
+    'zh-Hant': ('上帝', '神', '耶穌', '聖靈'),
+}
+
+# Preserve multiword English terms as a single layout unit during wrapping.
 KEYWORD_PATTERN = r"\b(?:GOD|JESUS)\b(?:['’]s?)?|\bHoly\s+Spirit\b(?:['’]s?)?"
 
 
-def salient_title_spans(text):
-    """Return only the fixed automatic terms; all other emphasis is manual."""
-    return [(match.start(), match.end()) for match in re.finditer(KEYWORD_PATTERN, text, re.IGNORECASE)]
+def salient_title_spans(text, language='en'):
+    """Return spans for the three faith concepts in the selected language."""
+    language = str(language or 'en')
+    terms = RELIGIOUS_TERMS.get(language, RELIGIOUS_TERMS['en'])
+    unbounded = language in ('ja', 'zh-Hans', 'zh-Hant', 'th')
+    matches=[]
+    for term in terms:
+        expression = re.escape(term) if term.isalnum() and not any(char.isspace() for char in term) else term
+        if not unbounded:
+            expression = r'(?<!\w)(?:' + expression + r')(?!\w)'
+        matches.extend((match.start(),match.end()) for match in re.finditer(expression,text,re.IGNORECASE))
+    matches.sort()
+    merged=[]
+    for start,end in matches:
+        if merged and start < merged[-1][1]:
+            merged[-1]=(merged[-1][0],max(merged[-1][1],end))
+        else:
+            merged.append((start,end))
+    return merged
 
 
-def title_line_runs(values):
+def title_line_runs(values, language='en'):
     text='\n'.join(values)
-    spans=salient_title_spans(text)
+    spans=salient_title_spans(text,language)
     result=[];offset=0
     for value in values:
         runs=[]
@@ -382,8 +424,8 @@ def title_line_runs(values):
     return result
 
 
-def title_runs(text):
-    return title_line_runs([text])[0]
+def title_runs(text,language='en'):
+    return title_line_runs([text],language)[0]
 
 
 class LocalEditor:
@@ -563,7 +605,7 @@ class LocalEditor:
         lines = []
         from page_cache import english_brackets
         all_text=english_brackets(self.text.get('1.0','end-1c'))
-        keywords=[(match.start(),match.end()) for match in re.finditer(KEYWORD_PATTERN,all_text,re.I)]
+        keywords=salient_title_spans(all_text,self.design.get('template_language','en'))
         offset=0
         for i, value in enumerate(all_text.split('\n'), 1):
             if not value:
@@ -678,8 +720,8 @@ class LocalEditor:
             tag=f'line_{index}'
             self.styles[tag]={'size':default_size,'bold':self.bold.get()}
             self.text.tag_add(tag,f'{index}.0',f'{index}.end')
-        for match in re.finditer(KEYWORD_PATTERN, '\n'.join(values),re.I):
-            self.apply_color(f'1.0+{match.start()}c',f'1.0+{match.end()}c',ORANGE)
+        for start,end in salient_title_spans('\n'.join(values),self.design.get('template_language','en')):
+            self.apply_color(f'1.0+{start}c',f'1.0+{end}c',ORANGE)
         self.preview()
 
     def apply_color(self,start,end,color):

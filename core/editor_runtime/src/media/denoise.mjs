@@ -859,8 +859,16 @@ export async function renderDenoisePreview(
     }
   }
 
-  // If AI isolation is selected and DeepFilter binary exists, try deepfilter first
-  if (["ai-isolation", "deepfilter"].includes(effectiveMode) && hasDeepFilterEngine()) {
+  if (effectiveMode === "deepfilter") {
+    if (!hasDeepFilterEngine()) throw new Error("未找到现有 DeepFilterNet 降噪引擎，请检查安装文件。");
+    return await renderDeepFilterTrack(inputPath, strength, outputPath, {
+      time: startTime,
+      duration: 8,
+    });
+  }
+
+  // AI isolation can use DeepFilterNet as an optional accelerator.
+  if (effectiveMode === "ai-isolation" && hasDeepFilterEngine()) {
     try {
       return await renderDeepFilterTrack(inputPath, strength, outputPath, {
         time: startTime,
@@ -962,8 +970,13 @@ export async function renderDenoisedTrack(
     }
   }
 
-  // If AI isolation is selected and DeepFilter binary exists, try deepfilter first
-  if (["ai-isolation", "deepfilter"].includes(effectiveMode) && hasDeepFilterEngine()) {
+  if (effectiveMode === "deepfilter") {
+    if (!hasDeepFilterEngine()) throw new Error("未找到现有 DeepFilterNet 降噪引擎，请检查安装文件。");
+    return await renderDeepFilterTrack(inputPath, strength, outputPath);
+  }
+
+  // AI isolation can use DeepFilterNet as an optional accelerator.
+  if (effectiveMode === "ai-isolation" && hasDeepFilterEngine()) {
     try {
       return await renderDeepFilterTrack(inputPath, strength, outputPath);
     } catch (err) {

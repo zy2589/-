@@ -782,7 +782,14 @@
           }));
           if (!isCurrent()) return;
           if (gapPlayback) gapPlayback.startWall = performance.now();
-          if (inClipAtPlay) await video.play();
+          if (inClipAtPlay) {
+            // Start the denoised audio player from the transport gesture,
+            // alongside the video decoder, so the browser doesn't reject it
+            // as a second autoplay request after video.play() resolves.
+            pendingPlayRequest = 0;
+            syncPreviewAudio();
+            await video.play();
+          }
         } catch (error) {
           // pause()/load() legitimately cancel play(). A stale request must not
           // restart the UI loop or change the replacement source's state.

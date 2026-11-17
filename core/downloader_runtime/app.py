@@ -24,13 +24,9 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs, urlencode, urljoin, urlsplit, urlunsplit, parse_qsl
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from app_settings import PALETTES, apply_appearance, read_settings, update_settings, settings_location, seed_user_data, rebase_local_fonts, sync_appearance
+from app_settings import PALETTES, apply_appearance, read_settings, update_settings, settings_location, seed_user_data, rebase_local_fonts, sync_appearance, canva_page_cache_fallback_path
 from desktop_ui import icon_button, icon_menu, DarkPopupMenu, add_theme_menu, set_window_icon, ToolTip, bind_scale_wheel
-from template_translation import (DEFAULT_LANGUAGE, LANGUAGES, LANGUAGE_CODES,
-                                  load_translation_cache, save_translation_cache,
-                                  translate_template_copy, translation_cache_key)
-from template_language import (apply_template_translation,
-                               build_template_translation_request)
+from template_translation import DEFAULT_LANGUAGE, LANGUAGES, LANGUAGE_CODES
 
 _drive_guard = threading.Lock()
 _drive_locks = {}
@@ -1201,9 +1197,10 @@ class App:
         # The embedded downloader shares the app-wide DaVinci dark theme.
         self.appearance = tk.StringVar(value='深色')
         self.cache_path = self.settings_path.parent / 'canva-page-audit.json'
-        if self.cache_path.is_file():
+        cache_to_anonymize = self.cache_path if self.cache_path.is_file() else canva_page_cache_fallback_path()
+        if cache_to_anonymize is not None and cache_to_anonymize.is_file():
             from page_cache import anonymize_template_names
-            anonymize_template_names(self.cache_path)
+            anonymize_template_names(cache_to_anonymize)
         self.theme = tk.StringVar(value='白天')
         self.layout = tk.StringVar(value='自动')
         self.resolution = tk.StringVar(value='1080x1920')
@@ -1272,12 +1269,13 @@ class App:
         ttk.Button(template_row, text='抠图区域', width=8, command=self._open_cutout).pack(side='left', padx=(0, 4))
         noise_row = ttk.Frame(panel)
         noise_row.pack(fill='x', pady=(4, 6))
-        ttk.Label(noise_row, text='全局降噪', style='Muted.TLabel', width=7).pack(side='left')
+        ttk.Label(noise_row, text='全局降噪 · DeepFilterNet', style='Muted.TLabel', width=20).pack(side='left')
         self.denoise_scale = ttk.Scale(noise_row, from_=0, to=100, variable=self.global_denoise,
                                        style='Horizontal.TScale',
                                        command=self._update_denoise_label)
         self.denoise_scale.pack(side='left', fill='x', expand=True, padx=(4, 8))
         bind_scale_wheel(self.denoise_scale, step=1)
+        ToolTip(self.denoise_scale, '剪辑页和下载区共用同一个 DeepFilterNet 引擎；这里设置全局强度，每行也可单独覆盖。')
         self.denoise_label = ttk.Label(noise_row, text='30%', width=5, style='Muted.TLabel')
         self.denoise_label.configure(text=f'{self.global_denoise.get()}%')
         self.denoise_label.pack(side='left')
@@ -1297,9 +1295,6 @@ class App:
             header_form.columnconfigure(column,weight=weight,minsize=minimum)
         self.rows=[];self.row_statuses=[];self.row_clear_buttons=[]
         self.page_vars=[];self.language_vars=[];self.title_layout_vars=[];self.denoise_vars=[];self.denoise_picks=[];self.auto_page_values=[];self.auto_page_people=[];self.page_match_issues=[]
-        self.template_translation_cache_path=self.settings_path.parent/'lead-template-translations.json'
-        self.template_translation_cache=load_translation_cache(self.template_translation_cache_path)
-        self.translation_pending=False
         self.suggested_page_values=[];self.match_jobs={};self.page_entries=[]
         self.title_entries=[];self.title_font_paths=[];self.title_color_ranges=[]
         self.title_last_values=[];self.title_selection_ranges=[];self.title_manual_lines=[]
@@ -1539,6 +1534,7 @@ class App:
                                   state='readonly',width=5,style='Cell.TEntry')
         denoise_pick.grid(row=grid_row+1,column=6,sticky='ew',padx=3,pady=4)
         self.denoise_picks.append(denoise_pick)
+        ToolTip(denoise_pick, '该行只覆盖降噪强度；剪辑页和下载区统一使用 DeepFilterNet。')
         progress=ttk.Label(row,text=self.row_statuses[index],width=18,anchor='w',style='Muted.TLabel')
         progress.grid(row=grid_row+1,column=7,sticky='w',padx=2)
         clear_row_button=icon_button(row,'clear','清空本行（保留已下载文件）',
@@ -1567,9 +1563,11 @@ class App:
         title.trace_add('write',lambda *_,i=index:self.refresh_title_preview(i))
         title_layout.trace_add('write',lambda *_,i=index:self._title_layout_changed(i))
         page.trace_add('write',lambda *_,i=index:self.refresh_title_preview(i))
+        language.trace_add('write',lambda *_,i=index:self.load_matched_phone(i))
+        language.trace_add('write',lambda *_,i=index:self.preview_page(i))
         phone.trace_add('write',lambda *_,i=index:self.refresh_title_preview(i))
         ToolTip(phone_entry,'生成标题图时用此号码替换所选模板中的号码；留空则使用模板原号码。')
-        ToolTip(page_entry,'选择本行引流文案的语种。英语使用原文；其他语种会在开始下载/生成图片时翻译文案，号码和模板样式保持不变。')
+        ToolTip(page_entry,'选择本行引流模板语种。每种语言使用“引流模板”里保存的独立文案；还没有的语种可从英语模板复制后编辑。')
         ToolTip(progress,lambda label=progress:label.cget('text'))
         if hasattr(self,'last_snapshot'):
             for variable in (name,title,link,page,language,phone,background,title_layout,denoise):
@@ -1823,11 +1821,12 @@ class App:
     def title_preview_design(self,index):
         from page_cache import page_design,read_pages,read_style,page_number_for_position
         theme=self.theme.get();layout=self.layout.get()
+        language_code=self.selected_template_language_code(index)
         position=self.page_vars[index].get().strip()
         design=None
         if position:
             pages=read_pages(self.cache_path)
-            try:number=page_number_for_position(pages,position)
+            try:number=page_number_for_position(pages,position,language_code)
             except ValueError:number=None
             if number is not None:
                 try:
@@ -1841,6 +1840,7 @@ class App:
                     'lines':[{'size':52,'bold':True,'runs':[]}]}
             design.update(read_style(self.cache_path))
             design.update(theme=theme,layout=layout)
+        design['template_language']=language_code
         override={'1行':'单行','2行':'两行','3行':'三行','4行':'四行'}.get(self.title_layout_vars[index].get())
         if override:
             design['layout']=override;design['layout_exact']=True
@@ -1947,9 +1947,10 @@ class App:
                 from page_cache import read_pages,page_number_for_position
                 position=self.page_vars[index].get().strip()
                 pages=read_pages(self.cache_path)
-                number=page_number_for_position(pages,position) if position else None
+                number=page_number_for_position(
+                    pages,position,self.selected_template_language_code(index)) if position else None
                 template=self._decorate_title_design(design_for_font,index,raw_title)
-                design=replace_title(template,title)
+                design=replace_title(template,title,self.selected_template_language_code(index))
                 self._sync_title_manual_editor([
                     ''.join(run['text'] for run in line['runs']) for line in design['lines']])
                 image=render(design,output_size=self.resolution.get())
@@ -2484,11 +2485,12 @@ class App:
         try:
             pages = read_pages(self.cache_path)
             number = int(self.page_vars[index].get())
-            source_number=page_number_for_position(pages,number)
+            language_code=self.selected_template_language_code(index)
+            source_number=page_number_for_position(pages,number,language_code)
             page = pages[source_number]
             _, source_phone = page_footer(page)
             phone=source_phone
-            if source_number==pages[min(pages)]:
+            if not page.get('template_language') and source_number==min(pages):
                 config_path=Path(self.settings_path).parent/'graphic-template-1.json'
                 try:phone=json.loads(config_path.read_text(encoding='utf-8')).get('phone','+1(240)726-0061')
                 except (OSError,ValueError,TypeError):phone='+1(240)726-0061'
@@ -2500,6 +2502,7 @@ class App:
             self.status.config(text=f'第{index+1}行: 模板语种 {language}, {phone}\n人名: {person.get()}\n标题: {title.get()}\n链接: {link.get()}')
         except (OSError, ValueError, KeyError):
             self.status.config(text='选择模板并填写号码，可预览本行引流模板效果')
+        self.schedule_title_preview(index,120)
 
     def match_person(self,index,force=False):
         if self.active:return
@@ -2536,7 +2539,7 @@ class App:
         try:
             pages=read_pages(self.cache_path)
             position=int(self.page_vars[index].get())
-            source_number=page_number_for_position(pages,position)
+            source_number=page_number_for_position(pages,position,self.selected_template_language_code(index))
             _,phone=page_footer(pages[source_number])
         except (ValueError,OSError,KeyError):return
         if self.phone_source_numbers[index]!=source_number:
@@ -2568,7 +2571,7 @@ class App:
                 from page_cache import read_pages,page_number_for_position,page_footer
                 pages=read_pages(self.cache_path)
                 position=int(self.page_vars[index].get())
-                source_number=page_number_for_position(pages,position)
+                source_number=page_number_for_position(pages,position,self.selected_template_language_code(index))
                 _,existing=page_footer(pages[source_number])
             except (ValueError,OSError,KeyError,IndexError):
                 existing=''
@@ -2615,11 +2618,15 @@ class App:
             BibleEditor(self)
         except Exception as exc:messagebox.showerror('无法打开圣经背景',str(exc),parent=self.root)
 
+    def selected_template_language_code(self,index):
+        language=self.language_vars[index].get().strip() or DEFAULT_LANGUAGE
+        return LANGUAGE_CODES.get(language,'en')
+
     def start(self, retry_keys=None):
         if not self.rows_ready:
             self.status.config(text='任务列表正在准备，请稍候。')
             return
-        if self.active or self.translation_pending:
+        if self.active:
             return
         self.completion_actions.pack_forget()
         try:
@@ -2632,7 +2639,6 @@ class App:
             count = int(self.count.get())
             templates = {}
             title_image_errors = {}
-            translations_to_fetch = {}
             from page_cache import read_pages, page_design, read_style, page_number_for_position, page_footer, format_phone_like
             cached_pages = read_pages(self.cache_path)
             for index, page in enumerate(self.page_vars):
@@ -2641,10 +2647,14 @@ class App:
                     continue
                 position = page.get().strip() or '1'
                 try:
-                    source_number = page_number_for_position(cached_pages, position)
+                    language=self.language_vars[index].get().strip() or DEFAULT_LANGUAGE
+                    if language not in LANGUAGE_CODES:
+                        raise ValueError(f'第 {index+1} 行：不支持“{language}”语种。')
+                    target_language=LANGUAGE_CODES[language]
+                    source_number = page_number_for_position(cached_pages, position, target_language)
                     _, old_phone = page_footer(cached_pages[source_number])
                     template_theme=self.theme.get()
-                    if source_number==min(cached_pages):
+                    if not cached_pages[source_number].get('template_language') and source_number==min(cached_pages):
                         config_path=Path(self.settings_path).parent/'graphic-template-1.json'
                         try:old_phone=json.loads(config_path.read_text(encoding='utf-8')).get('phone','+1(240)726-0061')
                         except (OSError,ValueError,TypeError):old_phone='+1(240)726-0061'
@@ -2652,39 +2662,11 @@ class App:
                     templates[index] = page_design(cached_pages, source_number, template_theme, self.layout.get(),
                                                    read_style(self.cache_path), phone_override=formatted)
                     templates[index]['phone_input']=supplied
-                    templates[index]=self._decorate_title_design(templates[index],index,values[index][1])
-                    language=self.language_vars[index].get().strip() or DEFAULT_LANGUAGE
-                    if language not in LANGUAGE_CODES:
-                        raise ValueError(f'第 {index+1} 行：不支持“{language}”语种。')
-                    target_language=LANGUAGE_CODES[language]
-                    if target_language!='en':
-                        translation_request,translation_metadata=build_template_translation_request(
-                            templates[index],formatted)
-                        cache_key=translation_cache_key(target_language,translation_request)
-                        cached_translation=self.template_translation_cache.get(cache_key)
-                        if cached_translation is None:
-                            translations_to_fetch.setdefault(cache_key,(translation_request,target_language))
-                        else:
-                            templates[index]=apply_template_translation(
-                                templates[index],cached_translation,translation_metadata,formatted)
+                    templates[index]['template_language']=target_language
                     templates[index]['selected_template_language']=language
+                    templates[index]=self._decorate_title_design(templates[index],index,values[index][1])
                 except ValueError as exc:
                     raise ValueError(f'第 {index + 1} 行：模板 {position} 无法使用：{exc}') from exc
-            if translations_to_fetch:
-                self.translation_pending=True
-                self.start_button.config(state='disabled')
-                self.status.config(text='正在按所选语种翻译引流模板；原有换行、字号、颜色和号码格式会保留，完成后开始生成。')
-                def translate_pending_templates():
-                    translated={}
-                    error=''
-                    try:
-                        for cache_key,(request,target_language) in translations_to_fetch.items():
-                            translated[cache_key]=translate_template_copy(request,target_language)
-                    except Exception as exc:
-                        error=str(exc)
-                    self.events.put((None,'template_translation_ready',{'translations':translated,'error':error}))
-                threading.Thread(target=translate_pending_templates,daemon=True).start()
-                return
             if not 1 <= count <= 10:
                 raise ValueError('同时下载数量必须在 1 到 10 之间')
             task_values = [row if any(value.strip() for value in row) else
@@ -3259,28 +3241,6 @@ class App:
         try:
             while True:
                 key, state, detail = self.events.get_nowait()
-                if state == 'template_translation_ready':
-                    payload=detail if isinstance(detail,dict) else {}
-                    translated=payload.get('translations',{})
-                    if isinstance(translated,dict):
-                        self.template_translation_cache.update(
-                            {cache_key:value for cache_key,value in translated.items()
-                             if isinstance(cache_key,str) and isinstance(value,dict)})
-                        try:
-                            save_translation_cache(self.template_translation_cache_path,
-                                                   self.template_translation_cache)
-                        except OSError as exc:
-                            self.status.config(text=f'翻译已完成，但翻译缓存未能写入：{exc}')
-                    self.translation_pending=False
-                    self.start_button.config(state='normal')
-                    translation_error=str(payload.get('error') or '').strip()
-                    if translation_error:
-                        self.status.config(text=f'引流模板翻译失败，尚未开始下载：{translation_error}')
-                        messagebox.showerror('引流模板翻译失败',translation_error,parent=self.root)
-                    else:
-                        self.status.config(text='引流模板翻译完成，正在生成标题图并开始任务。')
-                        self.root.after_idle(self.start)
-                    continue
                 if key is None:
                     self.active = False
                     self.start_button.config(state='normal')

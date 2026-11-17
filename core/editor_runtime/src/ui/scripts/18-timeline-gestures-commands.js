@@ -675,6 +675,10 @@ function scaleTimelineClipGeometry(ratio) {
               startX: e.clientX,
               startY: e.clientY,
               moving: movable,
+              collapseSelectedCaptionOnClick: clip.dataset.type === "caption" &&
+                !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) &&
+                state.selectedItems.length > 1 &&
+                state.selectedItems.some(item => item.type === "caption" && item.id === clip.dataset.id),
               slip: editTool === "trim" && e.altKey && ["videolayer", "audioasset"].includes(clip.dataset.type),
               slipOriginSourceStart: Number(obj.sourceStart || 0),
               slipSourceDuration: Number(obj.sourceDuration || obj.duration || 0),
@@ -813,7 +817,24 @@ function scaleTimelineClipGeometry(ratio) {
         const before = timelineGestureBefore; timelineGestureBefore = null;
         applyHistoryState(JSON.parse(before));
       }
+      function shouldCollapseSelectedCaptionOnClick(drag, event) {
+        if (!drag?.collapseSelectedCaptionOnClick || drag.selectionPointerMoved) return false;
+        return Math.hypot(
+          Number(event?.clientX) - Number(drag.startX),
+          Number(event?.clientY) - Number(drag.startY),
+        ) <= 3;
+      }
+      function collapseCaptionSelectionAfterClick(drag, select, event) {
+        if (!shouldCollapseSelectedCaptionOnClick(drag, event)) return false;
+        const id = drag.element?.dataset?.id;
+        if (!id) return false;
+        select("caption", id, false, false);
+        return true;
+      }
       function handleTimelinePointerMove(e) {
+        if (timelineDrag?.pointer === e.pointerId && timelineDrag.collapseSelectedCaptionOnClick &&
+            Math.hypot(e.clientX - timelineDrag.startX, e.clientY - timelineDrag.startY) > 3)
+          timelineDrag.selectionPointerMoved = true;
         if (editTool === "blade" && !timelineDrag && e.target.closest?.("#timelineMain"))
           setBladeGuide(previewBladeTime(e.clientX), true);
         if (timelineDrag?.pointer === e.pointerId) {
@@ -1152,6 +1173,7 @@ function scaleTimelineClipGeometry(ratio) {
       document.addEventListener('pointerup',()=>flushTimelinePointerMove(false),true);
       document.addEventListener("pointerup", (e) => {
         if (timelineDrag?.pointer === e.pointerId) {
+          const collapseSelectedCaption = shouldCollapseSelectedCaptionOnClick(timelineDrag, e);
           hideTrimAudioDetail();
           hideSnapGuide();
           if (timelineDrag.marquee) {
@@ -1405,6 +1427,7 @@ function scaleTimelineClipGeometry(ratio) {
               { overwriteOverlays: true },
             );
           }
+          if (collapseSelectedCaption) collapseCaptionSelectionAfterClick(timelineDrag, selectItem, e);
           recomputeContentDuration();
           renderTimeline();
           renderPreviewObjects();

@@ -4,6 +4,8 @@ import vm from 'node:vm';
 import { fileURLToPath } from 'url';
 import {
   planIssueCaptionRemoval,
+  planMediaCaptionDeletion,
+  planTimelineCaptionDeletion,
   planReviewCaptionDeletion,
   reviewCaptionBlockIsCovered,
   reviewCaptionWordMatches,
@@ -81,6 +83,7 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
   requireBuildCheck(!!compressSourcePath, '无法定位压缩源码以执行横竖屏比例回归检查。');
   const compressScript = fs.readFileSync(compressSourcePath, 'utf8');
   const reviewScript = fs.readFileSync(path.join(uiDir, 'scripts/15-ai-review-polish.js'), 'utf8');
+  const deleteScript = fs.readFileSync(path.join(uiDir, 'scripts/13-pause-cut-split.js'), 'utf8');
   const renderScript = fs.readFileSync(path.join(uiDir, '../media/render.mjs'), 'utf8');
   const nestedTimelineScript = fs.readFileSync(path.join(uiDir, '../nested-timeline.mjs'), 'utf8');
   const compoundTimelineUi = fs.readFileSync(path.join(uiDir, 'scripts/33-nested-timeline.js'), 'utf8');
@@ -438,6 +441,42 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
       reviewScript.includes('无法准确切出重复范围，已取消删除以保护其他文案'),
     '删除文案必须按 issue、时间、轨道和素材限定到对应词句，禁止整组删字幕，并防止重复片段误删。',
   );
+  requireBuildCheck(
+    gestureScript.includes('collapseSelectedCaptionOnClick: clip.dataset.type === "caption"') &&
+      gestureScript.includes('state.selectedItems.length > 1') &&
+      gestureScript.includes('Math.hypot(e.clientX - timelineDrag.startX, e.clientY - timelineDrag.startY) > 3') &&
+      gestureScript.includes('collapseCaptionSelectionAfterClick(timelineDrag, selectItem, e)'),
+    '多选字幕后单击其中一条必须收窄为单选；拖动超过阈值时仍保留整组选区。',
+  );
+  const captionSelectionStart = gestureScript.indexOf('      function shouldCollapseSelectedCaptionOnClick(drag, event) {');
+  const captionSelectionEnd = gestureScript.indexOf('\n      function handleTimelinePointerMove(e) {', captionSelectionStart);
+  requireBuildCheck(captionSelectionStart >= 0 && captionSelectionEnd > captionSelectionStart,
+    '时间轴单条字幕选择保护缺失，无法运行删除回归。');
+  const captionSelection = vm.runInNewContext(
+    `${gestureScript.slice(captionSelectionStart, captionSelectionEnd)}\n`+
+      '({shouldCollapseSelectedCaptionOnClick,collapseCaptionSelectionAfterClick});',
+  );
+  const collapsedSelection = [];
+  requireBuildCheck(captionSelection.collapseCaptionSelectionAfterClick(
+    { collapseSelectedCaptionOnClick: true, startX: 10, startY: 20,
+      element: { dataset: { id: 'caption-one' } } },
+    (...args) => collapsedSelection.push(args),
+    { clientX: 12, clientY: 21 },
+  ) && captionSelection.shouldCollapseSelectedCaptionOnClick(
+    { collapseSelectedCaptionOnClick: true, startX: 10, startY: 20 }, { clientX: 12, clientY: 21 },
+  ) && collapsedSelection.length === 1 &&
+    JSON.stringify(collapsedSelection[0]) === JSON.stringify(['caption', 'caption-one', false, false]),
+    '普通点击多选中的单条字幕后，Delete 前必须只保留该字幕为选中状态。');
+  const draggedSelection = [];
+  requireBuildCheck(!captionSelection.collapseCaptionSelectionAfterClick(
+    { collapseSelectedCaptionOnClick: true, selectionPointerMoved: true, startX: 10, startY: 20,
+      element: { dataset: { id: 'caption-one' } } },
+    (...args) => draggedSelection.push(args),
+    { clientX: 15, clientY: 20 },
+  ) && !captionSelection.shouldCollapseSelectedCaptionOnClick(
+    { collapseSelectedCaptionOnClick: true, startX: 10, startY: 20 }, { clientX: 15, clientY: 20 },
+  ) && draggedSelection.length === 0,
+    '拖动多选字幕时必须保留整组选择，不能收窄成单条。');
 
   const selectedReview = { id: 'review-a', issueId: 'shared-issue', captionTrackId: 'caption-a', ownerClipId: 'clip-a', start: 1, end: 2 };
   const reviewDeleteCaptions = [
@@ -499,6 +538,137 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
   }], { id: 'review-a', issueId: 'shared-issue', captionTrackId: 'caption-a', ownerClipId: 'clip-a', start: 1, end: 2 });
   requireBuildCheck(allTextBlocked.blocked && allTextBlocked.reason === 'would-remove-all-text',
     '切除错误文案如果会清空工程全部字幕，必须在任何时间线编辑前拒绝。');
+  const mediaScopedCaptions = [
+    { id: 'owned-caption', trackId: 'caption-a', ownerClipId: 'audio-clip-a', sourceMediaId: 'source-a', text: 'remove keep', words: [
+      { display: 'remove', start: 11.1, end: 11.4, sourceStart: 1.1, sourceEnd: 1.4 },
+      { display: 'keep', start: 12.1, end: 12.4, sourceStart: 2.1, sourceEnd: 2.4 },
+    ] },
+    { id: 'other-owner', trackId: 'caption-a', ownerClipId: 'audio-clip-b', sourceMediaId: 'source-a', text: 'other owner', words: [
+      { display: 'other', start: 11.1, end: 11.4, sourceStart: 1.1, sourceEnd: 1.4 },
+    ] },
+    { id: 'ownerless-same-source', trackId: 'caption-a', ownerClipId: '', sourceMediaId: 'source-a', text: 'source match', words: [
+      { display: 'match', start: 11.2, end: 11.5, sourceStart: 1.2, sourceEnd: 1.5 },
+    ] },
+    { id: 'other-source', trackId: 'caption-a', ownerClipId: '', sourceMediaId: 'source-b', text: 'different source', words: [
+      { display: 'different', start: 11.2, end: 11.5, sourceStart: 1.2, sourceEnd: 1.5 },
+    ] },
+    { id: 'same-source-other-placement', trackId: 'caption-a', ownerClipId: '', sourceMediaId: 'source-a', text: 'repeated elsewhere', words: [
+      { display: 'repeat', start: 31.2, end: 31.5, sourceStart: 1.2, sourceEnd: 1.5 },
+    ] },
+  ];
+  const localCaptionDeletion = planTimelineCaptionDeletion([
+    { id: 'caption-one', trackId: 'caption-a', text: 'one', words: [{ display: 'one', start: 1, end: 2 }] },
+    { id: 'caption-two', trackId: 'caption-a', text: 'two', words: [{ display: 'two', start: 3, end: 4 }] },
+    { id: 'caption-locked', trackId: 'caption-locked', text: 'locked', words: [{ display: 'locked', start: 5, end: 6 }] },
+  ], { selectedCaptionIds: ['caption-one', 'caption-locked'] }, {
+    lockedTracks: { 'caption-locked': true },
+  });
+  requireBuildCheck(localCaptionDeletion.captions.length === 2 &&
+      localCaptionDeletion.captions.some(caption => caption.id === 'caption-two') &&
+      localCaptionDeletion.captions.some(caption => caption.id === 'caption-locked') &&
+      localCaptionDeletion.removedCaptionIds.has('caption-one') &&
+      !localCaptionDeletion.removedCaptionIds.has('caption-locked'),
+    '删除一条字幕只能删除所选字幕，其他字幕和锁定轨道内容必须保留。');
+  const mediaDeletion = planTimelineCaptionDeletion(mediaScopedCaptions, {
+    ownerClipIds: ['audio-clip-a'],
+    ranges: [{ ownerClipId: 'audio-clip-a', sourceMediaId: 'source-a', sourceStart: 1, sourceEnd: 2, start: 10, end: 20 }],
+  }, { joinWords: words => words.map(word => word.display).join(' ') });
+  const keptOwnedCaption = mediaDeletion.captions.find(caption => caption.id === 'owned-caption');
+  requireBuildCheck(mediaDeletion.removedWords.length === 2 &&
+      keptOwnedCaption?.words.map(word => word.display).join(' ') === 'keep' &&
+      mediaDeletion.captions.some(caption => caption.id === 'other-owner') &&
+      mediaDeletion.captions.some(caption => caption.id === 'other-source') &&
+      mediaDeletion.captions.some(caption => caption.id === 'same-source-other-placement') &&
+      !mediaDeletion.captions.some(caption => caption.id === 'ownerless-same-source'),
+    '删除一段音频时，只能删除同时匹配音源区间和时间线区间的字幕词，必须保留重复素材在其他位置的文案。');
+  const incompleteScopeDeletion = planTimelineCaptionDeletion(mediaScopedCaptions, {
+    ownerClipIds: [],
+    ranges: [{ ownerClipId: 'audio-clip-a', sourceMediaId: 'source-a', sourceStart: null, sourceEnd: 2 }],
+  });
+  requireBuildCheck(incompleteScopeDeletion.removedWords.length === 0 &&
+      incompleteScopeDeletion.captions.length === mediaScopedCaptions.length,
+    '音频源区间不完整时必须保留字幕，不能把缺失时间误当作零后扩大删除范围。');
+  const deleteSelectedStart=deleteScript.indexOf('      function deleteSelected(ripple = false, { record = true } = {}) {');
+  const deleteSelectedEnd=deleteScript.indexOf('      function shiftTracks(',deleteSelectedStart);
+  requireBuildCheck(deleteSelectedStart>=0&&deleteSelectedEnd>deleteSelectedStart,
+    '时间线删除入口缺失，无法运行字幕删除范围回归。');
+  const deleteSelectedSource=deleteScript.slice(deleteSelectedStart,deleteSelectedEnd);
+  requireBuildCheck(deleteSelectedSource.includes('planTimelineCaptionDeletion(state.captions||[]')&&
+      deleteSelectedSource.includes('selectedCaptionIds:[...selectedCaptionIds]')&&
+      deleteSelectedSource.includes('state.captions=mediaCaptionDeletion.captions;')&&
+      deleteSelectedSource.includes('state.captions = state.captions.filter(keep("caption"));')&&
+      deleteSelectedSource.includes('if(hasCaptionText&&!plannedCaptions.some(')&&
+      deleteSelectedSource.includes('applyHistoryState(JSON.parse(beforeDelete));')&&
+      !deleteSelectedSource.includes('remapCaptionsFromSource(')&&
+      !deleteSelectedSource.includes('detachCaptionOwner('),
+    '局部字幕删除必须只删选中字幕；删除媒体必须只删其源范围对应的字幕，且保护其他文案。');
+  function runDeleteSelectedScenario({ captions, selectedItems, audioAssets = [] }) {
+    const scenarioState = {
+      selectedItems: [...selectedItems], selected: selectedItems[0] || { type: '', id: '' },
+      captions: JSON.parse(JSON.stringify(captions)), reviewCaptions: [], issues: [],
+      captionRecoveryArchive: [], trackLocks: {}, undo: [], redo: [],
+      videoLayers: [], audioAssets: JSON.parse(JSON.stringify(audioAssets)), images: [], titles: [],
+      removals: [], audioMutes: [], autoTranscript: null, timelineRange: null,
+      currentTime: 0, duration: 60, video: null, avLinked: false,
+    };
+    const context = {
+      state: scenarioState,
+      console: { log() {}, warn() {} },
+      timelineGapSelection: null,
+      resolveWorkingSelection: items => items,
+      expandLinkedSelection: items => items,
+      selectionIsLocked: () => false,
+      planMediaCaptionDeletion,
+      planTimelineCaptionDeletion,
+      joinCaptionWords: words => words.map(word => word.display || word.text || '').filter(Boolean).join(' '),
+      isTime: value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)),
+      projectData: () => JSON.parse(JSON.stringify(scenarioState)),
+      snapshot: () => scenarioState.undo.push('snapshot'),
+      applyHistoryState: value => Object.assign(scenarioState, value),
+      mainClips: () => [], mainAudioClips: () => [],
+      timelineObjectFor: (type, id) => ({
+        audioasset: scenarioState.audioAssets,
+        videolayer: scenarioState.videoLayers,
+        caption: scenarioState.captions,
+      }[type] || []).find(object => object.id === id),
+      overlayTrackId: (type, object) => object.trackId || type,
+      dismissReviewHints() {}, dismissTrimmedIssues() {},
+      toast() {}, cleanupEmptyDynamicTracks() {},
+      recomputeContentDuration() {}, seekTimeline() {}, renderAll() {},
+      shiftTracks() {}, rippleSubtitleTimeline() {},
+      normalizeRemovals() {}, clearOrPromoteMainVideo() {},
+      findTimelineGap() {}, timelineGapItems() {}, rippleDeleteTimelineGap() {},
+    };
+    vm.runInNewContext(`${deleteSelectedSource}\ndeleteSelected(false);`, context);
+    return scenarioState;
+  }
+  const selectedCaptionId = mediaScopedCaptions[0].id;
+  const localDeleteState = runDeleteSelectedScenario({
+    captions: [
+      { id: selectedCaptionId, trackId: 'caption-a', text: 'selected', words: [{ display: 'selected', start: 1, end: 2 }] },
+      { id: 'unselected-caption', trackId: 'caption-a', text: 'keep me', words: [{ display: 'keep', start: 3, end: 4 }] },
+    ],
+    selectedItems: [{ type: 'caption', id: selectedCaptionId }],
+  });
+  requireBuildCheck(localDeleteState.captions.length === 1 &&
+      localDeleteState.captions[0].id === 'unselected-caption' &&
+      localDeleteState.captions[0].text === 'keep me',
+    '执行真实 Delete 所选字幕路径后，未选中的字幕必须仍在工程状态中。');
+  const audioDeleteCaptions = mediaScopedCaptions.map(caption => caption.id === 'owned-caption'
+    ? { ...caption, text: 'remove', words: [caption.words[0]] }
+    : caption);
+  const audioDeleteState = runDeleteSelectedScenario({
+    captions: audioDeleteCaptions,
+    selectedItems: [{ type: 'audioasset', id: 'audio-clip-a' }],
+    audioAssets: [{ id: 'audio-clip-a', trackId: 'audio-a', sourceMediaId: 'source-a', sourceStart: 1, sourceEnd: 2, start: 10, end: 20 }],
+  });
+  const audioDeleteCaptionIds = audioDeleteState.captions.map(caption => caption.id);
+  requireBuildCheck(audioDeleteState.audioAssets.length === 0 &&
+      audioDeleteState.captions.some(caption => caption.id === 'other-owner') &&
+      audioDeleteState.captions.some(caption => caption.id === 'other-source') &&
+      audioDeleteState.captions.some(caption => caption.id === 'same-source-other-placement') &&
+      !audioDeleteState.captions.some(caption => caption.id === 'owned-caption' || caption.id === 'ownerless-same-source'),
+    `执行真实 Delete 音频路径后，只能移除对应字幕，其他所有者、音源或重复放置位置的文案必须保留。实际字幕：${audioDeleteCaptionIds.join(',')}；素材剩余：${audioDeleteState.audioAssets.length}`);
   const fullyCovered = planReviewCaptionDeletion([
     { id: 'whole-block', trackId: 'caption-a', ownerClipId: 'clip-a', text: 'repeat', start: 1.1, end: 1.8 },
   ], [selectedReview]);

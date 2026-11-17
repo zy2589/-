@@ -617,8 +617,8 @@
           state.audioCuts = [];
           state.waveform = [];
           // Removing the last video clip must not erase independent subtitle
-          // overlays. The delete path detaches their source ownership before
-          // this fallback runs, so they remain editable on the timeline.
+          // overlays. The delete path removes only captions scoped to the
+          // deleted media, so unrelated text remains editable on the timeline.
           $("video").removeAttribute("src");
           $("video").load?.();
           $("stage").classList.toggle(
@@ -667,6 +667,24 @@
           toast(requested.length ? "所选轨道已锁定" : "请先选择一个或多个片段");
           return;
         }
+        const selectedMediaScopes = selected.flatMap(item => {
+          if (!['video', 'audio', 'videolayer', 'audioasset'].includes(item.type)) return [];
+          const object = item.type === 'video'
+            ? mainClips().find(clip => clip.id === item.id)
+            : item.type === 'audio'
+              ? mainAudioClips().find(clip => clip.id === item.id || clip.parentId === item.id)
+              : timelineObjectFor(item.type, item.id);
+          if (!object) return [];
+          return [{
+            ownerClipId: item.id,
+            sourceMediaId: object.sourceMediaId || object.path || state.video?.path || '',
+            sourceStart: isTime(object.sourceStart) ? Number(object.sourceStart) : null,
+            sourceEnd: isTime(object.sourceEnd) ? Number(object.sourceEnd) : null,
+            start: isTime(object.start) ? Number(object.start) : null,
+            end: isTime(object.end) ? Number(object.end) : null,
+          }];
+        });
+        const selectedMediaOwnerIds = new Set(selectedMediaScopes.map(scope => scope.ownerClipId));
         const selectedCaptionIds = new Set(
           selected.filter(item => item.type === 'caption').map(item => item.id),
         );
@@ -681,15 +699,25 @@
           toast('此次删除会清空全部字幕，已取消操作以保护工程');
           return;
         }
+        const beforeDelete = JSON.stringify(projectData(true));
+        const undoLengthBefore = state.undo.length;
+        const redoBefore = [...state.redo];
         if (record) snapshot();
-        const selectedMainOwnerIds = new Set(
-          selected
-            .filter(item => ["video", "audio"].includes(item.type) && item.id !== "main")
-            .map(item => item.id),
-        );
         // Convert selected main instances before deletion; never remove the backing source.
         state.selectedItems=selected;
-        for(const item of [...selected])if(['video','audio'].includes(item.type))materializeMainSegment(item.type,item.id);
+        for(const item of [...selected])if(['video','audio'].includes(item.type)){
+          const replacement=materializeMainSegment(item.type,item.id);
+          if(replacement){
+            selectedMediaOwnerIds.add(replacement.id);
+            const object=timelineObjectFor(replacement.type,replacement.id);
+            if(object)selectedMediaScopes.push({ownerClipId:replacement.id,
+              sourceMediaId:object.sourceMediaId||object.path||state.video?.path||'',
+              sourceStart:isTime(object.sourceStart)?Number(object.sourceStart):null,
+              sourceEnd:isTime(object.sourceEnd)?Number(object.sourceEnd):null,
+              start:isTime(object.start)?Number(object.start):null,
+              end:isTime(object.end)?Number(object.end):null});
+          }
+        }
         selected=expandLinkedSelection(state.selectedItems).filter(item=>!selectionIsLocked(item.type,item.id));
         const ids = (type) =>
           new Set(selected.filter((item) => item.type === type).map((item) => item.id));
@@ -701,7 +729,6 @@
         const captionOnly = selected.every(item => item.type === 'caption');
         const shouldRippleAudio = state.avLinked;
         const sourceClips = mainClips();
-        anchorCaptionsToSource(sourceClips);
         const selectedMainClips = sourceClips
           .filter(
             (clip) => videoIds.has(clip.id) || (shouldRippleAudio && audioIds.has(clip.id)),
@@ -731,9 +758,8 @@
             end: clip.sourceEnd,
             source: "manual",
           });
-          // Video/audio deletion must not implicitly delete timeline captions.
           // Ripple mode already moves enabled tracks through shiftTracks; a
-          // normal delete leaves overlays at their original timeline times.
+          // normal delete leaves unrelated overlays at their original times.
           if (ripple) shiftTracks(clip.start, clip.end - clip.start);
         }
         const audioOnly = mainAudioClips().filter(
@@ -758,37 +784,52 @@
         const removedMedia = [...state.videoLayers.filter(x => layerIds.has(x.id)),
           ...state.audioAssets.filter(x => audioAssetIds.has(x.id))];
         const removedOwners = new Set(removedMedia.map(x => x.id));
-        const detachedCaptionOwners = new Set([
-          ...selectedMainOwnerIds,
+        const deletedMediaOwnerIds = new Set([
+          ...selectedMediaOwnerIds,
           ...removedOwners,
           ...selectedMainClips.map(clip => clip.id),
         ]);
-        const detachCaptionOwner = (caption) => {
-          if (!caption || !detachedCaptionOwners.has(caption.ownerClipId)) return false;
-          caption.ownerClipId = "";
-          caption.ownerClipType = "";
-          delete caption.sourceStart;
-          delete caption.sourceEnd;
-          for (const word of caption.words || []) {
-            delete word.sourceStart;
-            delete word.sourceEnd;
-          }
-          return true;
-        };
-        // A source-backed segment can be materialized as a temporary layer
-        // before deletion. Captions previously owned by that layer are
-        // independent timeline items; clear the stale source link before the
-        // remapper runs, otherwise it archives and removes every word whose
-        // owner was just deleted.
-        for (const caption of state.captions || []) detachCaptionOwner(caption);
-        for (const caption of state.reviewCaptions || []) detachCaptionOwner(caption);
-        for (const record of state.captionRecoveryArchive || []) {
-          if (!detachCaptionOwner(record?.caption)) continue;
-          if (record.word) {
-            delete record.word.sourceStart;
-            delete record.word.sourceEnd;
-          }
+        const deletedMediaScopes = [
+          ...selectedMediaScopes,
+          ...removedMedia.map(object => ({ownerClipId:object.id,
+            sourceMediaId:object.sourceMediaId||object.path||state.video?.path||'',
+            sourceStart:isTime(object.sourceStart)?Number(object.sourceStart):null,
+            sourceEnd:isTime(object.sourceEnd)?Number(object.sourceEnd):null,
+            start:isTime(object.start)?Number(object.start):null,
+            end:isTime(object.end)?Number(object.end):null})),
+          ...selectedMainClips.map(clip => ({ownerClipId:clip.id,sourceMediaId:state.video?.path||'',
+            sourceStart:isTime(clip.sourceStart)?Number(clip.sourceStart):null,
+            sourceEnd:isTime(clip.sourceEnd)?Number(clip.sourceEnd):null,
+            start:isTime(clip.start)?Number(clip.start):null,
+            end:isTime(clip.end)?Number(clip.end):null})),
+        ];
+        const mediaCaptionDeletion=planTimelineCaptionDeletion(state.captions||[],{
+          ownerClipIds:[...deletedMediaOwnerIds],ranges:deletedMediaScopes,
+          selectedCaptionIds:[...selectedCaptionIds],
+        },{lockedTracks:state.trackLocks||{},joinWords:words=>joinCaptionWords(words)});
+        const plannedCaptions=mediaCaptionDeletion.captions;
+        if(hasCaptionText&&!plannedCaptions.some(caption=>(caption.words||[]).length||String(caption.text||'').trim())){
+          state.undo.splice(undoLengthBefore);state.redo=redoBefore;
+          applyHistoryState(JSON.parse(beforeDelete));
+          toast('此次删除会清空全部文案，已取消操作以保护工程');
+          return;
         }
+        state.captions=mediaCaptionDeletion.captions;
+        const archiveRecords=state.captionRecoveryArchive||[];
+        const archiveEntries=archiveRecords.map((record,index)=>{
+          const caption=record?.caption||{},word=record?.word;
+          return {id:String(index),trackId:caption.trackId||'caption',ownerClipId:caption.ownerClipId||'',
+            sourceMediaId:word?.sourceMediaId||caption.sourceMediaId||'',
+            sourceStart:word?.sourceStart??caption.sourceStart,sourceEnd:word?.sourceEnd??caption.sourceEnd,
+            start:word?.start??caption.start,end:word?.end??caption.end,
+            words:word?[word]:[],text:word?.display||caption.text||''};
+        });
+        const archiveDeletion=planMediaCaptionDeletion(archiveEntries,{
+          ownerClipIds:[...deletedMediaOwnerIds],ranges:deletedMediaScopes,
+        },{lockedTracks:{},joinWords:words=>joinCaptionWords(words)});
+        const keptArchiveIndexes=new Set(archiveDeletion.captions.map(entry=>Number(entry.id)));
+        state.captionRecoveryArchive=archiveRecords.filter((record,index)=>
+          keptArchiveIndexes.has(index)&&!selectedCaptionIds.has(record?.caption?.id));
         for (const clip of removedMedia) dismissTrimmedIssues(clip.start, clip.end, removedOwners);
         const keep = (type) => (item) => !ids(type).has(item.id);
         state.videoLayers = state.videoLayers.filter((item) => !layerIds.has(item.id));
@@ -797,9 +838,10 @@
         state.titles = state.titles.filter(keep("text"));
         if(state.autoTranscript){
           state.autoTranscript.deletedSources ||= [];
-          for(const caption of state.captions.filter(c=>requested.some(item=>item.type==='caption' && item.id===c.id)))for(const word of caption.words||[]){
-            if(Number.isFinite(word.sourceStart)&&Number.isFinite(word.sourceEnd))state.autoTranscript.deletedSources.push({sourceMediaId:caption.sourceMediaId||state.video?.path,ownerClipId:caption.ownerClipId,mainSource:/^[av]-/.test(caption.ownerClipId||''),sourceStart:word.sourceStart,sourceEnd:word.sourceEnd});
-          }
+          for(const {caption,word} of mediaCaptionDeletion.removedWords)if(isTime(word.sourceStart)&&isTime(word.sourceEnd))
+            state.autoTranscript.deletedSources.push({sourceMediaId:caption.sourceMediaId||state.video?.path,
+              ownerClipId:caption.ownerClipId,mainSource:/^[av]-/.test(caption.ownerClipId||''),
+              sourceStart:word.sourceStart,sourceEnd:word.sourceEnd});
         }
         state.captions = state.captions.filter(keep("caption"));
         state.captionRecoveryArchive = (state.captionRecoveryArchive || []).filter((record) => !ids("caption").has(record?.caption?.id));
@@ -812,11 +854,9 @@
           }
           for(const hole of ranges.reverse())applyEditRipple(hole.end,hole.start-hole.end,[],overlayHoles.filter(x=>x.start<hole.end&&x.end>hole.start).map(x=>x.trackId),{onlyTargetTracks:captionOnly});
         }
-        if (!captionOnly) remapCaptionsFromSource(mainClips());
         if (removeWholeMain) clearOrPromoteMainVideo();
         if (selectedMainClips.length) {
           normalizeRemovals();
-          remapCaptionsFromSource(mainClips());
           const packed = baseMainClips();
           const rippleFrom = selectedMainClips.reduce(
             (min, clip) => Math.min(min, Number(clip.start || 0)),

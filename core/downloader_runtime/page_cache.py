@@ -5,7 +5,9 @@ import re
 import unicodedata
 import phonenumbers
 from datetime import datetime
+from html.parser import HTMLParser
 from pathlib import Path
+from app_settings import canva_page_cache_fallback_path, global_template_fallback_path
 
 
 def english_brackets(text):
@@ -54,6 +56,23 @@ def format_phone(text):
         if phonenumbers.is_possible_number(parsed) and re.sub(r'\D','',output)==re.sub(r'\D','',clean):return output
     except phonenumbers.NumberParseException:pass
     return clean
+
+
+def template_footer_with_phone(text, phone, previous_phone=''):
+    """Keep a saved template's editable phone field present in its copy text."""
+    footer=normalize_contacts(str(text or '').strip())
+    phone=format_phone(str(phone or '').strip())
+    if not footer:raise ValueError('引流文案不能为空')
+    if not re.fullmatch(r'\+\s*\d[\d ()\-]{6,}\d',phone):
+        raise ValueError('模板号码请包含国家区号，例如 +33 6 12 34 56 78')
+    if previous_phone and previous_phone in footer:
+        return footer.replace(previous_phone,phone,1)
+    numbers=list(re.finditer(PHONE_PATTERN,footer))
+    if len(numbers)>1:raise ValueError('引流文案中有多个联系电话，请保留一个号码')
+    if numbers:
+        match=numbers[0]
+        return footer[:match.start()]+phone+footer[match.end():]
+    return f'{footer.rstrip()}\n{phone}'
 
 
 def format_phone_like(existing,text):
@@ -110,6 +129,48 @@ def phone_warnings(text):
     return warnings
 
 
+class _TemplateAuditParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.in_template_one = False
+        self.in_pre = False
+        self.parts = []
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        if tag == 'article' and attributes.get('id') == 'template-1':
+            self.in_template_one = True
+        elif self.in_template_one and tag == 'pre' and not self.parts:
+            self.in_pre = True
+
+    def handle_endtag(self, tag):
+        if tag == 'pre' and self.in_pre:
+            self.in_pre = False
+        elif tag == 'article' and self.in_template_one:
+            self.in_template_one = False
+
+    def handle_data(self, data):
+        if self.in_template_one and self.in_pre:
+            self.parts.append(data)
+
+
+def _bootstrap_cache_from_audit_html(path):
+    audit = Path(path).with_name('Canva本地页面信息.html')
+    if not audit.is_file():
+        return None
+    parser = _TemplateAuditParser()
+    try:
+        parser.feed(audit.read_text(encoding='utf-8'))
+    except (OSError, UnicodeError):
+        return None
+    footer = ''.join(parser.parts).strip()
+    if not footer:
+        return None
+    return {'checked_at': datetime.now().isoformat(timespec='seconds'), 'page_count': 1,
+            'pages': [{'page_number': 1, 'page_name': '模板 1',
+                       'text_elements': [{'type': 'TEXT', 'role': 'LOCAL_FOOTER', 'text': footer}]}]}
+
+
 def normalize_cache(data):
     for page in data.get('pages',[]):
         for element in page.get('text_elements',[]):
@@ -117,18 +178,61 @@ def normalize_cache(data):
     return data
 
 
+def read_cache(path):
+    source = Path(path)
+    fallback = canva_page_cache_fallback_path() if source.name == 'canva-page-audit.json' else None
+    candidates = [source]
+    if fallback is not None and fallback != source:
+        candidates.append(fallback)
+    readable = []
+    parse_errors = []
+    for candidate in candidates:
+        try:
+            data = json.loads(candidate.read_text(encoding='utf-8'))
+            readable.append((candidate.stat().st_mtime_ns, data))
+        except (FileNotFoundError, PermissionError):
+            continue
+        except json.JSONDecodeError as exc:
+            parse_errors.append(exc)
+    if readable:
+        return normalize_cache(max(readable, key=lambda item: item[0])[1])
+    if parse_errors:
+        raise parse_errors[0]
+    data = _bootstrap_cache_from_audit_html(source)
+    if data is None:
+        return json.loads(source.read_text(encoding='utf-8'))
+    try:
+        write_cache(source, data)
+    except PermissionError:
+        pass
+    return normalize_cache(data)
+
+
+def resolved_cache_path(path):
+    source = Path(path)
+    fallback = canva_page_cache_fallback_path() if source.name == 'canva-page-audit.json' else None
+    candidates = [candidate for candidate in (source, fallback) if candidate is not None and candidate.is_file()]
+    if candidates:
+        return max(candidates, key=lambda candidate: candidate.stat().st_mtime_ns)
+    read_cache(source)
+    candidates = [candidate for candidate in (source, fallback) if candidate is not None and candidate.is_file()]
+    return max(candidates, key=lambda candidate: candidate.stat().st_mtime_ns) if candidates else source
+
+
 def save_page_name(path,number,name):
-    name=name.strip()
-    if not name:raise ValueError('页面名称不能为空')
-    data=normalize_cache(json.loads(Path(path).read_text(encoding='utf-8')))
-    page=next(page for page in data['pages'] if page['page_number']==int(number))
+    name=' '.join(str(name or '').split())
+    if not name:raise ValueError('模板名称不能为空')
+    if len(name)>48:raise ValueError('模板名称不能超过 48 个字符')
+    data=read_cache(path)
+    page=next((page for page in data['pages'] if page['page_number']==int(number)),None)
+    if page is None:raise ValueError('找不到要重命名的模板')
     page['page_name']=name;write_cache(path,data)
 
 
 def save_page_content(path,number,text):
     text=normalize_contacts(text.strip())
     if not text:raise ValueError('页面内容不能为空')
-    data=normalize_cache(json.loads(Path(path).read_text(encoding='utf-8')))
+    data=read_cache(path)
     page=next(page for page in data['pages'] if page['page_number']==int(number))
     original=[element for element in page['text_elements'] if element.get('text','').strip()]
     paragraphs=re.split(r'\n[ \t]*\n',text)
@@ -146,7 +250,7 @@ def save_page_content(path,number,text):
 def save_footer(path,number,text):
     text=normalize_contacts(text.strip())
     if not text:raise ValueError('下方文案不能为空')
-    data=normalize_cache(json.loads(Path(path).read_text(encoding='utf-8')))
+    data=read_cache(path)
     page=next(page for page in data['pages'] if page['page_number']==int(number))
     footers=[element for element in page['text_elements'] if 'Message us on' in element.get('text','') or element.get('role')=='LOCAL_FOOTER']
     if not footers:
@@ -157,7 +261,7 @@ def save_footer(path,number,text):
 
 
 def read_pages(path):
-    data = normalize_cache(json.loads(Path(path).read_text(encoding='utf-8')))
+    data = read_cache(path)
     pages = {}
     for page in data['pages']:
         number = int(page['page_number'])
@@ -170,12 +274,13 @@ def read_pages(path):
 def anonymize_template_names(path):
     """Remove person identities left by the former person-to-page workflow."""
     source=Path(path)
-    data=normalize_cache(json.loads(source.read_text(encoding='utf-8')))
+    data=read_cache(source)
     changed=False
     pages=sorted(data.get('pages',[]),key=lambda page:int(page['page_number']))
     for position,page in enumerate(pages,1):
         label=f'模板 {position}'
-        if page.get('page_name')!=label:
+        has_legacy_identity=any(page.get(key) for key in ('local_person','local_title'))
+        if has_legacy_identity and page.get('page_name')!=label:
             page['page_name']=label;changed=True
         for key in ('local_person','local_title'):
             if key in page:
@@ -188,15 +293,90 @@ def ordered_page_numbers(pages):
     return sorted(pages)
 
 
-def page_number_for_position(pages, position):
-    """Resolve the only supported traffic template to its local design page."""
+def language_template_numbers(pages):
+    """Return the English source template and any explicitly created language copies."""
+    ordered = ordered_page_numbers(pages)
+    source = next((number for number in ordered if not pages[number].get('template_language')), None)
+    copies = [number for number in ordered if pages[number].get('template_language')]
+    return ([source] if source is not None else []) + copies
+
+
+def page_number_for_position(pages, position, language_code='en'):
+    """Resolve template 1 to the selected language's saved copy."""
     try:
         position=int(position)
     except (TypeError, ValueError):
         raise ValueError('请输入模板编号')
-    ordered=ordered_page_numbers(pages)
-    if position != 1 or not ordered:raise ValueError('目前仅保留模板 1')
-    return ordered[0]
+    if position != 1:
+        raise ValueError('目前仅保留模板 1')
+    language_code = str(language_code or 'en').strip() or 'en'
+    copies = [number for number in ordered_page_numbers(pages)
+              if pages[number].get('template_language') == language_code]
+    if copies:
+        return copies[0]
+    if language_code == 'en':
+        source = next((number for number in ordered_page_numbers(pages)
+                       if not pages[number].get('template_language')), None)
+        if source is not None:
+            return source
+    language_names = {
+        'fr': '法语', 'es': '西班牙语', 'pt': '葡萄牙语', 'de': '德语',
+        'it': '意大利语', 'nl': '荷兰语', 'ar': '阿拉伯语', 'ja': '日语',
+        'ko': '韩语', 'hi': '印地语', 'id': '印度尼西亚语', 'vi': '越南语',
+        'th': '泰语', 'fil': '菲律宾语', 'ru': '俄语', 'zh-Hans': '简体中文',
+        'zh-Hant': '繁体中文',
+    }
+    raise ValueError(f'还没有{language_names.get(language_code, language_code)}引流模板。请先在“引流模板”中从英语模板复制新建。')
+
+
+def duplicate_language_template(path, source_number, language_code, language_name, style=None,
+                               footer=None, phone=None):
+    """Clone a complete page, then give its copy independent text, phone, and style."""
+    language_code = str(language_code or '').strip()
+    language_name = ' '.join(str(language_name or '').split())
+    if not language_code or language_code == 'en' or not language_name:
+        raise ValueError('请选择英语以外的模板语种。')
+    data = read_cache(path)
+    if any(page.get('template_language') == language_code for page in data.get('pages', [])):
+        raise ValueError(f'已存在{language_name}模板。')
+    original = next((page for page in data['pages']
+                     if int(page['page_number']) == int(source_number)), None)
+    if original is None:
+        raise ValueError('找不到英语模板，无法复制。')
+    number = max(data.get('next_page_number', 1),
+                 max((int(page['page_number']) for page in data['pages']), default=0) + 1)
+    duplicate = copy.deepcopy(original)
+    duplicate.update(
+        page_number=number,
+        page_name=f'模板 1 · {language_name}',
+        origin='local-copy',
+        copied_from=int(source_number),
+        template_language=language_code,
+    )
+    effective = style if style is not None else (original.get('local_style') or read_style(path))
+    duplicate['local_style'] = style_snapshot(effective or {})
+    if footer is not None:
+        footer = normalize_contacts(str(footer).strip())
+        if not footer:
+            raise ValueError('复制模板需要先填写引流文案。')
+        if phone is not None:
+            _,source_phone=page_footer(duplicate)
+            footer=template_footer_with_phone(footer,phone,source_phone)
+        footer_elements = [element for element in duplicate.get('text_elements', [])
+                           if 'Message us on' in element.get('text', '') or element.get('role') == 'LOCAL_FOOTER']
+        if footer_elements:
+            footer_elements[0]['text'] = footer
+            footer_elements[0]['role'] = 'LOCAL_FOOTER'
+            for element in footer_elements[1:]:
+                element['text'] = ''
+        else:
+            duplicate.setdefault('text_elements', []).append(
+                {'type': 'TEXT', 'role': 'LOCAL_FOOTER', 'text': footer})
+    data['pages'].append(duplicate)
+    data['next_page_number'] = number + 1
+    data['page_count'] = len(data['pages'])
+    write_cache(path, data)
+    return number
 
 
 def page_text(page):
@@ -279,18 +459,47 @@ def page_design(pages, number, theme='白天', layout='自动', style=None, phon
 def write_cache(path, data):
     data=normalize_cache(data)
     source = Path(path)
-    backups = source.parent / 'page_cache_backups'
-    backups.mkdir(exist_ok=True)
-    if source.exists():
-        (backups / f'{source.stem}-{datetime.now():%Y%m%d-%H%M%S-%f}.json').write_bytes(source.read_bytes())
-    temporary = source.with_suffix('.json.tmp')
-    temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
-    temporary.replace(source)
+
+    def write_to(target):
+        backups = target.parent / 'page_cache_backups'
+        backups.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            (backups / f'{target.stem}-{datetime.now():%Y%m%d-%H%M%S-%f}.json').write_bytes(target.read_bytes())
+        temporary = target.with_suffix('.json.tmp')
+        temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+        try:
+            temporary.replace(target)
+        except Exception:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+
+    try:
+        write_to(source)
+    except PermissionError:
+        fallback = canva_page_cache_fallback_path() if source.name == 'canva-page-audit.json' else None
+        if fallback is None or fallback.resolve() == source.resolve():
+            raise
+        write_to(fallback)
 
 
 def read_style(path):
     source = Path(path).with_name('global-template.json')
-    return json.loads(source.read_text(encoding='utf-8')) if source.exists() else {}
+    fallback = global_template_fallback_path()
+    candidates = [source]
+    if fallback is not None and fallback != source:
+        candidates.append(fallback)
+    readable = []
+    for priority, candidate in enumerate(candidates):
+        try:
+            value = json.loads(candidate.read_text(encoding='utf-8'))
+            modified = candidate.stat().st_mtime_ns
+        except (FileNotFoundError, PermissionError):
+            continue
+        readable.append((modified, -priority, value))
+    return max(readable, key=lambda item: (item[0], item[1]))[2] if readable else {}
 
 
 def style_snapshot(style):
@@ -301,13 +510,21 @@ def style_snapshot(style):
 
 
 def save_style(path,style):
-    write_cache(Path(path).with_name('global-template.json'),style_snapshot(style))
+    source=Path(path).with_name('global-template.json')
+    snapshot=style_snapshot(style)
+    try:
+        write_cache(source,snapshot)
+    except PermissionError:
+        fallback=global_template_fallback_path()
+        if fallback is None or fallback.resolve()==source.resolve():raise
+        fallback.parent.mkdir(parents=True,exist_ok=True)
+        write_cache(fallback,snapshot)
 
 
 def duplicate_page(path,source_number,name,style=None):
     name=name.strip()
     if not name:raise ValueError('新页面名称不能为空')
-    data=normalize_cache(json.loads(Path(path).read_text(encoding='utf-8')))
+    data=read_cache(path)
     original=next(page for page in data['pages'] if page['page_number']==int(source_number))
     number=max(data.get('next_page_number',1),max((page['page_number'] for page in data['pages']),default=0)+1)
     duplicate=copy.deepcopy(original)
@@ -328,7 +545,7 @@ def duplicate_page_for_task(path, person, title, phone, style=None, source_numbe
     if not re.fullmatch(r'\+\s*\d[\d ()\-]{6,}\d', phone):
         raise ValueError('页面资料缺失时，请填写含国家区号的号码，例如 +1 (868) 372-2347')
 
-    data = normalize_cache(json.loads(Path(path).read_text(encoding='utf-8')))
+    data = read_cache(path)
     pages = {int(page['page_number']): page for page in data['pages']}
     candidates = []
     if source_number is not None and int(source_number) in pages:
@@ -381,14 +598,14 @@ def duplicate_page_for_task(path, person, title, phone, style=None, source_numbe
 
 
 def save_local_style(path,number,style):
-    data=normalize_cache(json.loads(Path(path).read_text(encoding='utf-8')))
+    data=read_cache(path)
     page=next(page for page in data['pages'] if page['page_number']==int(number))
     page['local_style']=style_snapshot(style)
     write_cache(path,data)
 
 
 def add_page(path):
-    data = normalize_cache(json.loads(Path(path).read_text(encoding='utf-8')))
+    data = read_cache(path)
     # Never reuse a removed number; stale download rows cannot target another person.
     number = max(data.get('next_page_number', 1), max((p['page_number'] for p in data['pages']), default=0) + 1)
     data['pages'].append({'page_number':number, 'page_name':'新页面', 'origin':'local',
@@ -400,7 +617,7 @@ def add_page(path):
 
 
 def delete_page(path, number):
-    data = normalize_cache(json.loads(Path(path).read_text(encoding='utf-8')))
+    data = read_cache(path)
     data['next_page_number'] = max(data.get('next_page_number', 1), max((p['page_number'] for p in data['pages']), default=0)+1)
     original_count = len(data['pages'])
     data['pages'] = [p for p in data['pages'] if p['page_number'] != int(number)]
@@ -414,7 +631,7 @@ def save_page(path, number, name, phone):
     phone = format_phone(phone.strip())
     if not re.fullmatch(r'\+\s*\d[\d ()\-]{6,}\d', phone):
         raise ValueError('请输入带 + 国家区号的电话号码')
-    data = normalize_cache(json.loads(Path(path).read_text(encoding='utf-8')))
+    data = read_cache(path)
     page = next(p for p in data['pages'] if p['page_number'] == int(number))
     page['page_name'] = name.strip()
     footers = [e for e in page['text_elements'] if 'Message us on' in e.get('text','') or e.get('role')=='LOCAL_FOOTER']
@@ -433,8 +650,7 @@ def save_phone(path, number, phone):
     if not re.fullmatch(r'\+\s*\d[\d ()\-]{6,}\d', phone):
         raise ValueError('请输入带 + 国家区号的电话号码；可保留空格、括号和横线')
     source = Path(path)
-    original = source.read_text(encoding='utf-8')
-    data = normalize_cache(json.loads(original))
+    data = read_cache(source)
     page = next((p for p in data['pages'] if p['page_number'] == int(number)), None)
     if page is None:
         raise ValueError('页码不存在')
@@ -442,9 +658,4 @@ def save_phone(path, number, phone):
     for element in page['text_elements']:
         if 'Message us on' in element.get('text', '') or element.get('role')=='LOCAL_FOOTER':
             element['text'] = element['text'].replace(old_phone, phone, 1)
-    backups = source.parent / 'page_cache_backups'
-    backups.mkdir(exist_ok=True)
-    (backups / f'{source.stem}-{datetime.now():%Y%m%d-%H%M%S-%f}.json').write_text(original, encoding='utf-8')
-    temporary = source.with_suffix('.json.tmp')
-    temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
-    temporary.replace(source)
+    write_cache(source, data)

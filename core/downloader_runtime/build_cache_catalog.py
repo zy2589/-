@@ -23,20 +23,23 @@ def build(source, target):
         if len(footers) != 1:
             notes.append('固定联系文案不是唯一一段，请人工核对')
         body = ''.join('<pre>' + html.escape(t) + '</pre>' for t in footers)
-        cards.append(f'<article id="template-{position}"><h2>模板 {position}</h2>'
+        name=' '.join(str(page.get('page_name') or '').split()) or f'模板 {position}'
+        language=str(page.get('template_language') or 'en')
+        cards.append(f'<article id="template-{position}"><h2>{html.escape(name)}</h2>'
+                     f'<p>语种：{html.escape(language)}</p>'
                      f'<p>联系电话：{html.escape("；".join(phones) or "未识别")}</p>'
                      f'<p class="note">{html.escape("；".join(notes))}</p>{body}</article>')
-    header = f'共 1 个模板 · 记录日期：{html.escape(str(data.get("checked_at", "未记录")))}'
+    header = f'共 {len(pages)} 个模板 · 记录日期：{html.escape(str(data.get("checked_at", "未记录")))}'
     document = '''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>引流模板信息</title>
 <style>body{font:16px "Microsoft YaHei",sans-serif;margin:24px auto;max-width:960px;padding:0 20px;background:#f5f6f8;color:#222}article{background:white;padding:18px 24px;margin:16px 0;border-radius:10px}pre{white-space:pre-wrap;font:inherit;line-height:1.7;border-top:1px solid #eee;padding-top:12px}.note{color:#945800}input{padding:10px;width:90%;font:inherit}h2{margin-top:0}</style>
-<h1>引流模板信息</h1><p>''' + header + '''</p><p>当前仅保留模板 1。这里显示本机保存的引流文案和号码。</p>
+<h1>引流模板信息</h1><p>''' + header + '''</p><p>这里显示本机保存的引流文案和号码。</p>
 <input placeholder="搜索模板编号、电话号码或文字" oninput="document.querySelectorAll('article').forEach(a=>a.hidden=!a.innerText.toLowerCase().includes(this.value.toLowerCase()))">
 ''' + ''.join(cards) + '</html>'
     Path(target).write_text(document, encoding='utf-8')
-    paragraphs = ['# 引流模板信息', header, '当前仅保留模板 1。']
-    if pages:
-        paragraphs.append('## 模板 1')
-        paragraphs.extend(e['text'].strip() for e in pages[0]['text_elements'] if e.get('text','').strip() and ('Message us on' in e.get('text','') or e.get('role')=='LOCAL_FOOTER'))
+    paragraphs = ['# 引流模板信息', header]
+    for position,page in enumerate(pages,1):
+        paragraphs.append(f"## {' '.join(str(page.get('page_name') or '').split()) or f'模板 {position}'}")
+        paragraphs.extend(e['text'].strip() for e in page['text_elements'] if e.get('text','').strip() and ('Message us on' in e.get('text','') or e.get('role')=='LOCAL_FOOTER'))
     Path(target).with_suffix('.md').write_text('\n\n'.join(paragraphs) + '\n', encoding='utf-8')
     return len(pages)
 

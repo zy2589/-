@@ -20,6 +20,22 @@ def settings_location():
     return directory / 'settings.json'
 
 
+def global_template_fallback_path():
+    """Store only the shared visual style in writable per-user app data if Documents is blocked."""
+    local_app_data = os.environ.get('LOCALAPPDATA')
+    if not local_app_data:
+        return None
+    return Path(local_app_data) / 'ClipAssistant' / 'Downloader' / 'global-template.json'
+
+
+def canva_page_cache_fallback_path():
+    """Store the private page cache in writable per-user data when Documents is protected."""
+    local_app_data = os.environ.get('LOCALAPPDATA')
+    if not local_app_data:
+        return None
+    return Path(local_app_data) / 'ClipAssistant' / 'Downloader' / 'canva-page-audit.json'
+
+
 def seed_user_data(data_directory, bundle_directory):
     """Seed bundled defaults and user-approved initial preferences once."""
     data_directory=Path(data_directory)
@@ -34,8 +50,15 @@ def seed_user_data(data_directory, bundle_directory):
         source=preferred if preferred.exists() else bundle_directory/name
         target=data_directory/name
         if not source.exists() or target.exists():continue
-        if source.is_dir():shutil.copytree(source,target)
-        elif source.is_file():shutil.copy2(source,target)
+        try:
+            if source.is_dir():shutil.copytree(source,target)
+            elif source.is_file():shutil.copy2(source,target)
+        except PermissionError:
+            if name != 'global-template.json':raise
+            fallback=global_template_fallback_path()
+            if fallback is None:raise
+            fallback.parent.mkdir(parents=True,exist_ok=True)
+            if not fallback.exists():shutil.copy2(source,fallback)
 
 
 def rebase_local_fonts(data_directory, bundle_directory):

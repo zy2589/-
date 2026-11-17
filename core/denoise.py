@@ -124,10 +124,14 @@ def denoise_video(
     video = Path(video)
     ffmpeg = resource_dir / "ffmpeg" / "ffmpeg.exe"
     ffprobe = resource_dir / "ffmpeg" / "ffprobe.exe"
-    bundle = resource_dir / "denoise-dpdfnet"
-    denoiser = bundle / "sherpa-onnx-offline-denoiser.exe"
-    model = bundle / "dpdfnet2_48khz_hr.onnx"
-    for required in (ffmpeg, ffprobe, denoiser, model):
+    # Packaged builds stage the shared executable at the resource root.
+    # Development checkouts keep it with the editor runtime assets.
+    denoiser = next((candidate for candidate in (
+        resource_dir / "deep-filter.exe",
+        resource_dir / "editor-runtime" / "deep-filter.exe",
+        Path(__file__).resolve().parent.parent / "resources" / "editor-runtime" / "deep-filter.exe",
+    ) if candidate.is_file()), resource_dir / "deep-filter.exe")
+    for required in (ffmpeg, ffprobe, denoiser):
         if not required.is_file():
             raise RuntimeError(f"降噪运行文件缺失：{required.name}")
 
@@ -135,7 +139,8 @@ def denoise_video(
     mux_channels = max(1, min(2, int(output_channels or channels)))
     mux_sample_rate = max(8_000, int(output_sample_rate or SAMPLE_RATE))
     strength = max(0, min(100, int(strength_percent))) / 100.0
-    attenuation_db = 6.0 + 30.0 * strength
+    # Keep the strength curve identical to the editor's DeepFilterNet panel.
+    attenuation_db = round(10.0 + 90.0 * strength)
     final_suffix = video.suffix.lower()
     if final_suffix not in {".mp4", ".m4v", ".mov", ".mkv", ".webm"}:
         final_suffix = ".mkv"
@@ -143,8 +148,6 @@ def denoise_video(
 
     work = Path(tempfile.mkdtemp(prefix=".clipassistant-", dir=video.parent))
     try:
-        local_model = work / "model.onnx"
-        shutil.copy2(model, local_model)
         normalized = work / "source.wav"
         _run(
             [
@@ -185,11 +188,11 @@ def denoise_video(
                 input_end = min(total_frames, end + CONTEXT_FRAMES)
                 trim_start = WARMUP_FRAMES + start - input_start
                 part_name = f"input-{channel}-{chunk_index}.wav"
-                enhanced_name = f"enhanced-{channel}-{chunk_index}.wav"
                 clean_name = f"clean-{channel}-{chunk_index}.wav"
                 part = work / part_name
-                enhanced = work / enhanced_name
                 clean = work / clean_name
+                enhanced_dir = work / f"enhanced-{channel}-{chunk_index}"
+                enhanced_dir.mkdir()
 
                 start_seconds = input_start / SAMPLE_RATE
                 input_seconds = (input_end - input_start) / SAMPLE_RATE
@@ -199,7 +202,7 @@ def denoise_video(
                         "-ss", f"{start_seconds:.9f}", "-t", f"{input_seconds:.9f}",
                         "-i", str(channel_path), "-af",
                         # Keep extra context after the requested segment so
-                        # the denoiser's final analysis window cannot shorten
+                        # the model's final analysis window cannot shorten
                         # aligned audio at a chunk or file boundary.
                         f"adelay={WARMUP_FRAMES}S:all=1,apad=pad_len={WARMUP_FRAMES + CONTEXT_FRAMES}",
                         "-c:a", "pcm_s16le", str(part),
@@ -208,23 +211,23 @@ def denoise_video(
                 if progress:
                     percent = int((chunk_index + 1) * 100 / chunk_count)
                     progress(f"降噪中 {percent}% · 声道 {channel + 1}/{actual_channels}")
-                _run(
-                    [
-                        str(denoiser),
-                        "--speech-denoiser-dpdfnet-model=model.onnx",
-                        f"--speech-denoiser-dpdfnet-attenuation-limit-db={attenuation_db:.3f}",
-                        "--num-threads=1", "--provider=cpu", "--print-args=false",
-                        f"--input-wav={part_name}", f"--output-wav={enhanced_name}",
-                    ],
-                    cwd=work,
-                    cancel=cancel,
-                )
+                denoiser_args = [
+                    str(denoiser), "--output-dir", str(enhanced_dir),
+                    "--atten-lim-db", str(attenuation_db), "--compensate-delay",
+                ]
+                if strength >= 0.65:
+                    denoiser_args.append("--pf")
+                denoiser_args.append(str(part))
+                _run(denoiser_args, cwd=work, cancel=cancel)
+                enhanced = next(enhanced_dir.glob("*.wav"), None)
+                if enhanced is None or not enhanced.is_file():
+                    raise RuntimeError("DeepFilterNet 输出文件缺失，未替换原视频")
                 output_frames = end - start
                 required_end = trim_start + output_frames
                 enhanced_info = _wave_info(enhanced)
                 if enhanced_info[:2] != (1, SAMPLE_RATE):
                     raise RuntimeError("降噪器输出格式异常，未替换原视频")
-                # Some DPDFNet builds return a few fewer samples at the final
+                # Some DeepFilterNet builds return a few fewer samples at the final
                 # analysis window even with right-side context. Only tolerate
                 # a small boundary deficit; pad that tail before trimming so
                 # every chunk remains exactly aligned to the source sample grid.

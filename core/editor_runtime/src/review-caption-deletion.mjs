@@ -199,6 +199,139 @@ export function planReviewCaptionDeletion(captions, reviews, {
   return result;
 }
 
+function sourceScopeMatches(scope, item, allowUnknownMedia = false) {
+  const scopeMedia = String(scope?.sourceMediaId || '');
+  const itemMedia = String(item?.sourceMediaId || '');
+  const mediaMatches = allowUnknownMedia
+    ? true
+    : !!scopeMedia && !!itemMedia && scopeMedia === itemMedia;
+  return mediaMatches &&
+    isTime(scope?.sourceStart) && isTime(scope?.sourceEnd) && Number(scope.sourceEnd) > Number(scope.sourceStart);
+}
+
+function sourceWordOverlaps(scope, caption, word, allowUnknownMedia = false) {
+  const hasTimelineRange = [scope?.start, scope?.end, word?.start, word?.end].every(isTime);
+  const timelineMatches = hasTimelineRange
+    ? rangesOverlap(Number(scope.start), Number(scope.end), Number(word.start), Number(word.end))
+    : allowUnknownMedia;
+  return timelineMatches && sourceScopeMatches(scope, caption, allowUnknownMedia) && isTime(word?.sourceStart) && isTime(word?.sourceEnd) &&
+    Number(word.sourceEnd) > Number(word.sourceStart) &&
+    rangesOverlap(Number(scope.sourceStart), Number(scope.sourceEnd), Number(word.sourceStart), Number(word.sourceEnd));
+}
+
+function sourceCaptionCovered(scope, caption, allowUnknownMedia = false) {
+  const hasTimelineRange = [scope?.start, scope?.end, caption?.start, caption?.end].every(isTime);
+  const timelineCovered = hasTimelineRange
+    ? Number(caption.start) >= Number(scope.start) - 0.005 && Number(caption.end) <= Number(scope.end) + 0.005
+    : allowUnknownMedia;
+  return timelineCovered && sourceScopeMatches(scope, caption, allowUnknownMedia) && isTime(caption?.sourceStart) && isTime(caption?.sourceEnd) &&
+    Number(caption.sourceEnd) > Number(caption.sourceStart) &&
+    Number(caption.sourceStart) >= Number(scope.sourceStart) - 0.005 &&
+    Number(caption.sourceEnd) <= Number(scope.sourceEnd) + 0.005;
+}
+
+/** Remove only caption words owned by deleted media or precisely mapped to its source interval. */
+export function planMediaCaptionDeletion(captions, {
+  ownerClipIds = [],
+  ranges = [],
+} = {}, {
+  lockedTracks = {},
+  joinWords = words => words.map(word => word.display || word.text || '').filter(Boolean).join(' '),
+} = {}) {
+  const owners = new Set(ownerClipIds.map(id => String(id || '')).filter(Boolean));
+  const scopes = (Array.isArray(ranges) ? ranges : []).filter(scope =>
+    isTime(scope?.sourceStart) && isTime(scope?.sourceEnd) && Number(scope.sourceEnd) > Number(scope.sourceStart));
+  const result = { captions: [], removedCaptionIds: new Set(), removedWords: [] };
+  for (const caption of Array.isArray(captions) ? captions : []) {
+    if (lockedTracks[caption.trackId || 'caption']) {
+      result.captions.push(caption);
+      continue;
+    }
+    const ownerId = String(caption.ownerClipId || '');
+    const ownerMatched = !!ownerId && owners.has(ownerId);
+    const ownScopes = scopes.filter(scope => String(scope.ownerClipId || '') === ownerId);
+    const words = Array.isArray(caption.words) ? caption.words : [];
+    if (words.length) {
+      let changed = false;
+      const remaining = [];
+      for (const word of words) {
+        const exactSourceScopes = (ownerMatched && ownScopes.length ? ownScopes : scopes)
+          .filter(scope => sourceWordOverlaps(scope, caption, word, ownerMatched));
+        const sourceScoped = !ownerId && exactSourceScopes.length > 0;
+        const ownerScoped = ownerMatched && (exactSourceScopes.length > 0 ||
+          !isTime(word?.sourceStart) || !isTime(word?.sourceEnd) || !ownScopes.length);
+        if (!sourceScoped && !ownerScoped) {
+          remaining.push(word);
+          continue;
+        }
+        changed = true;
+        result.removedWords.push({ captionId: caption.id, caption, word });
+      }
+      if (!changed) {
+        result.captions.push(caption);
+        continue;
+      }
+      if (!remaining.length) {
+        result.removedCaptionIds.add(caption.id);
+        continue;
+      }
+      const updated = { ...caption, words: remaining, text: joinWords(remaining) };
+      const timed = remaining.filter(word => isTime(word.start) && isTime(word.end) && Number(word.end) > Number(word.start));
+      if (timed.length) {
+        updated.start = Math.min(...timed.map(word => Number(word.start)));
+        updated.end = Math.max(...timed.map(word => Number(word.end)));
+      }
+      const sourceTimed = remaining.filter(word => isTime(word.sourceStart) && isTime(word.sourceEnd) && Number(word.sourceEnd) > Number(word.sourceStart));
+      if (sourceTimed.length === remaining.length) {
+        updated.sourceStart = Math.min(...sourceTimed.map(word => Number(word.sourceStart)));
+        updated.sourceEnd = Math.max(...sourceTimed.map(word => Number(word.sourceEnd)));
+      } else {
+        delete updated.sourceStart;
+        delete updated.sourceEnd;
+      }
+      result.captions.push(updated);
+      continue;
+    }
+    const removeBlock = ownerMatched
+      ? !isTime(caption.sourceStart) || !isTime(caption.sourceEnd) ||
+        ownScopes.some(scope => sourceCaptionCovered(scope, caption, true))
+      : !ownerId && scopes.some(scope => sourceCaptionCovered(scope, caption));
+    if (removeBlock) result.removedCaptionIds.add(caption.id);
+    else result.captions.push(caption);
+  }
+  return result;
+}
+
+/** Combine explicit caption selection with media-scoped removal without widening either scope. */
+export function planTimelineCaptionDeletion(captions, {
+  ownerClipIds = [],
+  ranges = [],
+  selectedCaptionIds = [],
+} = {}, options = {}) {
+  const source = Array.isArray(captions) ? captions : [];
+  const selectedIds = new Set((Array.isArray(selectedCaptionIds) ? selectedCaptionIds : [])
+    .map(id => String(id || '')).filter(Boolean));
+  const deletion = planMediaCaptionDeletion(source, { ownerClipIds, ranges }, options);
+  const lockedTracks = options.lockedTracks || {};
+  const explicitlyDeleted = new Set();
+  const explicitWords = [];
+  for (const caption of source) {
+    if (!selectedIds.has(String(caption.id || '')) || lockedTracks[caption.trackId || 'caption']) continue;
+    explicitlyDeleted.add(caption.id);
+    for (const word of caption.words || []) explicitWords.push({ captionId: caption.id, caption, word });
+  }
+  const removedCaptionIds = new Set([...deletion.removedCaptionIds, ...explicitlyDeleted]);
+  return {
+    ...deletion,
+    captions: deletion.captions.filter(caption => !explicitlyDeleted.has(caption.id)),
+    removedCaptionIds,
+    removedWords: [
+      ...deletion.removedWords.filter(item => !explicitlyDeleted.has(item.captionId)),
+      ...explicitWords,
+    ],
+  };
+}
+
 export function planIssueCaptionRemoval(captions, issue, options = {}) {
   const issueId = String(issue?.issueId || issue?.id || '');
   if (!issueId) return { blocked: true, reason: 'missing-issue-id', deletion: null };
