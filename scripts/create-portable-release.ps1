@@ -1,9 +1,11 @@
-﻿$ErrorActionPreference = 'Stop'
+﻿param([Parameter(Mandatory = $true)][ValidatePattern('^\d{8}-\d{6}$')][string]$Timestamp)
+$ErrorActionPreference = 'Stop'
 $Root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $Baseline = Join-Path $Root 'release\剪辑助手'
 $ProgramsInstallRoot = Join-Path $env:LOCALAPPDATA 'Programs\剪辑助手'
 $TimeZone = [TimeZoneInfo]::FindSystemTimeZoneById('New Zealand Standard Time')
-$LocalTime = [TimeZoneInfo]::ConvertTime((Get-Date).ToUniversalTime(), $TimeZone)
+$LocalTime = [DateTime]::ParseExact($Timestamp, 'yyyyMMdd-HHmmss', [Globalization.CultureInfo]::InvariantCulture)
+$LocalTime = [TimeZoneInfo]::ConvertTime($LocalTime, $TimeZone)
 $Timestamp = $LocalTime.ToString('yyyyMMdd-HHmmss')
 $Name = "ClipAssistant-portable-$Timestamp"
 $StagingRoot = Join-Path $Root ".build\github-release\$Name"
