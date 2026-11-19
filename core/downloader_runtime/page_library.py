@@ -19,6 +19,7 @@ class PageLibrary:
     def __init__(self, app):
         self.app=app
         self.path=app.cache_path
+        self.language_names={code:language for language,code in LANGUAGE_CODES.items()}
         self.window=tk.Toplevel(app.root)
         self.window.title('引流模板管理')
         screen_w=self.window.winfo_screenwidth();screen_h=self.window.winfo_screenheight()
@@ -143,7 +144,7 @@ class PageLibrary:
         page=self.pages.get(number,{})
         name=' '.join(str(page.get('page_name') or '').split())
         language=page.get('template_language','en')
-        language_name=next((label for label,code in LANGUAGE_CODES.items() if code==language),str(language))
+        language_name=self.language_names.get(language,str(language))
         if name and name!=f'模板 {position}':return name
         return f'模板 {position} · {language_name}'
 
@@ -211,7 +212,7 @@ class PageLibrary:
             design=page_design(self.pages,str(number),self.app.theme.get(),self.app.layout.get(),read_style(self.path))
             design['footer']=design['footer'].replace(source_phone,phone,1);design['phone']=phone;design['phone_input']=phone
             design['template_language']=page.get('template_language','en')
-            language_name=labels.get(design['template_language'],design['template_language'])
+            language_name=self.language_names.get(design['template_language'],design['template_language'])
             self.notice.configure(text=f'{language_name}模板 · 文案和号码独立保存；标题里的神、耶稣、圣灵会按所选语种自动高亮。白天/黑天主题会沿用当前设置。')
         except ValueError:
             footer='';self.phone.set(self.template_1_phone())

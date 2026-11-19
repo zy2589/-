@@ -597,11 +597,12 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
       deleteSelectedSource.includes('selectedCaptionIds:[...selectedCaptionIds]')&&
       deleteSelectedSource.includes('state.captions=mediaCaptionDeletion.captions;')&&
       deleteSelectedSource.includes('state.captions = state.captions.filter(keep("caption"));')&&
-      deleteSelectedSource.includes('if(hasCaptionText&&!plannedCaptions.some(')&&
+      deleteSelectedSource.includes('const explicitlySelectedAllCaptions = selectedCaptionIds.size > 0')&&
+      deleteSelectedSource.includes('if(hasCaptionText&&!keepsCaptionText&&!explicitlySelectedAllCaptions)')&&
       deleteSelectedSource.includes('applyHistoryState(JSON.parse(beforeDelete));')&&
       !deleteSelectedSource.includes('remapCaptionsFromSource(')&&
       !deleteSelectedSource.includes('detachCaptionOwner('),
-    '局部字幕删除必须只删选中字幕；删除媒体必须只删其源范围对应的字幕，且保护其他文案。');
+    '局部删除只能删选中字幕；显式选中全部字幕时允许删除，删除媒体时则保护未选文案。');
   function runDeleteSelectedScenario({ captions, selectedItems, audioAssets = [] }) {
     const scenarioState = {
       selectedItems: [...selectedItems], selected: selectedItems[0] || { type: '', id: '' },

@@ -32,6 +32,19 @@
         gap: 8px;
         margin-top: 16px;
       }
+      .homecleanupdialog { width: min(560px, calc(100% - 32px)); }
+      .homecleanupchoices { display: grid; gap: 8px; margin-top: 14px; }
+      .homecleanupchoice {
+        display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start;
+        padding: 11px 12px; border: 1px solid #41464d; border-radius: 8px; background: #292d31;
+        cursor: pointer;
+      }
+      .homecleanupchoice input { margin: 3px 0 0; }
+      .homecleanupchoice span { display: grid; gap: 4px; }
+      .homecleanupchoice small { color: var(--muted); line-height: 1.4; }
+      .homecleanupchoice.destructive { border-color: #70413d; }
+      .homecleanupchoice input:disabled { cursor: not-allowed; }
+      .homecleanupchoice:has(input:disabled) { opacity: .55; cursor: not-allowed; }
       .exportprogress {
         margin-top: 12px;
         height: 8px;

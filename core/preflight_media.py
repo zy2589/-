@@ -183,17 +183,17 @@ def main():
         "3 Dangerous Steps That Can Lead",
         "If You Keep Falling Into Sin, Watch",
         "How to Build Better Habits Every Morning",
-        "Lord's Return and Christian Habits",
+        "Lordian Return and Christian Habits",
     ):
         if salient_title_spans(title):
             raise RuntimeError(f"标题自动高亮超出指定词：{title!r}。")
-    required_title = "GOD loves JESUS and the Holy Spirit"
+    required_title = "GOD loves JESUS and the LORD and the Holy Spirit"
     required_spans = [required_title[start:end].casefold() for start, end in salient_title_spans(required_title)]
-    if required_spans != ["god", "jesus", "holy spirit"]:
-        raise RuntimeError("标题自动高亮预检失败：只能自动高亮 GOD、JESUS、Holy Spirit。")
-    possessive_title = "gOd's love, jEsUs' words, and HOLY SPIRIT's guidance"
+    if required_spans != ["god", "jesus", "lord", "holy spirit"]:
+        raise RuntimeError("标题自动高亮预检失败：GOD、JESUS、LORD、Holy Spirit 识别不完整。")
+    possessive_title = "gOd's love, jEsUs' words, the LORD's return, and HOLY SPIRIT's guidance"
     possessive_spans = [possessive_title[start:end].casefold() for start, end in salient_title_spans(possessive_title)]
-    if possessive_spans != ["god's", "jesus'", "holy spirit's"]:
+    if possessive_spans != ["god's", "jesus'", "lord's", "holy spirit's"]:
         raise RuntimeError("标题自动高亮预检失败：大小写和所有格处理异常。")
     near_match_title = "Goddess, Jesusian, Holy Spiritual"
     if salient_title_spans(near_match_title):

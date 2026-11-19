@@ -362,7 +362,7 @@ def render(design, green_preview=False, output_size='1080x1920'):
     return image
 
 
-# These are the equivalents of God, Jesus, and Holy Spirit in every language
+# These are the equivalents of God, Jesus, Lord, and Holy Spirit in every language
 # offered by the downloader.  The selected row language controls matching.
 RELIGIOUS_TERMS = {
     'en': (r"GOD(?:['’]s?)?", r"JESUS(?:['’]s?)?", r"HOLY\s+SPIRIT(?:['’]s?)?"),
@@ -386,13 +386,15 @@ RELIGIOUS_TERMS = {
 }
 
 # Preserve multiword English terms as a single layout unit during wrapping.
-KEYWORD_PATTERN = r"\b(?:GOD|JESUS)\b(?:['’]s?)?|\bHoly\s+Spirit\b(?:['’]s?)?"
+KEYWORD_PATTERN = r"\b(?:GOD|JESUS|LORD)\b(?:['’]s?)?|\bHoly\s+Spirit\b(?:['’]s?)?"
 
 
 def salient_title_spans(text, language='en'):
-    """Return spans for the three faith concepts in the selected language."""
+    """Return spans for faith terms in the selected language."""
     language = str(language or 'en')
     terms = RELIGIOUS_TERMS.get(language, RELIGIOUS_TERMS['en'])
+    if language == 'en':
+        terms = (*terms, r"LORD(?:['’]s?)?")
     unbounded = language in ('ja', 'zh-Hans', 'zh-Hant', 'th')
     matches=[]
     for term in terms:

@@ -491,7 +491,7 @@ foreach ($RequiredDownloadToken in @(
     'def folder_name(person, title):',
     'def try_publish_title_png(',
     'saved.stat().st_size < 128',
-    'KEYWORD_PATTERN = r"\b(?:GOD|JESUS)\b',
+    'KEYWORD_PATTERN = r"\b(?:GOD|JESUS|LORD)\b',
     'Holy\s+Spirit'
 )) {
     if (!$DownloaderAppSourceText.Contains($RequiredDownloadToken) -and !$TitleDesignSourceText.Contains($RequiredDownloadToken)) {

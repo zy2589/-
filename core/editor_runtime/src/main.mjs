@@ -1,5 +1,6 @@
 import {sendRpcJson,failRpcJson} from './rpc-response.mjs';
 import {JsonChunkParser,bufferedJsonChunks} from './large-json-codec.mjs';
+import {applicationRoot} from './app-paths.mjs';
 import {exportPreferencesStore} from './export-preferences.mjs';
 import {seedUserPreference} from './user-seeds.mjs';
 import { consolidateMainMedia } from './consolidate-media.mjs';
@@ -1511,8 +1512,12 @@ nativeMethods = {
         ? registerAsset(record.thumbnailPath).url : '' }));
     return result;
   }),
-  scanSafeCache: safe(() => scanSafeCache(supportRoot())),
-  cleanSafeCache: safe(token => cleanSafeCache(supportRoot(), token)),
+  scanSafeCache: safe(() => scanSafeCache(supportRoot(), applicationRoot())),
+  cleanSafeCache: safe(input => cleanSafeCache(
+    supportRoot(),
+    typeof input === 'string' ? input : input?.token,
+    typeof input === 'string' ? ['caches'] : input?.categories,
+  )),
   deleteSelectedProject: safe(async (input = {}) => {
     releaseProjectAssets(input.id);
     return deleteProject(input.id, {updatedAt: input.updatedAt, permanent: input.permanent === true});

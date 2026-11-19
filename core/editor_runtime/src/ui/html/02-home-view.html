@@ -49,6 +49,21 @@
         </div>
       </main>
     </section>
+    <div class="modal" id="homeCleanupModal" role="dialog" aria-modal="true" aria-labelledby="homeCleanupTitle">
+      <div class="dialog homecleanupdialog">
+        <h2 id="homeCleanupTitle">清理缓存和旧数据</h2>
+        <p>选择要清理的内容。当前安装版、当前发布目录、登录资料、设置、凭据和源素材会保留。</p>
+        <div class="homecleanupchoices">
+          <label class="homecleanupchoice"><input type="checkbox" id="homeCleanupCaches"><span><b>可再生缓存</b><small id="homeCleanupCachesDetail"></small></span></label>
+          <label class="homecleanupchoice"><input type="checkbox" id="homeCleanupPackages"><span><b>旧版本包与打包暂存</b><small id="homeCleanupPackagesDetail"></small></span></label>
+          <label class="homecleanupchoice destructive"><input type="checkbox" id="homeCleanupProjects"><span><b>工程项目</b><small id="homeCleanupProjectsDetail">永久删除工程文件、媒体副本和自动保存历史，无法恢复。</small></span></label>
+        </div>
+        <div class="dialogactions">
+          <button class="btn" id="homeCleanupCancel" type="button">取消</button>
+          <button class="btn danger" id="homeCleanupConfirm" type="button">清理所选内容</button>
+        </div>
+      </div>
+    </div>
     <div class="modal" id="newProjectModal">
       <div class="dialog newdialog">
         <h2>新建工程</h2>

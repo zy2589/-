@@ -43,10 +43,35 @@ def extract_phone_input(text, region='US'):
     return re.sub(r'\s+', ' ', match.raw_string.translate(str.maketrans({'＋': '+'}))).strip()
 
 
+def _format_us_phone(text, region='US', country_code_hint=1):
+    """Return US numbers in the downloader's established +1(area)xxx-xxxx style."""
+    clean = str(text or '').strip()
+    if not clean:
+        return ''
+    # A malformed pasted value like +(646)594-2103 is missing the US country
+    # code. Restore it only when the current row/template is already US-based.
+    if country_code_hint == 1 and re.match(r'^\+\s*\(', clean):
+        clean = re.sub(r'^\+\s*', '+1', clean, count=1)
+    try:
+        number = phonenumbers.parse(clean, None if clean.startswith('+') else (region or 'US'))
+        if (phonenumbers.region_code_for_number(number) != 'US'
+                or not phonenumbers.is_possible_number(number)
+                or number.extension):
+            return ''
+        national = str(number.national_number)
+        if len(national) != 10:
+            return ''
+        return f'+1({national[:3]}){national[3:6]}-{national[6:]}'
+    except phonenumbers.NumberParseException:
+        return ''
+
+
 def format_phone(text):
     clean=extract_phone_input(text)
     if not clean:return ''
     clean=re.sub(r'[ \t]+',' ',clean)
+    us_phone=_format_us_phone(clean)
+    if us_phone:return us_phone
     if '(' in clean or ')' in clean:
         clean=re.sub(r'[ \t]*([()])[ \t]*',r'\1',clean)
         return re.sub(r'[ \t]*-[ \t]*','-',clean)
@@ -79,13 +104,17 @@ def format_phone_like(existing,text):
     """Format replacement digits with the saved number's separators when possible."""
     existing=str(existing or '').strip()
     region='US'
+    country_code_hint=1
     try:
         old_number=phonenumbers.parse(existing,None)
         region=phonenumbers.region_code_for_number(old_number) or region
+        country_code_hint=old_number.country_code
     except phonenumbers.NumberParseException:
         pass
     text=extract_phone_input(text,region)
     if not text:return ''
+    us_phone=_format_us_phone(text,region,country_code_hint)
+    if us_phone:return us_phone
     if text and not text.startswith('+'):
         try:
             old_number=phonenumbers.parse(existing,None)
@@ -105,8 +134,8 @@ def format_phone_like(existing,text):
         same_country=old_parsed.country_code==new_parsed.country_code
     except phonenumbers.NumberParseException:pass
     if same_country and len(old_digits)==len(new_digits) and new_digits:
-        # Respect intentional grouping in the pasted number. When the input is
-        # compact, keep the existing row/template style (e.g. +1(202)555-0147).
+        # Keep the existing row/template style for non-US numbers when the
+        # pasted number is compact; US numbers use their fixed format above.
         if any(char in text for char in ' ()-'):
             return re.sub(r'\s+', ' ', text).strip()
         digits=iter(new_digits)

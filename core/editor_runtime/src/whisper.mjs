@@ -31,7 +31,12 @@ import { speechLanguageForManuscript } from "./manuscript-language.mjs";
 import { mediaBinary, supportRoot } from "./media.mjs";
 import { mapSourceTime, mergeRanges } from "./pausecut.mjs";
 import { extractArchive, isWindows } from "./platform.mjs";
-import { completeGeminiMedia, geminiMediaReady, loadReviewSettings, reviewReady } from "./ai-settings.mjs";
+import {
+  completeGeminiTranscription,
+  GEMINI_SPEECH_MODEL,
+  geminiTranscriptionReady,
+  reviewReady,
+} from "./ai-settings.mjs";
 import {
   applyJudgeDecisions,
   blockingScriptureIssues,
@@ -60,7 +65,7 @@ function logSpeechJob(job,event,details={}){
     })+'\n',{encoding:'utf8',mode:0o600});
   }catch{/* diagnostics must never interrupt transcription */}
 }
-function transcriptCacheSettings(languageOverride = ""){const settings=loadSpeechSettings();return {...settings,speechLanguage:languageOverride||settings.speechLanguage,reviewModel:settings.engine==='gemini'?loadReviewSettings().model:'',deepgramChunkSeconds:settings.engine==='deepgram'?DEEPGRAM_CHUNK_SECONDS:undefined};}
+function transcriptCacheSettings(languageOverride = ""){const settings=loadSpeechSettings();return {...settings,speechLanguage:languageOverride||settings.speechLanguage,geminiSpeechModel:settings.engine==='gemini'?GEMINI_SPEECH_MODEL:'',deepgramChunkSeconds:settings.engine==='deepgram'?DEEPGRAM_CHUNK_SECONDS:undefined};}
 export { finalizeScriptAnalysis, finalizeAutoCaptionAnalysis };
 const HF_WHISPER =
   "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
@@ -409,7 +414,7 @@ export function clearDeepgramApiKey() {
 function normalizeSpeechEngine(value) {
   if (value === "gemini" || value === "deepgram" || value === "groq" || value === "local")
     return value;
-  return "groq";
+  return "deepgram";
 }
 
 export function localModelInstalled(id = "") {
@@ -469,7 +474,7 @@ export function speechStatus() {
   const settings = loadSpeechSettings();
   const groq = groqKeyStatus();
   const deepgram = deepgramKeyStatus();
-  const gemini = geminiMediaReady();
+  const gemini = geminiTranscriptionReady();
   const localInstalled = localModelInstalled();
   const ready =
     settings.engine === "gemini"
@@ -484,7 +489,7 @@ export function speechStatus() {
     engine: settings.engine,
     groq,
     deepgram,
-    gemini: { configured: gemini, model: loadReviewSettings().model || "gemini-3.7-flash" },
+    gemini: { configured: gemini, model: GEMINI_SPEECH_MODEL },
     localModel: spec.id,
     localModels: listLocalWhisperModels(),
     localInstalled,
@@ -496,7 +501,7 @@ export function speechStatus() {
 
 export function canTranscribe() {
   const settings = loadSpeechSettings();
-  if (settings.engine === "gemini") return geminiMediaReady();
+  if (settings.engine === "gemini") return geminiTranscriptionReady();
   if (settings.engine === "deepgram") return Boolean(getDeepgramApiKey());
   if (settings.engine === "local") return localModelInstalled();
   return Boolean(getGroqApiKey());
@@ -545,7 +550,7 @@ export function modelStatus() {
     path: target,
     name:
       engine === "gemini"
-        ? "Gemini / Vertex 听写"
+        ? GEMINI_SPEECH_MODEL
         : engine === "deepgram"
           ? "Deepgram Nova-3"
           : engine === "groq"
@@ -956,13 +961,14 @@ const GEMINI_STT_SCHEMA = {
 };
 
 async function geminiTranscribeFile(filePath, { signal, language = speechLanguage(), script = "" } = {}) {
-  if (!geminiMediaReady()) throw new Error("请先在纠正设置里保存 Gemini 或 Vertex 凭证。");
+  if (!geminiTranscriptionReady()) throw new Error("请在纠正设置里保存 Gemini API Key，或配置 Vertex 凭证。Antigravity 仅用于文稿纠正。");
   const bytes = await fs.promises.readFile(filePath);
   if (bytes.length > GEMINI_MAX_INLINE_BYTES)
     throw new Error("这段音频太大，请把视频剪短后再用 Gemini 听写。");
-  const raw = await completeGeminiMedia({
+  const raw = await completeGeminiTranscription({
+    model: GEMINI_SPEECH_MODEL,
     system:
-      `You are a multilingual speech-to-text engine. Detect the language spoken in the audio${language && language !== "auto" ? `; it is expected to be ${SPEECH_LANGUAGES.find((item) => item.id === language)?.english || language}` : ""}. Transcribe verbatim in that same language. Keep restarts, repeated words, false starts, and fillers. Do not translate or summarize.${script ? ` Expected vocabulary and wording from the manuscript: ${lexicalWords(script).slice(0, 150).join(" ")}` : ""}`,
+      `You are a multilingual speech-to-text engine. Detect the language spoken in the audio${language && language !== "auto" ? `; it is expected to be ${SPEECH_LANGUAGES.find((item) => item.id === language)?.english || language}` : ""}. Transcribe verbatim in that same language. Keep restarts, repeated words, false starts, and fillers. Do not translate, summarize, or silently correct grammar. Capitalize proper nouns correctly, including God, Jesus, Christ, Lord, Bible, Scripture, and Holy Spirit. Preserve the speaker's words exactly.${script ? ` Expected vocabulary and wording from the manuscript: ${lexicalWords(script).slice(0, 150).join(" ")}` : ""}`,
     input: [
       {
         type: "text",
@@ -992,13 +998,15 @@ export async function transcribeWithGemini(
     if (job) job.progress = 0.22;
     const raw = await geminiTranscribeFile(audioPath, { signal, language, script });
     if (job) job.progress = 0.86;
-    const segments = parseGeminiTranscription(raw, 0);
+    const segments = parseGeminiTranscription(raw.text, 0);
     return {
       segments,
       fallbackText: segments.map((item) => item.text).join(" "),
+      model: raw.model,
     };
   }
   const segments = [];
+  const models = new Set();
   const directory = path.dirname(audioPath);
   let index = 0;
   for (
@@ -1014,7 +1022,8 @@ export async function transcribeWithGemini(
     if (job) job.progress = 0.14 + Math.min(0.7, (start / totalDuration) * 0.7);
     try {
       const raw = await geminiTranscribeFile(chunkPath, { signal, language, script });
-      segments.push(...parseGeminiTranscription(raw, start));
+      segments.push(...parseGeminiTranscription(raw.text, start));
+      if (raw.model) models.add(raw.model);
     } finally {
       try {
         fs.unlinkSync(chunkPath);
@@ -1027,6 +1036,7 @@ export async function transcribeWithGemini(
   return {
     segments,
     fallbackText: segments.map((item) => item.text).join(" "),
+    model: [...models].join(" + "),
   };
 }
 
@@ -1732,9 +1742,9 @@ async function beginTranscription(job, context) {
   const preferred = job.engine || loadSpeechSettings().engine;
   job.engine = preferred;
   if (preferred === "gemini") {
-    if (!geminiMediaReady()) {
+    if (!geminiTranscriptionReady()) {
       job.state = "failed";
-      job.error = "听写选了 Gemini，请先在纠正设置里保存 Gemini 或 Vertex 凭证。";
+      job.error = "听写选了 Gemini，请保存 Gemini API Key，或配置 Vertex 凭证。";
       context.cleanup();
       return;
     }
@@ -1753,6 +1763,7 @@ async function beginTranscription(job, context) {
         context.cleanup();
         return;
       }
+      job.asrModel = transcribed.model || GEMINI_SPEECH_MODEL;
       context.cleanup();
       job.child = null;
       await finalizeScriptAnalysis(
@@ -1979,6 +1990,7 @@ export function startScriptAnalysis({
   job.cacheDecision=forceRecognition?'bypassed':cached?'hit':'miss';
   logSpeechJob(job,'started',{cacheDecision:job.cacheDecision});
   if(cached){
+    job.asrModel=cached.model||'';
     fs.rmSync(tempDir,{recursive:true,force:true});
     void finalizeScriptAnalysis(job,cached.segments,cached.fallbackText,duration,script,removals).catch(error=>{if(job.state==='cancelled')return;job.state="failed";job.error=error.message;});
     return {jobId:id};
@@ -2087,6 +2099,33 @@ function autoCaptionWords(segments = []) {
   })).filter((word) => word.display && word.end > word.start);
 }
 
+function capitalizeTranscriptProperNouns(segments = []) {
+  const properNouns = /\b(god|jesus|christ|lord|bible|scripture)(['’]s)?\b/giu;
+  const holySpirit = /\bholy\s+spirit\b/giu;
+  return segments.map((segment) => ({
+    ...segment,
+    text: String(segment.text || "")
+      .replace(properNouns, (_match, name, possessive = "") =>
+        `${name[0].toLocaleUpperCase()}${name.slice(1).toLocaleLowerCase()}${possessive}`)
+      .replace(holySpirit, "Holy Spirit"),
+  }));
+}
+
+function capitalizeCaptionProperNouns(words = [], script = "") {
+  const manuscriptCase = manuscriptProperCaseKeys(script);
+  return words.map((word) => {
+    const original = String(word.display || word.text || "");
+    const expected = String(word.expectedDisplay || "");
+    const expectedKey = normalizeWord(expected);
+    const scriptCaseMatch = expectedKey && expectedKey === normalizeWord(original) && manuscriptCase.has(expectedKey);
+    const knownCase = capitalizeTranscriptProperNouns([{ text: original }])[0].text;
+    const display = scriptCaseMatch ? expected : knownCase;
+    return display === original
+      ? word
+      : { ...word, display, text: display, originalDisplay: word.originalDisplay || original, autoCorrected: true };
+  });
+}
+
 function manuscriptProperCaseKeys(script = "") {
   const text=String(script||"");
   const keys=new Set();
@@ -2132,12 +2171,13 @@ async function finalizeAutoCaptionAnalysis(job, segments, duration, captionLines
   }
   logSpeechJob(job,'transcript-ready',{segmentCount:unique.length,audioVerifiedWordCount:unique.filter(segment=>segment.audioVerified).length,
     gapsOver12Seconds:transcriptGaps.length,longestGapSeconds:Math.round(Math.max(0,...transcriptGaps)*100)/100});
-  if(job.cacheKey) {try{writeTranscriptCache(supportRoot(),job.cacheKey,unique,fallbackText);}catch{/* cache is optional */}}
+  if(job.cacheKey) {try{writeTranscriptCache(supportRoot(),job.cacheKey,unique,fallbackText,job.asrModel||'');}catch{/* cache is optional */}}
   const sourceSegments=unique.map(segment=>({...segment}));
   const placed=Array.isArray(job.sourceClips)?job.sourceClips:null;
   const cutRanges=placed?[]:mergeRanges(job.requestRemovals || [],duration);
   const outputDuration=placed?Math.max(.04,...placed.map(clip=>Number(clip.end)||0)):Math.max(.04,mapSourceTime(Number(duration)||.04,cutRanges));
   unique=placed?transcriptOnPlacedClips(unique,placed):retainedTranscriptSegments(unique,cutRanges,duration);
+  unique = capitalizeTranscriptProperNouns(unique);
   const recognizedWords = autoCaptionWords(unique);
   if (!recognizedWords.length) throw new Error(placed?'当前时间线没有保留可匹配的人声，请检查音频片段裁切范围。':'没有识别到清晰的人声。');
   const manuscript = String(script || "").trim();
@@ -2159,7 +2199,10 @@ async function finalizeAutoCaptionAnalysis(job, segments, duration, captionLines
   const formattedSpeech = !plan&&formatOnlyPlan
     ? applyManuscriptFormattingOnly(formatOnlyPlan.words,manuscript)
     : recognizedWords;
-  const words = normalizeScriptureReferences(plan ? plan.words : formattedSpeech,{rangeReference:manuscript});
+  const words = capitalizeCaptionProperNouns(
+    normalizeScriptureReferences(plan ? plan.words : formattedSpeech,{rangeReference:manuscript}),
+    manuscript,
+  );
   const captions = buildCaptions(words, {
     maxWords: 10,
     maxChars: 34,
@@ -2178,7 +2221,7 @@ async function finalizeAutoCaptionAnalysis(job, segments, duration, captionLines
     captions,
     outputDuration,
     engine: job.engine || "deepgram",
-    model: job.engine === 'groq' ? GROQ_STT_MODEL : job.engine === 'local' ? loadSpeechSettings().localModel : job.engine === 'gemini' ? loadReviewSettings().model : DEEPGRAM_STT_MODEL,
+    model: job.engine === 'groq' ? GROQ_STT_MODEL : job.engine === 'local' ? loadSpeechSettings().localModel : job.engine === 'gemini' ? (job.asrModel || GEMINI_SPEECH_MODEL) : DEEPGRAM_STT_MODEL,
     scriptAssisted: Boolean(correctScript),
     scriptMode: forcedAlignment && correctScript ? "forced" : correctScript ? "reference" : "none",
     forcedAlignment: Boolean(forcedAlignment && correctScript),

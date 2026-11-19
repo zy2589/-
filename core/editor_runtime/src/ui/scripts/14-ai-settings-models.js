@@ -61,7 +61,7 @@ function filterSpeechLanguageList(query, languages) {
       async function checkModel() {
         try {
           const s = unwrap(await window.native.modelStatus());
-          const engine = s.preferredEngine || s.engine || "groq";
+          const engine = s.preferredEngine || s.engine || "deepgram";
           if ($("speechEngine")) $("speechEngine").value = engine;
           speechLanguageCatalog = Array.isArray(s.speechLanguages) ? s.speechLanguages : [];
           renderManuscriptLanguageOptions(state.manuscriptLanguage || "en");
@@ -101,7 +101,7 @@ function filterSpeechLanguageList(query, languages) {
               : `下载这个模型（${localSpec?.sizeLabel || ""}）`;
           if ($("speechEngineHint")) {
             $("speechEngineHint").textContent = geminiOn
-              ? "听写走纠正设置里的 Gemini API 或 Vertex。Antigravity CLI 只用于纠正，不能听写。只上传音频。时间戳由模型估算。"
+              ? "Gemini 听写使用 Gemini API Key 或 Vertex 凭证，独立于文稿纠正提供方；服务繁忙时会自动重试并切换备用 Flash 模型。只上传音频，时间戳由模型估算。专有名词会按常用写法大写。"
               : deepgramOn
                 ? "Deepgram Nova-3 词级时间戳，适合口播对齐。只上传音频。"
                 : localOn
@@ -112,7 +112,7 @@ function filterSpeechLanguageList(query, languages) {
           const deepgramHint = s.deepgram?.hint ? `（${s.deepgram.hint}）` : "";
           if (s.engine === "gemini") {
             $("modelBox").className = "status good";
-            $("modelBox").textContent = `听写：Gemini / Vertex（${s.gemini?.model || "gemini-3.7-flash"}）。纠正也用同一套凭证。`;
+            $("modelBox").textContent = `听写：Gemini（${s.gemini?.model || "gemini-3.7-flash"}）。凭证独立于当前纠正提供方。`;
           } else if (s.engine === "deepgram") {
             $("modelBox").className = "status good";
             $("modelBox").textContent = `听写：Deepgram Nova-3。纠正：Gemini / Vertex。${deepgramHint}`;
@@ -124,7 +124,7 @@ function filterSpeechLanguageList(query, languages) {
             $("modelBox").textContent = `听写：本地 ${localSpec?.label || "Whisper"}。可离线匹配。`;
           } else if (geminiOn) {
             $("modelBox").className = "status warn";
-            $("modelBox").textContent = "听写选了 Gemini，请先在纠正设置里保存 Key。";
+            $("modelBox").textContent = "听写选了 Gemini，请保存 Gemini API Key，或配置 Vertex Key / 服务账号。";
           } else if (deepgramOn) {
             $("modelBox").className = "status warn";
             $("modelBox").textContent = "听写选了 Deepgram，请先保存 Deepgram API Key。";
@@ -359,7 +359,7 @@ function filterSpeechLanguageList(query, languages) {
           if (!model.ready && !model.installed) {
             const preferred = model.preferredEngine || model.engine;
             if (preferred === "gemini") {
-              toast("请先在纠正设置里保存 Gemini API Key，或改用 Vertex 并保存 Key / 服务账号");
+              toast("请保存 Gemini API Key，或配置 Vertex Key / 服务账号");
               openReviewSettings();
             } else if (preferred === "deepgram") {
               toast("请先保存 Deepgram API Key");

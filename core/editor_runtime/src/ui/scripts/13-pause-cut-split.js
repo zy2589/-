@@ -391,7 +391,7 @@
             const next=editLinkedTrim(linked,edge,time-object[edge],{fps:timelineFrameRate(),ripple:editTool==='trim',bounds:linked.map(x=>editTool==='trim'?{}:editNeighborBounds(x,state.videoLayers.includes(x)?'videolayer':'audioasset'))});
             linked.forEach((x,i)=>Object.assign(x,next[i]));
             if(editTool==='trim')applyEditRipple(oldEnd,object.end-object.start-oldDuration,linked);
-            remapCaptionsFromSource(mainClips());recomputeContentDuration();renderAll();return;
+            recomputeContentDuration();renderAll();return;
           }
         }
         const working = resolveWorkingSelection(
@@ -688,17 +688,8 @@
         const selectedCaptionIds = new Set(
           selected.filter(item => item.type === 'caption').map(item => item.id),
         );
-        const hasCaptionText = (state.captions || []).some(caption =>
-          (caption.words || []).length || String(caption.text || '').trim(),
-        );
-        const remainingCaptionText = (state.captions || []).some(caption =>
-          !selectedCaptionIds.has(caption.id) &&
-          ((caption.words || []).length || String(caption.text || '').trim()),
-        );
-        if (selectedCaptionIds.size && hasCaptionText && !remainingCaptionText) {
-          toast('此次删除会清空全部字幕，已取消操作以保护工程');
-          return;
-        }
+        const explicitlySelectedAllCaptions = selectedCaptionIds.size > 0 &&
+          (state.captions || []).every(caption => selectedCaptionIds.has(caption.id));
         const beforeDelete = JSON.stringify(projectData(true));
         const undoLengthBefore = state.undo.length;
         const redoBefore = [...state.redo];
@@ -807,8 +798,9 @@
           ownerClipIds:[...deletedMediaOwnerIds],ranges:deletedMediaScopes,
           selectedCaptionIds:[...selectedCaptionIds],
         },{lockedTracks:state.trackLocks||{},joinWords:words=>joinCaptionWords(words)});
-        const plannedCaptions=mediaCaptionDeletion.captions;
-        if(hasCaptionText&&!plannedCaptions.some(caption=>(caption.words||[]).length||String(caption.text||'').trim())){
+        const hasCaptionText=(state.captions||[]).some(caption=>(caption.words||[]).length||String(caption.text||'').trim());
+        const keepsCaptionText=mediaCaptionDeletion.captions.some(caption=>(caption.words||[]).length||String(caption.text||'').trim());
+        if(hasCaptionText&&!keepsCaptionText&&!explicitlySelectedAllCaptions){
           state.undo.splice(undoLengthBefore);state.redo=redoBefore;
           applyHistoryState(JSON.parse(beforeDelete));
           toast('此次删除会清空全部文案，已取消操作以保护工程');

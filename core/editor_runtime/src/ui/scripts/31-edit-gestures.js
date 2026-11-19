@@ -1,4 +1,5 @@
-// A gesture is one transaction, including legacy-main -> source-reference conversion.
+// Grouped timeline gestures are transactional. Main-track body gestures keep
+// their packed source clips and do not remap captions as a side effect.
 (()=>{
  const surface=$('timelineContent'),original=surface.onpointerdown;
  let transaction=null,advanced=null,frame=0,pending=null;
@@ -7,15 +8,16 @@
  surface.onpointerdown=function(e){
   const element=e.target.closest('.clip[data-type][data-id]');
   if(e.button!==0||!element||!['video','audio','videolayer','audioasset'].includes(element.dataset.type)||editTool==='blade'||selectionIsLocked(element.dataset.type,element.dataset.id))return original.call(this,e);
+  const mainTrackBodyGesture=['video','audio'].includes(element.dataset.type)&&!e.target.closest('[data-trim]')&&!(editTool==='trim'&&e.shiftKey);
   const before=JSON.stringify(projectData(true)),undoLength=state.undo.length;
   transaction={before,undoLength,pointer:e.pointerId};
   timelineHistoryTransaction=true;
   let type=element.dataset.type,id=element.dataset.id;
-  if(type==='video'||type==='audio'){
+  if(!mainTrackBodyGesture&&(type==='video'||type==='audio')){
    const replacement=materializeMainSegment(type,id);if(replacement){type=replacement.type;id=replacement.id;element.dataset.type=type;element.dataset.id=id;}
   }
   // Materialize all selected main instances before the original handler collects movement.
-  for(const item of [...(state.selectedItems||[])])if(['video','audio'].includes(item.type)&&!selectionIsLocked(item.type,item.id))materializeMainSegment(item.type,item.id);
+  if(!mainTrackBodyGesture)for(const item of [...(state.selectedItems||[])])if(['video','audio'].includes(item.type)&&!selectionIsLocked(item.type,item.id))materializeMainSegment(item.type,item.id);
   const obj=timelineObjectFor(type,id),edge=e.target.closest('[data-trim]')?.dataset.trim;
   if(obj&&editTool==='trim'&&e.shiftKey){
    materializeTimelineMedia();
@@ -65,10 +67,10 @@
   if(transaction.moving?.length){
    materializeTimelineMedia();const movingIds=new Set(transaction.moving.map(x=>x.obj.id));
    for(const item of transaction.moving){const list=timelineCollection(item.type);if(!list)continue;const others=list.filter(x=>!movingIds.has(x.id)&&x.trackId===item.obj.trackId),untouched=list.filter(x=>movingIds.has(x.id)||x.trackId!==item.obj.trackId);list.splice(0,list.length,...untouched,...overwriteEditableClips(others,item.obj.start,item.obj.end));}
-   remapCaptionsFromSource(mainClips());recomputeContentDuration();renderAll();
+   recomputeContentDuration();renderAll();
   }
   if(advanced){advanced=null;recomputeContentDuration();renderAll();}
-  reconcileEditLinks();remapCaptionsFromSource(mainClips());
+  reconcileEditLinks();
   // Earlier handlers may have recorded snapshots; replace them with the single pre-gesture state.
   state.undo.splice(transaction.undoLength);
   const delta=editHistoryDelta(JSON.parse(before),projectData(true));

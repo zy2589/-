@@ -1930,6 +1930,19 @@ om: 1px solid var(--line);
         gap: 8px;
         margin-top: 16px;
       }
+      .homecleanupdialog { width: min(560px, calc(100% - 32px)); }
+      .homecleanupchoices { display: grid; gap: 8px; margin-top: 14px; }
+      .homecleanupchoice {
+        display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start;
+        padding: 11px 12px; border: 1px solid #41464d; border-radius: 8px; background: #292d31;
+        cursor: pointer;
+      }
+      .homecleanupchoice input { margin: 3px 0 0; }
+      .homecleanupchoice span { display: grid; gap: 4px; }
+      .homecleanupchoice small { color: var(--muted); line-height: 1.4; }
+      .homecleanupchoice.destructive { border-color: #70413d; }
+      .homecleanupchoice input:disabled { cursor: not-allowed; }
+      .homecleanupchoice:has(input:disabled) { opacity: .55; cursor: not-allowed; }
       .exportprogress {
         margin-top: 12px;
         height: 8px;
@@ -4400,6 +4413,21 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
         </div>
       </main>
     </section>
+    <div class="modal" id="homeCleanupModal" role="dialog" aria-modal="true" aria-labelledby="homeCleanupTitle">
+      <div class="dialog homecleanupdialog">
+        <h2 id="homeCleanupTitle">清理缓存和旧数据</h2>
+        <p>选择要清理的内容。当前安装版、当前发布目录、登录资料、设置、凭据和源素材会保留。</p>
+        <div class="homecleanupchoices">
+          <label class="homecleanupchoice"><input type="checkbox" id="homeCleanupCaches"><span><b>可再生缓存</b><small id="homeCleanupCachesDetail"></small></span></label>
+          <label class="homecleanupchoice"><input type="checkbox" id="homeCleanupPackages"><span><b>旧版本包与打包暂存</b><small id="homeCleanupPackagesDetail"></small></span></label>
+          <label class="homecleanupchoice destructive"><input type="checkbox" id="homeCleanupProjects"><span><b>工程项目</b><small id="homeCleanupProjectsDetail">永久删除工程文件、媒体副本和自动保存历史，无法恢复。</small></span></label>
+        </div>
+        <div class="dialogactions">
+          <button class="btn" id="homeCleanupCancel" type="button">取消</button>
+          <button class="btn danger" id="homeCleanupConfirm" type="button">清理所选内容</button>
+        </div>
+      </div>
+    </div>
     <div class="modal" id="newProjectModal">
       <div class="dialog newdialog">
         <h2>新建工程</h2>
@@ -4584,9 +4612,9 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
                 <summary>听写引擎</summary>
               <label class="field"><span class="small">用谁听写</span>
                 <select class="select" id="speechEngine">
+                  <option value="gemini">Gemini</option>
                   <option value="groq">Groq Whisper</option>
-                  <option value="deepgram">Deepgram Nova-3</option>
-                  <option value="gemini">Gemini / Vertex 听写</option>
+                  <option value="deepgram">Deepgram Nova-3（默认）</option>
                   <option value="local">本地 Whisper（离线）</option>
                 </select>
               </label>
@@ -10647,7 +10675,6 @@ function captionMeaningContext(captions, review) {
           }
           return true;
         });
-        if (changed && movesMainMedia) remapCaptionsFromSource(audioOnlyMainMove ? mainAudioClips() : mainClips());
         if (changed) toast(`切片已${applied < 0 ? "左移" : "右移"} ${Math.round(Math.abs(applied) / frameDuration())} 帧`);
         return changed;
       }
@@ -11251,8 +11278,15 @@ function baseMainClips() {
           const main=audioOwner?mainAudioClips():nextClips;
           const mediaClips=[...main,...(audioOwner?state.audioAssets:state.videoLayers)];
           const owner=caption.ownerClipId&&mediaClips.find(c=>c.id===caption.ownerClipId);
-          if(caption.ownerClipId&&!owner&&!/^[va]-/.test(caption.ownerClipId))return null;
-          return sourceRangeToTimeline(start,end,owner?[{...owner,sourceEnd:Number(owner.sourceEnd??(Number(owner.sourceStart||0)+(owner.end-owner.start)*Number(state.audio.speed||1)))}]:main);
+          const legacyMainOwner=/^(?:main|[va]-)/.test(String(caption.ownerClipId||''));
+          if(caption.ownerClipId&&!owner&&!legacyMainOwner)return null;
+          const sourceMediaId=String(caption.sourceMediaId||'').trim();
+          const available=mediaClips.filter(clip=>{
+            const clipSource=String(clip.sourceMediaId||clip.path||state.video?.path||'').trim();
+            return !sourceMediaId||!clipSource||clipSource===sourceMediaId;
+          });
+          const candidates=owner?[owner]:available;
+          return sourceRangeToTimeline(start,end,candidates.map(clip=>({...clip,sourceEnd:Number(clip.sourceEnd??(Number(clip.sourceStart||0)+(clip.end-clip.start)*Number(state.audio.speed||1)))})));
         };
         const archived = Array.isArray(state.captionRecoveryArchive) ? state.captionRecoveryArchive : [];
         const working = new Map((state.captions || []).map((caption) => [caption.id, { ...caption, words: Array.isArray(caption.words) ? [...caption.words] : caption.words }]));
@@ -18644,7 +18678,7 @@ function selectedVideoGrade(create = false) {
             const next=editLinkedTrim(linked,edge,time-object[edge],{fps:timelineFrameRate(),ripple:editTool==='trim',bounds:linked.map(x=>editTool==='trim'?{}:editNeighborBounds(x,state.videoLayers.includes(x)?'videolayer':'audioasset'))});
             linked.forEach((x,i)=>Object.assign(x,next[i]));
             if(editTool==='trim')applyEditRipple(oldEnd,object.end-object.start-oldDuration,linked);
-            remapCaptionsFromSource(mainClips());recomputeContentDuration();renderAll();return;
+            recomputeContentDuration();renderAll();return;
           }
         }
         const working = resolveWorkingSelection(
@@ -18941,17 +18975,8 @@ function selectedVideoGrade(create = false) {
         const selectedCaptionIds = new Set(
           selected.filter(item => item.type === 'caption').map(item => item.id),
         );
-        const hasCaptionText = (state.captions || []).some(caption =>
-          (caption.words || []).length || String(caption.text || '').trim(),
-        );
-        const remainingCaptionText = (state.captions || []).some(caption =>
-          !selectedCaptionIds.has(caption.id) &&
-          ((caption.words || []).length || String(caption.text || '').trim()),
-        );
-        if (selectedCaptionIds.size && hasCaptionText && !remainingCaptionText) {
-          toast('此次删除会清空全部字幕，已取消操作以保护工程');
-          return;
-        }
+        const explicitlySelectedAllCaptions = selectedCaptionIds.size > 0 &&
+          (state.captions || []).every(caption => selectedCaptionIds.has(caption.id));
         const beforeDelete = JSON.stringify(projectData(true));
         const undoLengthBefore = state.undo.length;
         const redoBefore = [...state.redo];
@@ -19060,8 +19085,9 @@ function selectedVideoGrade(create = false) {
           ownerClipIds:[...deletedMediaOwnerIds],ranges:deletedMediaScopes,
           selectedCaptionIds:[...selectedCaptionIds],
         },{lockedTracks:state.trackLocks||{},joinWords:words=>joinCaptionWords(words)});
-        const plannedCaptions=mediaCaptionDeletion.captions;
-        if(hasCaptionText&&!plannedCaptions.some(caption=>(caption.words||[]).length||String(caption.text||'').trim())){
+        const hasCaptionText=(state.captions||[]).some(caption=>(caption.words||[]).length||String(caption.text||'').trim());
+        const keepsCaptionText=mediaCaptionDeletion.captions.some(caption=>(caption.words||[]).length||String(caption.text||'').trim());
+        if(hasCaptionText&&!keepsCaptionText&&!explicitlySelectedAllCaptions){
           state.undo.splice(undoLengthBefore);state.redo=redoBefore;
           applyHistoryState(JSON.parse(beforeDelete));
           toast('此次删除会清空全部文案，已取消操作以保护工程');
@@ -19215,7 +19241,7 @@ function filterSpeechLanguageList(query, languages) {
       async function checkModel() {
         try {
           const s = unwrap(await window.native.modelStatus());
-          const engine = s.preferredEngine || s.engine || "groq";
+          const engine = s.preferredEngine || s.engine || "deepgram";
           if ($("speechEngine")) $("speechEngine").value = engine;
           speechLanguageCatalog = Array.isArray(s.speechLanguages) ? s.speechLanguages : [];
           renderManuscriptLanguageOptions(state.manuscriptLanguage || "en");
@@ -19255,7 +19281,7 @@ function filterSpeechLanguageList(query, languages) {
               : `下载这个模型（${localSpec?.sizeLabel || ""}）`;
           if ($("speechEngineHint")) {
             $("speechEngineHint").textContent = geminiOn
-              ? "听写走纠正设置里的 Gemini API 或 Vertex。Antigravity CLI 只用于纠正，不能听写。只上传音频。时间戳由模型估算。"
+              ? "Gemini 听写使用 Gemini API Key 或 Vertex 凭证，独立于文稿纠正提供方；服务繁忙时会自动重试并切换备用 Flash 模型。只上传音频，时间戳由模型估算。专有名词会按常用写法大写。"
               : deepgramOn
                 ? "Deepgram Nova-3 词级时间戳，适合口播对齐。只上传音频。"
                 : localOn
@@ -19266,7 +19292,7 @@ function filterSpeechLanguageList(query, languages) {
           const deepgramHint = s.deepgram?.hint ? `（${s.deepgram.hint}）` : "";
           if (s.engine === "gemini") {
             $("modelBox").className = "status good";
-            $("modelBox").textContent = `听写：Gemini / Vertex（${s.gemini?.model || "gemini-3.7-flash"}）。纠正也用同一套凭证。`;
+            $("modelBox").textContent = `听写：Gemini（${s.gemini?.model || "gemini-3.7-flash"}）。凭证独立于当前纠正提供方。`;
           } else if (s.engine === "deepgram") {
             $("modelBox").className = "status good";
             $("modelBox").textContent = `听写：Deepgram Nova-3。纠正：Gemini / Vertex。${deepgramHint}`;
@@ -19278,7 +19304,7 @@ function filterSpeechLanguageList(query, languages) {
             $("modelBox").textContent = `听写：本地 ${localSpec?.label || "Whisper"}。可离线匹配。`;
           } else if (geminiOn) {
             $("modelBox").className = "status warn";
-            $("modelBox").textContent = "听写选了 Gemini，请先在纠正设置里保存 Key。";
+            $("modelBox").textContent = "听写选了 Gemini，请保存 Gemini API Key，或配置 Vertex Key / 服务账号。";
           } else if (deepgramOn) {
             $("modelBox").className = "status warn";
             $("modelBox").textContent = "听写选了 Deepgram，请先保存 Deepgram API Key。";
@@ -19513,7 +19539,7 @@ function filterSpeechLanguageList(query, languages) {
           if (!model.ready && !model.installed) {
             const preferred = model.preferredEngine || model.engine;
             if (preferred === "gemini") {
-              toast("请先在纠正设置里保存 Gemini API Key，或改用 Vertex 并保存 Key / 服务账号");
+              toast("请保存 Gemini API Key，或配置 Vertex Key / 服务账号");
               openReviewSettings();
             } else if (preferred === "deepgram") {
               toast("请先保存 Deepgram API Key");
@@ -23910,38 +23936,114 @@ function persistedMediaItem(item, preserveWaveform = false) {
         $('homeCleanCache').textContent = label;
         $('homeCleanCache').disabled = homeBusy || homeCacheBusy;
       }
+      function cleanupSize(bytes) {
+        const value=Number(bytes)||0;
+        return value>=1024*1024*1024?(value/1024/1024/1024).toFixed(2)+' GB':(value/1024/1024).toFixed(2)+' MB';
+      }
+      function closeHomeCleanupModal() {
+        $('homeCleanupModal').classList.remove('on');
+        homeCacheTicket=null;
+        homeCacheBusy=false;
+        updateCacheButton();
+      }
+      $('homeCleanupCancel').onclick = closeHomeCleanupModal;
+      $('homeCleanupConfirm').onclick = () => {
+        const ticket=homeCacheTicket;
+        if (!ticket) return;
+        const categories=[];
+        if ($('homeCleanupCaches').checked) categories.push('caches');
+        if ($('homeCleanupPackages').checked) categories.push('packages');
+        const includeProjects=$('homeCleanupProjects').checked;
+        if (!categories.length&&!includeProjects) { toast('请先选择要清理的内容'); return; }
+        const projectItems=includeProjects?ticket.projects:[];
+        const selectedLines=[];
+        if (categories.includes('caches')) selectedLines.push('可再生缓存 '+ticket.categories.caches.count+' 个文件（'+cleanupSize(ticket.categories.caches.bytes)+'）');
+        if (categories.includes('packages')) selectedLines.push('旧版本包和打包暂存 '+ticket.categories.packages.count+' 个文件（'+cleanupSize(ticket.categories.packages.bytes)+'）');
+        if (includeProjects) selectedLines.push('永久删除 '+projectItems.length+' 个工程及其媒体副本和自动保存历史');
+        closeHomeCleanupModal();
+        askConfirm('将执行以下清理：\n\n'+selectedLines.join('\n')+'\n\n当前安装版、当前发布目录、登录资料、设置、凭据和源素材会保留。'+(includeProjects?'\n\n工程删除后无法恢复。':''),async () => {
+          homeCacheBusy=true;
+          if (includeProjects) homeBusy=true;
+          updateCacheButton('清理中…');
+          let cacheResult=null,projectDeleted=0,projectFailed=0,projectPending=0;
+          const failures=[];
+          try {
+            if (categories.length) {
+              try { cacheResult=await nativeCall('cleanSafeCache',{token:ticket.token,categories}); }
+              catch(error) { failures.push('缓存/旧包：'+error.message); }
+            }
+            if (includeProjects) {
+              if (state.editorActive) {
+                projectFailed=projectItems.length;
+                failures.push('请先关闭当前工程再删除工程数据');
+              } else {
+                for (const item of projectItems) {
+                  try {
+                    const result=await nativeCall('deleteSelectedProject',{id:item.id,updatedAt:item.updatedAt,permanent:true});
+                    if (!result) throw Error('工程不存在或已更新');
+                    projectDeleted++;
+                    projectPending+=Number(result.cleanupPending===true);
+                  } catch(error) { projectFailed++; failures.push(error.message); }
+                }
+              }
+            }
+            const parts=[];
+            if (cacheResult) parts.push('释放 '+cleanupSize(cacheResult.bytes)+'，移除缓存 '+cacheResult.cacheRemoved+' 个、旧包/暂存 '+cacheResult.packageRemoved+' 个');
+            if (includeProjects) parts.push('永久删除工程 '+projectDeleted+' 个，后台清理 '+projectPending+' 个，失败 '+projectFailed+' 个');
+            if (cacheResult?.skipped) parts.push('另有 '+cacheResult.skipped+' 个文件因正在使用或发生变化而跳过');
+            if (cacheResult?.unreadableProjects) parts.push('有 '+cacheResult.unreadableProjects+' 个工程文件无法校验，相关预览缓存已跳过');
+            if (failures.length) parts.push('问题：'+[...new Set(failures)].join('；'));
+            toast(parts.join('；')||'没有清理任何项目');
+          } finally {
+            if (includeProjects) homeBusy=false;
+            homeCacheBusy=false;
+            updateCacheButton();
+            if (includeProjects) await refreshHome();
+          }
+        },includeProjects?'永久删除工程并清理':'清理所选内容');
+      };
       $('homeCleanCache').onclick = async () => {
         if (homeCacheBusy || homeBusy) return;
-        if (homeCacheTicket) {
-          const ticket = homeCacheTicket;
-          askConfirm('当前可清理缓存：'+(ticket.bytes/1048576).toFixed(2)+' MB。清理缓存不会删除工程文件，是否继续？',async () => {
-            homeCacheTicket=null; homeCacheBusy=true; updateCacheButton('清理中…');
-            try {
-              const cleaned=await nativeCall('cleanSafeCache',ticket.token);
-              const warning=cleaned.unreadableProjects?'；发现 '+cleaned.unreadableProjects+' 个无法校验的工程文件，已跳过媒体预览缓存以保护关联素材':'';
-              toast('已释放 '+(cleaned.bytes/1048576).toFixed(2)+' MB；跳过 '+cleaned.skipped+' 个正在使用、已更新或受保护文件'+warning);
-            } catch(error) { toast(error.message); }
-            finally { homeCacheBusy=false; updateCacheButton(); }
-          },'清理缓存');
-          return;
-        }
         homeCacheBusy=true; updateCacheButton('统计中…');
-        toast('正在后台统计缓存，可以继续新建和编辑工程');
+        toast('正在后台统计缓存、旧版本包和工程数据');
         try {
-          const result=await nativeCall('scanSafeCache');
-          if (!result.count) {
+          const [result,projectResult]=await Promise.all([
+            nativeCall('scanSafeCache'),
+            nativeCall('queryProjects',{period:'all',idsOnly:true}),
+          ]);
+          const categories=result.categories||{caches:{bytes:result.bytes||0,count:result.count||0},packages:{bytes:0,count:0}};
+          const projects=Array.isArray(projectResult.selection)?projectResult.selection:[];
+          if (!categories.caches.count&&!categories.packages.count&&!projects.length) {
             toast(result.unreadableProjects
-              ? '发现 '+result.unreadableProjects+' 个无法校验的工程文件。为保护工程关联素材，已跳过媒体预览缓存；没有其他可安全清理的过期缓存。'
-              : '没有可安全清理的缓存');
+              ? '发现 '+result.unreadableProjects+' 个无法校验的工程文件，已跳过相关预览缓存；没有其他可安全清理的内容。'
+              : '没有可清理的旧包、过期缓存或工程');
             return;
           }
-          homeCacheTicket=result;
-          const warning=result.unreadableProjects
-            ? '；另发现 '+result.unreadableProjects+' 个无法校验的工程文件，本次会跳过媒体预览缓存'
-            : '';
-          toast('缓存统计完成：'+(result.bytes/1048576).toFixed(2)+' MB。可在首页点击“确认清理”继续。'+warning);
+          homeCacheTicket={...result,categories,projects};
+          const cacheChoice=$('homeCleanupCaches');
+          cacheChoice.checked=categories.caches.count>0;
+          cacheChoice.disabled=categories.caches.count===0;
+          $('homeCleanupCachesDetail').textContent=categories.caches.count
+            ? categories.caches.count+' 个文件 · '+cleanupSize(categories.caches.bytes)+'（预览、转写、临时、WebView 和 Python 字节码缓存）'
+            : '没有可清理的过期缓存';
+          const packageChoice=$('homeCleanupPackages');
+          packageChoice.checked=categories.packages.count>0;
+          packageChoice.disabled=categories.packages.count===0;
+          $('homeCleanupPackagesDetail').textContent=categories.packages.count
+            ? categories.packages.count+' 个文件 · '+cleanupSize(categories.packages.bytes)+'（过期发布包和打包/诊断暂存；保留最新发布包与当前发布目录）'
+            : '没有发现旧发布包或打包暂存';
+          const projectChoice=$('homeCleanupProjects');
+          projectChoice.checked=false;
+          projectChoice.disabled=projects.length===0;
+          $('homeCleanupProjectsDetail').textContent=projects.length
+            ? '永久删除全部 '+projects.length+' 个工程及其媒体副本、自动保存历史，无法恢复。'
+            : '没有可删除的工程；删除工程不会删除 Downloads 中的源视频。';
+          $('homeCleanupModal').classList.add('on');
         } catch(error) { toast(error.message); }
-        finally { homeCacheBusy=false; updateCacheButton(homeCacheTicket?'确认清理':'清理缓存'); }
+        finally {
+          if ($('homeCleanupModal').classList.contains('on')) updateCacheButton('已统计');
+          else { homeCacheBusy=false; updateCacheButton(); }
+        }
       };
       // The project home is the initial screen in the integrated shell. It
       // used to wait for Back or New Project before querying the local store,
@@ -28991,7 +29093,7 @@ function nudgeCutEdge(side, frames) {
   if(Math.abs(time-clip[edge])<frameDuration()/2){restoreSnapshot();return toast('已到可用素材或相邻切口边界');}
   if(state.playing)togglePlay();state.cutPreviewRange=null;$('loopCutPreview').textContent='循环试听前后 1 秒';
   linked.forEach((x,i)=>Object.assign(x.obj,next[i]));
-  remapCaptionsFromSource(mainClips());recomputeContentDuration();seekTimeline(time);renderAll();queueAutosave();refreshCutInspector();
+  recomputeContentDuration();seekTimeline(time);renderAll();queueAutosave();refreshCutInspector();
 }
 $("openCutInspector")?.addEventListener("click", () => {
   if (!precisionCutPair()) return toast("请先切出至少两个视频片段");
@@ -29542,7 +29644,8 @@ function moveBoundCaptions(clip,previous){
  }
  if(typeof syncReviewIssueTimes==='function')syncReviewIssueTimes();
 }
-// A gesture is one transaction, including legacy-main -> source-reference conversion.
+// Grouped timeline gestures are transactional. Main-track body gestures keep
+// their packed source clips and do not remap captions as a side effect.
 (()=>{
  const surface=$('timelineContent'),original=surface.onpointerdown;
  let transaction=null,advanced=null,frame=0,pending=null;
@@ -29551,15 +29654,16 @@ function moveBoundCaptions(clip,previous){
  surface.onpointerdown=function(e){
   const element=e.target.closest('.clip[data-type][data-id]');
   if(e.button!==0||!element||!['video','audio','videolayer','audioasset'].includes(element.dataset.type)||editTool==='blade'||selectionIsLocked(element.dataset.type,element.dataset.id))return original.call(this,e);
+  const mainTrackBodyGesture=['video','audio'].includes(element.dataset.type)&&!e.target.closest('[data-trim]')&&!(editTool==='trim'&&e.shiftKey);
   const before=JSON.stringify(projectData(true)),undoLength=state.undo.length;
   transaction={before,undoLength,pointer:e.pointerId};
   timelineHistoryTransaction=true;
   let type=element.dataset.type,id=element.dataset.id;
-  if(type==='video'||type==='audio'){
+  if(!mainTrackBodyGesture&&(type==='video'||type==='audio')){
    const replacement=materializeMainSegment(type,id);if(replacement){type=replacement.type;id=replacement.id;element.dataset.type=type;element.dataset.id=id;}
   }
   // Materialize all selected main instances before the original handler collects movement.
-  for(const item of [...(state.selectedItems||[])])if(['video','audio'].includes(item.type)&&!selectionIsLocked(item.type,item.id))materializeMainSegment(item.type,item.id);
+  if(!mainTrackBodyGesture)for(const item of [...(state.selectedItems||[])])if(['video','audio'].includes(item.type)&&!selectionIsLocked(item.type,item.id))materializeMainSegment(item.type,item.id);
   const obj=timelineObjectFor(type,id),edge=e.target.closest('[data-trim]')?.dataset.trim;
   if(obj&&editTool==='trim'&&e.shiftKey){
    materializeTimelineMedia();
@@ -29609,10 +29713,10 @@ function moveBoundCaptions(clip,previous){
   if(transaction.moving?.length){
    materializeTimelineMedia();const movingIds=new Set(transaction.moving.map(x=>x.obj.id));
    for(const item of transaction.moving){const list=timelineCollection(item.type);if(!list)continue;const others=list.filter(x=>!movingIds.has(x.id)&&x.trackId===item.obj.trackId),untouched=list.filter(x=>movingIds.has(x.id)||x.trackId!==item.obj.trackId);list.splice(0,list.length,...untouched,...overwriteEditableClips(others,item.obj.start,item.obj.end));}
-   remapCaptionsFromSource(mainClips());recomputeContentDuration();renderAll();
+   recomputeContentDuration();renderAll();
   }
   if(advanced){advanced=null;recomputeContentDuration();renderAll();}
-  reconcileEditLinks();remapCaptionsFromSource(mainClips());
+  reconcileEditLinks();
   // Earlier handlers may have recorded snapshots; replace them with the single pre-gesture state.
   state.undo.splice(transaction.undoLength);
   const delta=editHistoryDelta(JSON.parse(before),projectData(true));

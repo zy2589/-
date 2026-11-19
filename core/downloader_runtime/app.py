@@ -1546,7 +1546,6 @@ class App:
         name_entry.bind('<FocusIn>',lambda _,i=index:self.preview_folder(i))
         page_entry.bind('<FocusIn>',lambda _,i=index:self.preview_page(i))
         page_entry.bind('<KeyRelease>',lambda _,i=index:self.preview_page(i))
-        page_entry.bind('<FocusOut>',lambda _,i=index:self.load_matched_phone(i),add='+')
         phone_entry.bind('<FocusIn>',lambda _,i=index:self.preview_page(i))
         phone_entry.bind('<FocusOut>',lambda _,i=index:self.format_phone_cell(i),add='+')
         phone.trace_add('write',lambda *_,i=index:self.preview_page(i))
@@ -1563,10 +1562,10 @@ class App:
         title.trace_add('write',lambda *_,i=index:self.refresh_title_preview(i))
         title_layout.trace_add('write',lambda *_,i=index:self._title_layout_changed(i))
         page.trace_add('write',lambda *_,i=index:self.refresh_title_preview(i))
-        language.trace_add('write',lambda *_,i=index:self.load_matched_phone(i))
+        # Changing the selected template language must not fill the row's phone field.
         language.trace_add('write',lambda *_,i=index:self.preview_page(i))
         phone.trace_add('write',lambda *_,i=index:self.refresh_title_preview(i))
-        ToolTip(phone_entry,'生成标题图时用此号码替换所选模板中的号码；留空则使用模板原号码。')
+        ToolTip(phone_entry,'手动填写时用此号码替换模板号码；切换语种不会自动填入号码。留空仍使用模板原号码。')
         ToolTip(page_entry,'选择本行引流模板语种。每种语言使用“引流模板”里保存的独立文案；还没有的语种可从英语模板复制后编辑。')
         ToolTip(progress,lambda label=progress:label.cget('text'))
         if hasattr(self,'last_snapshot'):
@@ -1614,13 +1613,49 @@ class App:
         raw = title.get()
         cleaned = strip_title_hashtags(raw)
         if cleaned != raw:
+            manual_lines = self.title_manual_lines[index]
+            if manual_lines is not None:
+                from local_design import normalize_manual_title_lines
+                manual_text = '\n'.join(manual_lines).replace('＃', '#').split('#', 1)[0]
+                candidates = [line.strip() for line in manual_text.splitlines() if line.strip()]
+                try:
+                    manual_lines = normalize_manual_title_lines(cleaned, candidates)
+                except ValueError:
+                    manual_lines = None
+            self.record_edit()
+            was_paused = self.history_paused
+            self.history_paused = True
+            self.title_manual_lines[index] = manual_lines
             title.set(cleaned)
+            self.history_paused = was_paused
+            self.record_edit()
             self.status.config(text='已从视频标题中移除 # 后面的标签。')
 
     def _title_layout_changed(self,index):
-        if self.title_manual_lines[index] is not None:
-            self.title_manual_lines[index]=None
+        # Explicit manual breaks take precedence over the automatic line-count
+        # selector and remain in force until the user chooses “自动分行”.
         self.refresh_title_preview(index)
+
+    def _commit_manual_title_editor(self, index):
+        if (index != self.title_preview_index or self.title_preview_manual_text is None
+                or not self.title_preview_manual_text.winfo_exists()):
+            return True
+        raw_title = self.rows[index][1].get()
+        if not raw_title.strip():
+            return True
+        lines = self.title_preview_manual_text.get('1.0', 'end-1c').splitlines()
+        from local_design import normalize_manual_title_lines
+        try:
+            normalized = normalize_manual_title_lines(raw_title, lines)
+        except ValueError as exc:
+            self.status.config(text=f'标题分段无效：{exc}')
+            messagebox.showerror('标题分段无效', str(exc), parent=self.root)
+            return False
+        if normalized != self.title_manual_lines[index]:
+            self.record_edit()
+            self.title_manual_lines[index] = normalized
+            self.record_edit()
+        return True
 
     def _sync_title_manual_editor(self,lines):
         editor=self.title_preview_manual_text
@@ -1853,6 +1888,10 @@ class App:
         if not value or value==automatic:return ''
         from page_cache import format_phone_like
         formatted=format_phone_like(automatic or '+1',value)
+        # Phone parsing is intentionally permissive at the input stage. If a
+        # partial or uncommon number cannot be normalized yet, keep what the
+        # user typed so later validation can explain the problem without erasing it.
+        if not formatted:return value
         if formatted!=value:self.phone_vars[index].set(formatted)
         return '' if formatted==automatic else formatted
 
@@ -2576,7 +2615,7 @@ class App:
             except (ValueError,OSError,KeyError,IndexError):
                 existing=''
         formatted=format_phone_like(existing,value) if existing else format_phone_like('+1',value)
-        if formatted!=value:self.phone_vars[index].set(formatted)
+        if formatted and formatted!=value:self.phone_vars[index].set(formatted)
 
     def clear_auto_phone(self,index):
         if self.phone_vars[index].get().strip()==self.auto_phone_values[index]:
@@ -2631,10 +2670,12 @@ class App:
         self.completion_actions.pack_forget()
         try:
             values = []
-            for name, title, link in self.rows:
-                cleaned_title = strip_title_hashtags(title.get()).strip()
-                if cleaned_title != title.get():
-                    title.set(cleaned_title)
+            if (self.title_preview_index is not None
+                    and not self._commit_manual_title_editor(self.title_preview_index)):
+                return
+            for index, (name, title, link) in enumerate(self.rows):
+                self.clean_title_field(index)
+                cleaned_title = title.get().strip()
                 values.append((name.get(), cleaned_title, link.get()))
             count = int(self.count.get())
             templates = {}
@@ -2659,6 +2700,8 @@ class App:
                         try:old_phone=json.loads(config_path.read_text(encoding='utf-8')).get('phone','+1(240)726-0061')
                         except (OSError,ValueError,TypeError):old_phone='+1(240)726-0061'
                     formatted = format_phone_like(old_phone, supplied) if supplied else format_phone_like(old_phone,old_phone)
+                    if supplied and not formatted:
+                        raise ValueError('号码无法识别，请检查号码，必要时补上国家区号。')
                     templates[index] = page_design(cached_pages, source_number, template_theme, self.layout.get(),
                                                    read_style(self.cache_path), phone_override=formatted)
                     templates[index]['phone_input']=supplied

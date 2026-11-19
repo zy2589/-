@@ -3540,7 +3540,6 @@
           }
           return true;
         });
-        if (changed && movesMainMedia) remapCaptionsFromSource(audioOnlyMainMove ? mainAudioClips() : mainClips());
         if (changed) toast(`切片已${applied < 0 ? "左移" : "右移"} ${Math.round(Math.abs(applied) / frameDuration())} 帧`);
         return changed;
       }

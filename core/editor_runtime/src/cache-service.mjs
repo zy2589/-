@@ -3,7 +3,7 @@ import { Worker, isMainThread, parentPort } from 'node:worker_threads';
 let worker, sequence = 0;
 const pending = new Map();
 export function notifyCacheActivity() { worker?.postMessage({activity:true}); }
-function request(method, root, token) {
+function request(method, root, token, categories, workspaceHint = '') {
   if (!worker) {
     const current = worker = new Worker(new URL(import.meta.url), {execArgv:process.execArgv.filter(arg=>!arg.startsWith('--input-type'))});
     const fail = error => {
@@ -22,22 +22,24 @@ function request(method, root, token) {
   }
   worker.ref();
   return new Promise((resolve,reject)=>{
-    const id=++sequence; pending.set(id,{resolve,reject}); worker.postMessage({id,method,root,token});
+    const id=++sequence; pending.set(id,{resolve,reject}); worker.postMessage({id,method,root,token,categories,workspaceHint});
   });
 }
-export const scanSafeCache = root => request('scan',root);
-export const cleanSafeCache = (root,token) => request('clean',root,token);
+export const scanSafeCache = (root,workspaceHint = '') => request('scan',root,undefined,undefined,workspaceHint);
+export const cleanSafeCache = (root,token,categories = ['caches']) => request('clean',root,token,categories);
 
 if (!isMainThread) {
   const engine=await import('./cache-maintenance.mjs');
   let busy=false;
   parentPort.on('message',async message=>{
     if (message.activity) { engine.notifyCacheActivity(); return; }
-    const {id,method,root,token}=message;
+    const {id,method,root,token,categories,workspaceHint}=message;
     if (busy) { parentPort.postMessage({id,error:'缓存任务正在后台运行'}); return; }
     busy=true;
     try {
-      const result=method==='scan'?await engine.scanSafeCache(root):await engine.cleanSafeCache(root,token);
+      const result=method==='scan'
+        ? await engine.scanSafeCache(root,workspaceHint)
+        : await engine.cleanSafeCache(root,token,categories);
       parentPort.postMessage({id,result});
     } catch(error) {parentPort.postMessage({id,error:error.message});}
     finally {busy=false;}

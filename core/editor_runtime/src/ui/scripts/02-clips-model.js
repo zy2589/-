@@ -64,8 +64,15 @@ function baseMainClips() {
           const main=audioOwner?mainAudioClips():nextClips;
           const mediaClips=[...main,...(audioOwner?state.audioAssets:state.videoLayers)];
           const owner=caption.ownerClipId&&mediaClips.find(c=>c.id===caption.ownerClipId);
-          if(caption.ownerClipId&&!owner&&!/^[va]-/.test(caption.ownerClipId))return null;
-          return sourceRangeToTimeline(start,end,owner?[{...owner,sourceEnd:Number(owner.sourceEnd??(Number(owner.sourceStart||0)+(owner.end-owner.start)*Number(state.audio.speed||1)))}]:main);
+          const legacyMainOwner=/^(?:main|[va]-)/.test(String(caption.ownerClipId||''));
+          if(caption.ownerClipId&&!owner&&!legacyMainOwner)return null;
+          const sourceMediaId=String(caption.sourceMediaId||'').trim();
+          const available=mediaClips.filter(clip=>{
+            const clipSource=String(clip.sourceMediaId||clip.path||state.video?.path||'').trim();
+            return !sourceMediaId||!clipSource||clipSource===sourceMediaId;
+          });
+          const candidates=owner?[owner]:available;
+          return sourceRangeToTimeline(start,end,candidates.map(clip=>({...clip,sourceEnd:Number(clip.sourceEnd??(Number(clip.sourceStart||0)+(clip.end-clip.start)*Number(state.audio.speed||1)))})));
         };
         const archived = Array.isArray(state.captionRecoveryArchive) ? state.captionRecoveryArchive : [];
         const working = new Map((state.captions || []).map((caption) => [caption.id, { ...caption, words: Array.isArray(caption.words) ? [...caption.words] : caption.words }]));

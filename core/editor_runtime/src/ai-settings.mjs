@@ -12,6 +12,7 @@ import { supportRoot } from "./media.mjs";
 const GEMINI_API_ROOT = "https://generativelanguage.googleapis.com";
 const INTERACTIONS_PATH = "/v1beta/interactions";
 const MODELS_LIST_PATH = "/v1beta/models";
+export const GEMINI_SPEECH_MODEL = "gemini-3.7-flash";
 const MODEL_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const NOT_TEXT_MODEL = /image|tts|live|embed|robot|computer-use|veo|lyria|omni|native-audio|imagen|aqa|gemma/i;
 const require = createRequire(import.meta.url);
@@ -681,9 +682,14 @@ export function reviewReady() {
 }
 
 export function geminiMediaReady() {
+  return geminiTranscriptionReady();
+}
+
+export function geminiTranscriptionReady() {
+  if (geminiApiKey()) return true;
   const settings = loadReviewSettings();
-  if (settings.provider === "antigravity") return false;
-  return reviewReady();
+  if (vertexAuthMode() === "express-key") return true;
+  return Boolean(settings.vertexProject && vertexServiceAccount());
 }
 
 export function buildGeminiInteractionBody({ model, system, user } = {}) {
@@ -1081,6 +1087,155 @@ export async function completeGeminiMedia({
   const text = textFromResult(legacy);
   if (!text) throw new Error(apiErrorMessage(legacy.data, legacy.raw, legacy.status));
   return text;
+}
+
+export async function completeGeminiTranscription({
+  system = "",
+  input = [],
+  signal = null,
+  responseSchema = null,
+  model = GEMINI_SPEECH_MODEL,
+} = {}) {
+  if (!geminiTranscriptionReady())
+    throw new Error("请在纠正设置里保存 Gemini API Key，或配置 Vertex 凭证。听写不受 Antigravity 选择影响。");
+  const id = normalizeModelId(model) || GEMINI_SPEECH_MODEL;
+  const headers = { "Content-Type": "application/json" };
+  const modelFallbacks = ["gemini-2.5-flash", "gemini-3.5-flash-lite"]
+    .filter(candidate => candidate !== id);
+
+  // A saved Gemini API Key is independent of the selected manuscript review
+  // provider, so Gemini transcription still works while Antigravity is used
+  // for review.
+  const geminiKey = geminiApiKey();
+  const settings = geminiKey ? null : loadReviewSettings();
+  const urlForModel = modelId => {
+    if (geminiKey)
+      return `${GEMINI_API_ROOT}/v1beta/models/${encodeURIComponent(modelId)}:generateContent`;
+    if (vertexAuthMode() === "express-key")
+      return buildVertexExpressGenerateContentUrl(modelId);
+    if (vertexAuthMode() === "service-account") {
+      if (!settings.vertexProject) throw new Error("请先填写 Vertex 项目 ID。");
+      const location = settings.vertexLocation || "us-central1";
+      return `https://${location}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(settings.vertexProject)}/locations/${encodeURIComponent(location)}/publishers/google/models/${encodeURIComponent(modelId)}:generateContent`;
+    }
+    throw new Error("请保存 Gemini API Key，或配置 Vertex Key / 服务账号。");
+  };
+  if (geminiKey) {
+    headers["x-goog-api-key"] = geminiKey;
+  } else {
+    if (vertexAuthMode() === "express-key") {
+      headers["x-goog-api-key"] = vertexApiKey();
+    } else if (vertexAuthMode() === "service-account") {
+      if (!settings.vertexProject) throw new Error("请先填写 Vertex 项目 ID。");
+      Object.assign(headers, await vertexOAuthHeaders());
+    } else {
+      throw new Error("请保存 Gemini API Key，或配置 Vertex Key / 服务账号。");
+    }
+  }
+
+  const body = {
+    systemInstruction: { parts: [{ text: String(system || "") }] },
+    contents: [{ role: "user", parts: mediaPartsFromInput(input) }],
+    generationConfig: {
+      temperature: 0,
+      responseMimeType: "application/json",
+      ...(responseSchema ? { responseSchema } : {}),
+    },
+  };
+  const interactionUrl = () => {
+    if (geminiKey) return `${GEMINI_API_ROOT}${INTERACTIONS_PATH}`;
+    if (vertexAuthMode() !== "service-account") return "";
+    if (!settings.vertexProject) throw new Error("请先填写 Vertex 项目 ID。");
+    const location = settings.vertexLocation || "us-central1";
+    return `https://${location}-aiplatform.googleapis.com/v1beta1/projects/${encodeURIComponent(settings.vertexProject)}/locations/${encodeURIComponent(location)}/interactions`;
+  };
+  const useInteractions = Boolean(geminiKey) || vertexAuthMode() === "service-account";
+  const isTemporaryFailure = (status, data = {}, raw = "") => {
+    const message = `${extractApiErrorMessage(data, raw, status)} ${raw}`.toLowerCase();
+    return [408, 429, 500, 502, 503, 504, 529].includes(Number(status)) ||
+      /high demand|overloaded|temporarily unavailable|resource_exhausted|fetch failed|network error|socket hang up|timed? ?out/.test(message);
+  };
+  const isModelUnavailable = (status, data = {}, raw = "") =>
+    Number(status) === 404 || /model[^\n]*(not found|does not exist|unavailable|no longer available|not available)/i.test(`${extractApiErrorMessage(data, raw, status)} ${raw}`);
+  const candidates = [id, ...modelFallbacks];
+  let lastError = null;
+  const attempted = [];
+  for (let modelIndex = 0; modelIndex < candidates.length; modelIndex += 1) {
+    const candidate = candidates[modelIndex];
+    attempted.push(candidate);
+    const attempts = modelIndex === 0 ? 2 : 1;
+    let shouldTryNextModel = false;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (signal?.aborted) throw new Error("cancelled");
+      try {
+        let result;
+        if (useInteractions) {
+          const interaction = await postGeminiJson(interactionUrl(), headers, {
+            model: candidate,
+            input,
+            system_instruction: String(system || ""),
+            store: false,
+            generation_config: { temperature: 0 },
+            response_format: responseSchema
+              ? [{ type: "text", mime_type: "application/json", schema: responseSchema }]
+              : [{ type: "text", mime_type: "application/json" }],
+          }, signal);
+          result = textFromResult(interaction) || !shouldFallbackToGenerateContent(interaction.status, interaction.data, interaction.raw)
+            ? interaction
+            : await postGeminiJson(urlForModel(candidate), headers, body, signal);
+        } else {
+          result = await postGeminiJson(urlForModel(candidate), headers, body, signal);
+        }
+        const text = textFromResult(result);
+        if (text) {
+          let isStructuredOutput = false;
+          try {
+            JSON.parse(text);
+            isStructuredOutput = true;
+          } catch {
+            /* Plain-text provider overload notices can arrive with HTTP 200. */
+          }
+          if (isStructuredOutput || !isTemporaryFailure(0, {}, text))
+            return { text, model: candidate };
+          lastError = new Error(text);
+          if (attempt + 1 < attempts) {
+            await new Promise(resolve => setTimeout(resolve, 850 * (attempt + 1)));
+            continue;
+          }
+          shouldTryNextModel = true;
+          break;
+        }
+        lastError = new Error(apiErrorMessage(result.data, result.raw, result.status));
+        const temporary = isTemporaryFailure(result.status, result.data, result.raw);
+        if (temporary && attempt + 1 < attempts) {
+          await new Promise(resolve => setTimeout(resolve, 850 * (attempt + 1)));
+          continue;
+        }
+        if (temporary || isModelUnavailable(result.status, result.data, result.raw)) {
+          shouldTryNextModel = true;
+          break;
+        }
+        throw lastError;
+      } catch (error) {
+        if (signal?.aborted || error?.message === "cancelled") throw error;
+        lastError = error;
+        const temporary = isTemporaryFailure(0, {}, error?.message || String(error));
+        if (temporary && attempt + 1 < attempts) {
+          await new Promise(resolve => setTimeout(resolve, 850 * (attempt + 1)));
+          continue;
+        }
+        if (temporary) {
+          shouldTryNextModel = true;
+          break;
+        }
+        throw error;
+      }
+    }
+    if (!shouldTryNextModel) break;
+  }
+  if (lastError && candidates.length === 1) throw lastError;
+  const tried = attempted.join(" → ");
+  throw new Error(`Gemini 听写服务当前负载较高或模型暂不可用。已依次尝试 ${tried}，请稍后重试。${lastError?.message ? `（${lastError.message}）` : ""}`);
 }
 
 export function formatAntigravityError(message, status = "") {

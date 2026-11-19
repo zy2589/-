@@ -128,7 +128,7 @@ function nudgeCutEdge(side, frames) {
   if(Math.abs(time-clip[edge])<frameDuration()/2){restoreSnapshot();return toast('已到可用素材或相邻切口边界');}
   if(state.playing)togglePlay();state.cutPreviewRange=null;$('loopCutPreview').textContent='循环试听前后 1 秒';
   linked.forEach((x,i)=>Object.assign(x.obj,next[i]));
-  remapCaptionsFromSource(mainClips());recomputeContentDuration();seekTimeline(time);renderAll();queueAutosave();refreshCutInspector();
+  recomputeContentDuration();seekTimeline(time);renderAll();queueAutosave();refreshCutInspector();
 }
 $("openCutInspector")?.addEventListener("click", () => {
   if (!precisionCutPair()) return toast("请先切出至少两个视频片段");
