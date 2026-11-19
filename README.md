@@ -1,6 +1,6 @@
 # 剪辑助手
 
-Windows 桌面应用，包含**下载、剪辑、抠图**三个工作区，以及工程首页和本地数据维护入口。
+Windows 桌面剪辑助手，包含**视频下载与降噪、时间线剪辑、CC 语音识别、视频抠图**四项核心功能，并提供工程首页和本地数据维护入口。CC 语音识别默认使用 Deepgram Nova-3，也可选择 Gemini、Groq Whisper 或本地 Whisper。
 
 ## 版权与使用范围
 
@@ -36,7 +36,11 @@ DPAPI 凭证与当前 Windows 用户配置关联。迁移到其他 Windows 用�
 
 ## 最新版本
 
-最新 Windows 版本与安装包、便携包及 SHA-256 校验文件见 [GitHub Releases](https://github.com/zy2589/-/releases/latest)。每个版本的变更和安全审核报告随 Release 发布。
+当前唯一发布版本：[`v20261119-190141`](https://github.com/zy2589/-/releases/tag/v20261119-190141)。
+
+- 安装包：[ClipAssistant-installer-20261119-190141.zip](https://github.com/zy2589/-/releases/download/v20261119-190141/ClipAssistant-installer-20261119-190141.zip)
+- 便携包：[ClipAssistant-portable-20261119-190141.zip](https://github.com/zy2589/-/releases/download/v20261119-190141/ClipAssistant-portable-20261119-190141.zip)
+- SHA-256 校验文件随两个压缩包一并提供；每个版本的变更和安全审核报告见 Release 页面。
 
 ## 本地构建记录
 
