@@ -52,6 +52,9 @@ const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const downloads = new Map();
 const analyses = new Map();
 const autoCaptionAnalyses = new Map();
+// Rebatch tiny decoded audio frames before FLAC encoding. Some source streams
+// can otherwise hand FFmpeg frames smaller than the FLAC encoder's minimum.
+const FLAC_SPEECH_FRAME_FILTER = "asetnsamples=n=1024:p=1";
 function logSpeechJob(job,event,details={}){
   try{
     const directory=path.join(supportRoot(),'logs');
@@ -1220,6 +1223,7 @@ function groqHttpError(status, body) {
 }
 
 function extractAudioSlice(inputPath, outputPath, start, duration) {
+  const wavOutput = path.extname(outputPath).toLowerCase() === ".wav";
   return new Promise((resolve, reject) => {
     const child = spawn(
       mediaBinary("ffmpeg"),
@@ -1239,8 +1243,9 @@ function extractAudioSlice(inputPath, outputPath, start, duration) {
         "1",
         "-ar",
         "16000",
+        ...(wavOutput ? [] : ["-af", FLAC_SPEECH_FRAME_FILTER]),
         "-c:a",
-        path.extname(outputPath).toLowerCase() === ".wav" ? "pcm_s16le" : "flac",
+        wavOutput ? "pcm_s16le" : "flac",
         outputPath,
       ],
       { stdio: ["ignore", "ignore", "pipe"], windowsHide: true },
@@ -2018,6 +2023,7 @@ export function startScriptAnalysis({
       "1",
       "-ar",
       "16000",
+      ...(useLocal ? [] : ["-af", FLAC_SPEECH_FRAME_FILTER]),
       "-c:a",
       useLocal ? "pcm_s16le" : "flac",
       wavPath,
@@ -2270,7 +2276,9 @@ export function startAutoCaptionAnalysis({ inputPath, duration, captionLines = 1
   };
   const ffmpeg = spawn(mediaBinary("ffmpeg"), [
     "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
-    "-i", inputPath, "-vn", "-ac", "1", "-ar", "16000", "-c:a", engine === 'local' ? 'pcm_s16le' : 'flac', audioPath,
+    "-i", inputPath, "-vn", "-ac", "1", "-ar", "16000",
+    ...(engine === 'local' ? [] : ["-af", FLAC_SPEECH_FRAME_FILTER]),
+    "-c:a", engine === 'local' ? 'pcm_s16le' : 'flac', audioPath,
   ], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
   job.child = ffmpeg;
   let ffmpegError = "";
