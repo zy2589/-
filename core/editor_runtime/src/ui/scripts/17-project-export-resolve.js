@@ -245,6 +245,19 @@ function persistedMediaItem(item, preserveWaveform = false) {
         }
       }
       let cachedExportHardware = null;
+      function updateExportProgressIndicator(label, visible = true) {
+        const button = $("showExportProgress");
+        if (!button) return;
+        button.hidden = !visible;
+        button.textContent = label || "";
+        button.title = label || "查看导出进度";
+      }
+      function showExportProgressPanel() {
+        const modal = $("exportModal");
+        if (!modal) return;
+        modal.classList.add("on");
+        modal.classList.toggle("background-mode", !!state.exportJobId);
+      }
       function hardwareExportLabel() {
         if (selectedExportDevice() === "cpu") return "⚙️ CPU 软件编码导出";
         const vendor = cachedExportHardware?.vendor;
@@ -302,6 +315,10 @@ function persistedMediaItem(item, preserveWaveform = false) {
         return cachedExportHardware;
       }
       async function openExportSettings() {
+        if (state.exportJobId) {
+          showExportProgressPanel();
+          return;
+        }
         if (!state.video) {
           toast("请先导入视频");
           return;
@@ -828,6 +845,9 @@ function persistedMediaItem(item, preserveWaveform = false) {
           }
           $("exportSettingsModal").classList.remove("on");
           $("exportModal").classList.add("on");
+          $("exportModal").classList.remove("background-mode");
+          $("backgroundExport").hidden = true;
+          updateExportProgressIndicator("", false);
           $("cancelExport").textContent = "取消导出";
           $("exportBar").style.width = "0";
           $("exportStatus").textContent = "正在检查音频修复参数…";
@@ -930,6 +950,9 @@ function persistedMediaItem(item, preserveWaveform = false) {
               spliceMuteUntil,
             };
           });
+          const denoisedSourcePath = mainAudioPath
+            ? state.denoisedAudio?.sourcePath || state.video?.path || ""
+            : "";
           const config = {
             inputPath: exportSourcePath,
             noMainVideoSource,
@@ -951,9 +974,19 @@ function persistedMediaItem(item, preserveWaveform = false) {
             audioAssets: state.audioAssets.map((x) => {
               const videoOwner = state.videoLayers.find((video) =>
                 (x.linkedVideoId && video.id === x.linkedVideoId) || (x.linkGroupId && video.linkGroupId === x.linkGroupId));
+              const linkedToDenoisedSource = !!denoisedSourcePath && (
+                x.path === denoisedSourcePath ||
+                x.sourceMediaId === denoisedSourcePath ||
+                (!!x.sourceMediaId && !!state.video?.sourceMediaId && x.sourceMediaId === state.video.sourceMediaId) ||
+                videoOwner?.path === denoisedSourcePath
+              );
+              const overlapsMainAudio = linkedToDenoisedSource && exportMainAudioClips.some((clip) =>
+                Number(x.start || 0) < Number(clip.end || 0) && Number(x.end || 0) > Number(clip.start || 0));
               const playbackMode = videoOwner?.splicePlaybackMode || "normal-audio";
               return ({
-              path: resolvedPath(x) || x.path,
+              path: linkedToDenoisedSource && !overlapsMainAudio
+                ? mainAudioPath
+                : resolvedPath(x) || x.path,
               start: x.start,
               end: x.end,
               sourceStart: x.sourceStart || 0,
@@ -964,7 +997,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
               pan: x.pan || 0,
               fadeIn: x.fadeIn || 0,
               fadeOut: x.fadeOut || 0,
-              muted: !!x.muted || playbackMode === "normal-muted" || playbackMode === "freeze-hold",
+              muted: !!x.muted || overlapsMainAudio || playbackMode === "normal-muted" || playbackMode === "freeze-hold",
               spliceMuteStart: playbackMode === "freeze-resume" ? Math.max(Number(x.start || 0), Number(videoOwner.start || 0)) : 0,
               spliceMuteUntil: playbackMode === "freeze-resume" ? Number(videoOwner.spliceFreezeUntil || videoOwner.start || 0) : 0,
               linkedVideoId: x.linkedVideoId || "",
@@ -1101,6 +1134,10 @@ function persistedMediaItem(item, preserveWaveform = false) {
           };
           const { jobId } = await nativeCall("startExport", config);
           state.exportJobId = jobId;
+          state.exportProjectId = state.projectId || "";
+          $("exportModal").classList.add("background-mode");
+          $("backgroundExport").hidden = false;
+          updateExportProgressIndicator("导出 0%");
           $("exportSummary").textContent =
             format === "mp3"
               ? `MP3 · ${formatTime(exportDuration / exportSpeed, false)} · ${exportSpeed} 倍速`
@@ -1112,6 +1149,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
             const elapsed = Math.max(0, Number(s.elapsed || 0));
             const clock = `${Math.floor(elapsed / 60)}:${String(Math.floor(elapsed % 60)).padStart(2, "0")}`;
             $("exportBar").style.width = `${Math.max(2, (s.progress || 0) * 100)}%`;
+            updateExportProgressIndicator(`导出 ${Math.round((s.progress || 0) * 100)}%`);
             $("exportBar").parentElement?.classList.toggle(
               "waiting",
               (s.state === "queued" || s.state === "exporting" || s.state === "preparing") && (s.progress || 0) < 0.18,
@@ -1133,16 +1171,22 @@ function persistedMediaItem(item, preserveWaveform = false) {
                 : "导出完成");
               $("revealExport").style.display = "inline-block";
               $("cancelExport").textContent = "关闭";
+              $("backgroundExport").hidden = true;
               $("revealExport").onclick = () =>
                 window.native.revealFile(s.outputPath);
               state.exportJobId = "";
+              state.exportProjectId = "";
+              updateExportProgressIndicator("导出完成");
               resetExportSpeed();
               break;
             }
             if (s.state === "cancelled") {
               $("exportStatus").textContent = "已取消导出";
               $("cancelExport").textContent = "关闭";
+              $("backgroundExport").hidden = true;
               state.exportJobId = "";
+              state.exportProjectId = "";
+              updateExportProgressIndicator("导出已取消");
               resetExportSpeed();
               break;
             }
@@ -1152,9 +1196,13 @@ function persistedMediaItem(item, preserveWaveform = false) {
           chooseButton.disabled = false;
           chooseButton.textContent = originalChooseText;
           state.exportJobId = "";
+          state.exportProjectId = "";
           resetExportSpeed();
           $("cancelExport").textContent = "关闭";
           $("exportStatus").textContent = e.message;
+          $("backgroundExport").hidden = true;
+          $("exportModal").classList.remove("background-mode");
+          updateExportProgressIndicator("导出失败");
           showExportSettingsFeedback(e.message || "导出失败，请重试");
           toast(e.message);
         }
@@ -1334,26 +1382,40 @@ function persistedMediaItem(item, preserveWaveform = false) {
           "永久删除工程",
         );
       }
+      async function renameHomeProject(projectId, event) {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        if (homeBusy) return;
+        const item = (window.__projectItems || []).find((project) => project.id === projectId);
+        if (!item) return;
+        homeBusy = true;
+        updateHomeSelection();
+        try {
+          const requestedName = await openRenameProjectDialog(item.name || "未命名工程");
+          if (requestedName == null) return;
+          const name = String(requestedName).trim().slice(0, 80);
+          if (!name) throw new Error("工程名称不能为空。");
+          if (state.projectId === projectId) await flushAutoSave();
+          await nativeCall("renameProject", { projectId, name });
+          if (state.projectId === projectId) {
+            state.projectName = name;
+            $("projectName").textContent = name;
+            window.syncOpenProjectTab?.(projectId, name);
+            queueAutosave();
+          }
+          toast("工程名称已修改");
+        } catch (error) {
+          toast(error.message);
+        } finally {
+          homeBusy = false;
+          updateHomeSelection();
+          await refreshHome();
+        }
+      }
       $("homeProjectGrid").onclick = (event) => {
         const rename = event.target.closest("[data-rename-project]");
         if (rename) {
-          const projectId = rename.dataset.renameProject;
-          const item = (window.__projectItems || []).find((project) => project.id === projectId);
-          openRenameProjectDialog(item?.name || "未命名工程").then((nextName) => {
-            if (nextName === null) return;
-            const name = nextName.trim().slice(0, 80);
-            if (!name) { toast("工程名称不能为空"); return; }
-            nativeCall("renameProject", { projectId, name })
-              .then(async () => {
-                if (state.projectId === projectId) {
-                  state.projectName = name;
-                  if ($("projectName")) $("projectName").textContent = state.projectName;
-                }
-                await refreshHome();
-                toast("工程名称已修改");
-              })
-              .catch((error) => toast(error.message));
-          });
+          renameHomeProject(rename.dataset.renameProject, event);
           return;
         }
         const remove = event.target.closest("[data-delete-project]");
@@ -1365,8 +1427,8 @@ function persistedMediaItem(item, preserveWaveform = false) {
         if (card) openProjectById(card.dataset.projectId);
       };
       $("homeProjectGrid").onpointerdown = (event) => {
-        const remove = event.target.closest("[data-delete-project], [data-rename-project]");
-        if (!remove) return;
+        const action = event.target.closest("[data-delete-project], [data-rename-project]");
+        if (!action) return;
         event.stopPropagation();
       };
       $("backHome").onclick = backToHome;

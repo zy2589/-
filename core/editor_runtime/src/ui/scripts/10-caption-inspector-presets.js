@@ -157,10 +157,62 @@ function renderIssues() {
         if (typeof captionReviewDiffers === 'function' && !captionReviewDiffers(before, after)) return false;
         return !!captionCorrectionKey(before) && !!captionCorrectionKey(after) && captionCorrectionKey(before) !== captionCorrectionKey(after);
       }
+      function captionMismatchReviewGroups(caption) {
+        const groups = new Map();
+        for (const [index, word] of (caption?.words || []).entries()) {
+          const recognized = word.recognizedDisplay || word.originalDisplay || word.display || '';
+          const expected = word.expectedDisplay || word.referenceExpected || '';
+          if (word.issueType !== 'mismatch' || !expected || !captionCorrectionDiffers(recognized, expected)) continue;
+          const key = word.issueId ? `issue:${word.issueId}` : `word:${index}`;
+          if (!groups.has(key)) groups.set(key, { issueId: word.issueId || '', words: [] });
+          groups.get(key).words.push(word);
+        }
+        const seenLabels = new Map();
+        return [...groups.values()].map(group => {
+          const review = group.issueId && (state.reviewCaptions || []).find(item =>
+            (item.issueId || item.id) === group.issueId && item.type === 'mismatch' &&
+            (!item.ownerClipId || item.ownerClipId === (caption.ownerClipId || '')) &&
+            (!item.captionTrackId || item.captionTrackId === (caption.trackId || 'caption')));
+          const unique = values => [...new Map(values.filter(value => String(value || '').trim()).map(value =>
+            [captionCorrectionKey(value), String(value).trim()])).values()];
+          const spoken = review?.spokenText || unique(group.words.map(word => word.recognizedDisplay || word.originalDisplay || word.display)).join(' ');
+          const expected = review?.expectedText || unique(group.words.map(word => word.expectedDisplay || word.referenceExpected)).join(' ');
+          const times = group.words.map(word => [Number(word.start), Number(word.end)])
+            .filter(([start, end]) => Number.isFinite(start) && Number.isFinite(end) && end > start);
+          return {
+            issueId: group.issueId, spokenText: spoken, expectedText: expected,
+            start: times.length ? Math.min(...times.map(([start]) => start)) : NaN,
+            end: times.length ? Math.max(...times.map(([, end]) => end)) : NaN,
+          };
+        }).filter(group => {
+          const spoken = captionCorrectionKey(group.spokenText);
+          const expected = captionCorrectionKey(group.expectedText);
+          if (!spoken || !expected) return false;
+          const key = `${spoken}\u2192${expected}`;
+          const previous = seenLabels.get(key) || [];
+          if (previous.some(item => {
+            if (![group.start, group.end, item.start, item.end].every(Number.isFinite)) return false;
+            const overlap = Math.min(group.end, item.end) - Math.max(group.start, item.start);
+            const shorter = Math.min(group.end - group.start, item.end - item.start);
+            return (overlap > 0.005 && shorter > 0 && overlap / shorter >= 0.75) ||
+              (Math.abs(group.start - item.start) <= 0.035 && Math.abs(group.end - item.end) <= 0.06);
+          })) return false;
+          previous.push({ start: group.start, end: group.end });
+          seenLabels.set(key, previous);
+          return true;
+        });
+      }
       function renderCaptionReferenceChanges(caption) {
         caption.textAuditBaseline ??= caption.text || '';
         const differs = captionCorrectionDiffers;
-        const changes = (caption.textChanges || []).filter(change => change.kind !== 'manual' && differs(change.before, change.after)).map(change =>
+        const seen = new Set();
+        const changes = (caption.textChanges || []).filter(change => {
+          if (change.kind === 'manual' || !differs(change.before,change.after)) return false;
+          const before=captionCorrectionKey(change.before),after=captionCorrectionKey(change.after),key=`${before}→${after}`;
+          if (seen.has(key) || captionMismatchReviewGroups(caption).some(group =>
+            captionCorrectionKey(group.spokenText)===before && captionCorrectionKey(group.expectedText)===after)) return false;
+          seen.add(key);return true;
+        }).map(change =>
           `<div class="caption-mismatch-suggestion small status"><span>${escapeHtml(change.before)}（识别文案） → ${escapeHtml(change.after)}（正确文案）</span></div>`).join('');
         return changes + (caption.words || []).map((word,index) => {
           if(word.autoMildCorrected)return `<div class="caption-mild-note small">已自动处理：${escapeHtml(word.display)}</div>`;
@@ -204,10 +256,9 @@ function renderIssues() {
         renderAll();queueAutosave();
       }
       function renderCaptionMismatchSuggestions(caption) {
-        return renderCaptionReferenceChanges(caption) + (caption.words || []).map((word, index) =>
-          word.issueType === "mismatch" && word.expectedDisplay && captionCorrectionDiffers(word.recognizedDisplay || word.originalDisplay || word.display, word.expectedDisplay)
-            ? `<div class="caption-mismatch-suggestion"><span>${escapeHtml(word.recognizedDisplay || word.originalDisplay || word.display || "")}（识别文案） → ${escapeHtml(word.expectedDisplay)}（正确文案）</span></div>`
-            : "").join("");
+        return renderCaptionReferenceChanges(caption) + captionMismatchReviewGroups(caption).map(group =>
+          `<div class="caption-mismatch-suggestion"><span>${escapeHtml(group.spokenText)}（识别文案） → ${escapeHtml(group.expectedText)}（正确文案）</span></div>`
+        ).join("");
       }
       function renderCaptionEmphasisPicker(caption) {
         if (state.captionStyle?.keywordMode !== true) return "";

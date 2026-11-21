@@ -99,8 +99,15 @@ if ($UiHtml.Contains('data-inspect="ai"') -or $UiHtml.Contains('id="inspect-ai"'
     throw '安装包仍包含已移除的 AI 助手属性页，未更改当前安装。'
 }
 $ProcessPath = [IO.Path]::GetFullPath((Join-Path $Destination '剪辑助手.exe'))
-$RunningInstance = Get-CimInstance Win32_Process -Filter "name = '剪辑助手.exe'" |
-    Where-Object { $_.ExecutablePath -and [IO.Path]::GetFullPath($_.ExecutablePath).Equals($ProcessPath, [StringComparison]::OrdinalIgnoreCase) } |
+$RunningInstance = Get-Process -Name '剪辑助手' -ErrorAction SilentlyContinue |
+    Where-Object {
+        try {
+            $_.Path -and [IO.Path]::GetFullPath($_.Path).Equals($ProcessPath, [StringComparison]::OrdinalIgnoreCase)
+        } catch {
+            # If the executable path cannot be read, treat the matching process name as running.
+            $true
+        }
+    } |
     Select-Object -First 1
 if ($RunningInstance) {
     throw '剪辑助手仍在运行。请先正常关闭窗口，再重新安装；当前安装未更改。'

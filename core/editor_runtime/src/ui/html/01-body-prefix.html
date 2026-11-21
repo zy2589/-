@@ -238,6 +238,11 @@
         background: #1c1e21;
         transform: translateY(-1px);
       }
+      .projectcard.drop-target {
+        border-color: var(--blue);
+        background: #20252a;
+        box-shadow: 0 0 0 2px rgba(93, 153, 218, .48);
+      }
       .projectthumb {
         width: 88px;
         height: 62px;
@@ -269,8 +274,7 @@
         margin-top: auto;
         padding-top: 2px;
       }
-      .projectdelete,
-      .projectrename {
+      .projectdelete {
         position: absolute;
         top: 8px;
         right: 8px;
@@ -283,9 +287,21 @@
         background: rgba(22,24,26,.92);
         opacity: 1;
       }
+      .projectrename {
+        position: absolute;
+        top: 8px;
+        right: 42px;
+        z-index: 3;
+        width: 28px;
+        height: 28px;
+        border: 1px solid #454a50;
+        border-radius: 6px;
+        color: #c8ccd2;
+        background: rgba(22,24,26,.92);
+        opacity: 1;
+      }
+      .projectrename:hover { color: #fff; background: #354f70; border-color: #54749b; }
       .projectdelete:hover { color: #fff; background: #a8373e; border-color: #a8373e; }
-      .projectrename { right: 42px; }
-      .projectrename:hover { color: #fff; background: #246ca6; border-color: #3b8fd0; }
       .emptyprojects {
         flex: 1;
         display: none;
@@ -1849,7 +1865,9 @@
       .zoom { accent-color: #8d8f94; }
       @media (max-height: 780px) { :root { --timeline: 310px; --timeline-track-h: 48px; } }
       /* The startup proportions take precedence over legacy fixed-width breakpoints. */
-      .app { grid-template-rows: var(--top) minmax(0, 1fr) var(--footer); }
+      /* Open project tabs can wrap onto additional rows; size the header from
+         its content so the second tab row stays visible instead of clipping. */
+      .app { grid-template-rows: auto minmax(0, 1fr) var(--footer); }
       .workspace {
         grid-template-columns: var(--side) 5px minmax(0, 1fr) 5px var(--inspector);
         grid-template-rows: minmax(220px, 1fr) minmax(160px, var(--timeline));

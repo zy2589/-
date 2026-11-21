@@ -22,6 +22,52 @@ from .downloader_runtime.desktop_ui import PALETTES, bind_scale_wheel, native_ca
 
 MAX_PREVIEW_MASKS = 1200
 PREVIEW_MASK_SIZE = (128, 128)
+ALPHA_EDGE_GAMMA = 1.15
+REPAIRED_ALPHA_MIN_FILTER = 41
+REPAIRED_ALPHA_CUTOFF = 0.30
+
+
+def _min_filter_axis_u8(values, size, axis):
+    """Apply a replicated-edge 1D minimum filter using block minima."""
+    radius = size // 2
+    pads = [(0, 0)] * values.ndim
+    pads[axis] = (radius, radius)
+    padded = np.pad(values, pads, mode='edge')
+    moved = np.moveaxis(padded, axis, -1)
+    output_length = values.shape[axis]
+    extra = (-moved.shape[-1]) % size
+    if extra:
+        moved = np.pad(moved, [(0, 0)] * (moved.ndim - 1) + [(0, extra)], mode='edge')
+
+    blocks = moved.reshape(*moved.shape[:-1], -1, size)
+    prefix = np.minimum.accumulate(blocks, axis=-1).reshape(*moved.shape[:-1], -1)
+    suffix = np.minimum.accumulate(blocks[..., ::-1], axis=-1)[..., ::-1].reshape(
+        *moved.shape[:-1], -1)
+    filtered = np.minimum(suffix[..., :output_length],
+                          prefix[..., size - 1:size - 1 + output_length])
+    return np.moveaxis(filtered, -1, axis)
+
+
+def _min_filter_square_u8(values, size):
+    """Apply a square minimum filter in linear time, separably by axis."""
+    return _min_filter_axis_u8(_min_filter_axis_u8(values, size, 1), size, 0)
+
+
+def _tighten_alpha_edges(alpha, *, repair_alpha=False):
+    """Reduce low-opacity fringe while keeping solid subject pixels unchanged."""
+    np.clip(alpha, 0.0, 1.0, out=alpha)
+    if repair_alpha:
+        # Existing transparent clips often contain a broad, contaminated edge.
+        # A modest matte erosion removes the contaminated outer fringe while
+        # leaving the solid interior untouched.
+        alpha_u8 = np.asarray(np.rint(alpha * 255.0), dtype=np.uint8)
+        alpha_u8 = _min_filter_square_u8(alpha_u8, REPAIRED_ALPHA_MIN_FILTER)
+        alpha[:] = np.asarray(alpha_u8, dtype=np.float32) / 255.0
+        np.subtract(alpha, REPAIRED_ALPHA_CUTOFF, out=alpha)
+        alpha /= 1.0 - REPAIRED_ALPHA_CUTOFF
+        np.clip(alpha, 0.0, 1.0, out=alpha)
+    np.power(alpha, ALPHA_EDGE_GAMMA, out=alpha)
+    return alpha
 
 
 def _run_silent(*args, **kwargs):
@@ -502,6 +548,7 @@ class RotoscopeWindow:
         self.progress_last_label_update = 0.0
         self.export_started_at = None
         self.active_export_repair_alpha = False
+        self.active_export_edge_cleanup = True
         self.active_export_format = ''
         self.contour_mode = tk.BooleanVar(value=False)
         self.contour_points = []
@@ -528,6 +575,7 @@ class RotoscopeWindow:
         self.smart_corrections = []
         self.active_smart_correction = None
         self.repair_alpha_mode = tk.BooleanVar(value=False)
+        self.alpha_edge_cleanup = tk.BooleanVar(value=True)
         self.repair_alpha = None
         self.smart_tracking_mask = None
         self.loaded_repair_mode = None
@@ -566,8 +614,9 @@ class RotoscopeWindow:
         ttk.Label(tools, text='RVM 逐帧跟随人物；背景笔会避开当前识别到的人物。').pack(side='left')
         corrections = ttk.Frame(self.window, padding=(10, 0, 10, 6))
         corrections.pack(fill='x')
-        ttk.Checkbutton(corrections, text='修复已有透明成片（只改Alpha）', variable=self.repair_alpha_mode,
+        ttk.Checkbutton(corrections, text='修复已有透明成片（收紧外沿残边）', variable=self.repair_alpha_mode,
                         command=self._repair_alpha_mode_changed).pack(side='left')
+        ttk.Checkbutton(corrections, text='发丝边缘净化（减少灰边）', variable=self.alpha_edge_cleanup).pack(side='left', padx=(8, 0))
         ttk.Checkbutton(corrections, text='手动修正绿蒙版', variable=self.smart_correction_mode,
                         command=self._smart_correction_mode_changed).pack(side='left')
         ttk.Checkbutton(corrections, text='吸附到人物边缘', variable=self.smart_brush_snap).pack(side='left', padx=(6, 0))
@@ -1219,7 +1268,7 @@ class RotoscopeWindow:
         self.smart_corrections.clear()
         self.active_smart_correction = None
         if repair:
-            self.status.set('修复模式只修改现有 Alpha，不重新抠像。请选择带 Alpha 的成片并重新读取；点选人物后用“减去保留”标出要擦除的残留。')
+            self.status.set('修复模式会保留现有 Alpha 并收紧外沿残边；要删局部残留时，点选人物后用“减去保留”标出。')
         else:
             self.status.set('已退出成片修复模式。请选择原视频并重新读取。')
         self._show_image()
@@ -1495,21 +1544,26 @@ class RotoscopeWindow:
         if not self.video.get():
             messagebox.showwarning('还没准备好', '请先选择视频。', parent=self.window)
             return
-        if self.smart_select_mode.get() and (self.smart_seed is None or self.smart_mask is None):
+        repair_alpha = bool(self.repair_alpha_mode.get())
+        edge_cleanup = bool(self.alpha_edge_cleanup.get())
+        automatic_alpha_cleanup = repair_alpha and edge_cleanup and not self.smart_corrections
+        if self.smart_select_mode.get() and (self.smart_seed is None or self.smart_mask is None) and not automatic_alpha_cleanup:
             messagebox.showwarning('先点选人物', '请先在预览画面中点击要保留的人物，看到绿色识别预览后再导出。', parent=self.window)
             return
-        repair_alpha = bool(self.repair_alpha_mode.get())
         if not repair_alpha and not self.smart_select_mode.get() and not (self.bounds or self.contour_points):
             messagebox.showwarning('先标出抠图范围', '请先点击“智能选人”并点选人物，或切换到“粗略人物范围”标出要保留的区域，再导出。', parent=self.window)
             return
         if repair_alpha and (self.loaded_repair_mode is not True or self.repair_alpha is None):
             messagebox.showwarning('重新读取透明成片', '请在勾选成片修复模式后重新读取带 Alpha 通道的视频。', parent=self.window)
             return
-        if repair_alpha and (self.smart_seed is None or self.smart_reference_bbox is None):
+        if repair_alpha and self.smart_corrections and (self.smart_seed is None or self.smart_reference_bbox is None):
             messagebox.showwarning('先建立人物跟踪', '请先在要修复的人物上点击一次，建立逐帧跟踪参考。', parent=self.window)
             return
-        if repair_alpha and (not self.smart_corrections or any(stroke['add'] for stroke in self.smart_corrections)):
+        if repair_alpha and any(stroke['add'] for stroke in self.smart_corrections):
             messagebox.showwarning('先标出残留', '请使用“减去保留”笔刷在当前帧标出要擦除的背景残留。', parent=self.window)
+            return
+        if repair_alpha and not self.smart_corrections and not edge_cleanup:
+            messagebox.showwarning('选择 Alpha 修复方式', '请启用“发丝边缘净化”，或点选人物并用“减去保留”笔刷标出残留。', parent=self.window)
             return
         try:
             source = Path(self.video.get()).expanduser().resolve(strict=True)
@@ -1584,6 +1638,7 @@ class RotoscopeWindow:
         self.progress_text.set('准备导出…')
         self.cancel_event.clear()
         self.active_export_repair_alpha = repair_alpha
+        self.active_export_edge_cleanup = edge_cleanup
         self.active_export_format = selected_format
         self.export_started_at = time.monotonic()
         self.progress_started_at = None
@@ -1591,10 +1646,12 @@ class RotoscopeWindow:
         self.status.set('正在加载模型并准备人物轮廓…')
         contours = [list(points) for points in self.contour_points]
         background_strokes = [list(points) for points in self.background_strokes]
-        # Keep the clicked-person seed after switching to the blue background brush.
-        smart_seed = self.smart_seed if self.smart_mask is not None else None
         smart_corrections = [{'points': list(stroke['points']), 'add': stroke['add'],
                               'radius': stroke['radius']} for stroke in self.smart_corrections]
+        # Alpha-only edge cleanup does not need an expensive person-tracking pass.
+        # Manual corrections still use the clicked-person seed to follow motion.
+        smart_seed = (self.smart_seed if self.smart_mask is not None and
+                      (not repair_alpha or smart_corrections) else None)
         # Smart-correction strokes, including erase marks, are mapped to the
         # current person on every frame. The separate background brush remains
         # scene-anchored for static furniture/background cleanup.
@@ -1618,7 +1675,7 @@ class RotoscopeWindow:
 
         args = (source, output_path, (left, top, right, bottom), self.image.size,
                 contours, background_strokes, compact, smart_seed, prores,
-                smart_corrections, smart_reference_bbox, repair_alpha)
+                smart_corrections, smart_reference_bbox, repair_alpha, edge_cleanup)
 
         def run_job():
             semaphore = getattr(self.app, 'cutout_semaphore', None)
@@ -1753,7 +1810,7 @@ class RotoscopeWindow:
                             self.smart_base_mask = self.repair_alpha.copy()
                             self.smart_mask = self.repair_alpha.copy()
                             self._show_image()
-                            self.status.set('透明成片已读取。点选人物建立逐帧跟踪，再用“减去保留”涂掉残留；只修改 Alpha。')
+                            self.status.set('透明成片已读取。导出时会收紧现有 Alpha 外沿；要删局部残留时，可点选人物后用“减去保留”。')
                         else:
                             self.status.set('视频已读取，尚未开始抠图。点击人物身体内部一点后，才会识别人物并生成预览。')
                 elif event[0] == 'selection_preview':
@@ -1978,7 +2035,8 @@ class RotoscopeWindow:
             self.progress.configure(value=100)
             self.progress_text.set(f'100% · 完成 · 用时 {self._format_remaining(elapsed)}' if elapsed is not None else '100% · 完成')
             self.status.set(f'导出完成：{output}')
-            format_text = ('ProRes 4444 MOV（已保留原画面，仅修改 Alpha）' if self.active_export_repair_alpha
+            format_text = (('ProRes 4444 MOV（收紧现有 Alpha 外沿残边）' if self.active_export_edge_cleanup
+                            else 'ProRes 4444 MOV（仅应用手动修正）') if self.active_export_repair_alpha
                            else ('WebM / VP8（含 Alpha，快速压缩；不建议用于 DaVinci）' if Path(output).suffix.lower() == '.webm'
                                  else ('FFV1 MOV（无损 RGBA，DaVinci 可读 Alpha）' if self.active_export_format.startswith('DaVinci FFV1')
                                        else 'ProRes 4444 MOV（含 Alpha，高质量）')))
@@ -1991,7 +2049,7 @@ class RotoscopeWindow:
         if self.close_when_finished:
             self._destroy_window()
 
-    def _export_worker(self, source, output, roi, frame_size, contour_points=(), background_strokes=(), compact=False, smart_seed=None, prores=False, smart_corrections=(), smart_reference_bbox=None, repair_alpha=False):
+    def _export_worker(self, source, output, roi, frame_size, contour_points=(), background_strokes=(), compact=False, smart_seed=None, prores=False, smart_corrections=(), smart_reference_bbox=None, repair_alpha=False, edge_cleanup=True):
         temporary_output = None
         try:
             fd, temporary_name = tempfile.mkstemp(prefix='.rotoscope-', suffix=output.suffix,
@@ -1999,7 +2057,7 @@ class RotoscopeWindow:
             os.close(fd)
             temporary_output = Path(temporary_name)
             self._run_matting(source, temporary_output, roi, frame_size, contour_points, background_strokes, compact, smart_seed, prores,
-                              smart_corrections, smart_reference_bbox, repair_alpha)
+                              smart_corrections, smart_reference_bbox, repair_alpha, edge_cleanup)
             # Commit only a verified complete render. A failed or cancelled
             # export must never truncate/delete the user's previous file.
             os.replace(temporary_output, output)
@@ -2010,19 +2068,19 @@ class RotoscopeWindow:
         else:
             self.events.put(('done', None, output, False))
 
-    def _run_matting(self, source, output, roi, frame_size, contour_points=(), background_strokes=(), compact=False, smart_seed=None, prores=False, smart_corrections=(), smart_reference_bbox=None, repair_alpha=False):
+    def _run_matting(self, source, output, roi, frame_size, contour_points=(), background_strokes=(), compact=False, smart_seed=None, prores=False, smart_corrections=(), smart_reference_bbox=None, repair_alpha=False, edge_cleanup=True):
         ffmpeg, ffprobe = shutil.which('ffmpeg'), shutil.which('ffprobe')
         if not ffmpeg or not ffprobe:
             raise RuntimeError('需要安装 FFmpeg（含 ffprobe），并将它加入 PATH。')
+        # Existing-alpha repair uses the supplied matte directly; normal
+        # cutout mode predicts a new matte from RGB with RVM.
         model = self._model_path() if not repair_alpha else None
         if not repair_alpha and not model.is_file():
             raise RuntimeError(f'找不到人物分割模型：{model}\n请重新运行模型安装/打包流程。')
         use_person_model = smart_seed is not None or bool(background_strokes)
-        # Use the same 512px model in the preview and on every export frame so
-        # the contour the user sees stays the contour the video follows.
-        # This model only provides a coarse moving-person gate; RVM still
-        # computes every-frame hair/edge mattes. The smaller guide model keeps
-        # the CPU/GPU preprocessing path light on long 1080x1920 jobs.
+        # Use the same person guide in the preview and export so the selected
+        # subject stays consistent. RVM uses a larger input for edge cleanup
+        # to retain more hair detail on portrait footage.
         person_model = self._person_model_path(high_resolution=False) if use_person_model else None
         if use_person_model and not person_model.is_file():
             raise RuntimeError(f'找不到自动人像识别模型：{person_model}\n请重新运行模型安装/打包流程。')
@@ -2055,9 +2113,8 @@ class RotoscopeWindow:
         left, top, right, bottom = roi
         right, bottom = min(right, width), min(bottom, height)
         crop_w, crop_h = right - left, bottom - top
-        # Keep RVM's established 512px input detail. Feeding larger frames and
-        # asking the model to downsample adds work without improving the matte.
-        inference_scale = min(512.0 / max(crop_w, crop_h), 1.0)
+        inference_long_side = 1024.0 if edge_cleanup else 512.0
+        inference_scale = min(inference_long_side / max(crop_w, crop_h), 1.0)
         inference_w = max(1, round(crop_w * inference_scale))
         inference_h = max(1, round(crop_h * inference_scale))
         session_options = ort.SessionOptions()
@@ -2226,6 +2283,8 @@ class RotoscopeWindow:
                         np.maximum(alpha, add_mask, out=alpha)
                     if subtract_keep is not None:
                         np.multiply(alpha, subtract_keep, out=alpha)
+                    if edge_cleanup:
+                        _tighten_alpha_edges(alpha, repair_alpha=repair_alpha)
                     rgb_crop = rgb[top:bottom, left:right]
                     if rvm_fgr is not None and not repair_alpha:
                         # RVM predicts an uncontaminated foreground color as
@@ -2237,15 +2296,20 @@ class RotoscopeWindow:
                         if foreground.shape[:2] != (crop_h, crop_w):
                             foreground = np.asarray(Image.fromarray(foreground, 'RGB').resize(
                                 (crop_w, crop_h), Image.Resampling.BILINEAR))
+                        foreground = foreground.astype(np.float32)
+                        if repair_alpha:
+                            foreground *= 257.0
                         edge_weight = np.clip((0.99 - alpha) / 0.22, 0.0, 1.0)
                         if add_mask is not None:
                             np.multiply(edge_weight, 1.0 - add_mask, out=edge_weight)
                         if subtract_keep is not None:
                             np.multiply(edge_weight, subtract_keep, out=edge_weight)
                         edge_weight = edge_weight[:, :, None]
-                        rgb_crop = np.asarray(np.rint(
+                        color_max = 65535.0 if repair_alpha else 255.0
+                        color_dtype = np.uint16 if repair_alpha else np.uint8
+                        rgb_crop = np.asarray(np.rint(np.clip(
                             rgb_crop.astype(np.float32) * (1.0 - edge_weight) +
-                            foreground.astype(np.float32) * edge_weight), dtype=np.uint8)
+                            foreground * edge_weight, 0.0, color_max)), dtype=color_dtype)
                     if left == 0 and top == 0 and right == width and bottom == height:
                         rgba = np.empty((height, width, 4), dtype=np.uint16 if repair_alpha else np.uint8)
                         rgba[:, :, :3] = rgb_crop
@@ -2352,6 +2416,9 @@ class RotoscopeWindow:
                             current_person_probability, tracking_center)
                         selected_person_probability = person_probability
                 cropped = np.ascontiguousarray(rgb[top:bottom, left:right])
+                # RVM is used only when creating a matte from an opaque source.
+                # Existing-alpha repair keeps the supplied matte and tightens
+                # its edge in the processing worker.
                 if not repair_alpha and (last_rvm_alpha is None or count % matting_interval == 0):
                     if inference_scale < 1.0:
                         model_frame = np.asarray(Image.fromarray(cropped).resize(

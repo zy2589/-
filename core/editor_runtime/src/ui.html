@@ -77,14 +77,18 @@
       .topbar {
         display: flex;
         align-items: center;
-        flex-wrap: nowrap;
+        flex-wrap: wrap;
         min-width: 0;
-        flex: 0 0 var(--top);
+        min-height: var(--top);
+        height: auto;
+        flex: 0 0 auto;
         gap: 10px;
-        padding: 0 14px;
+        row-gap: 5px;
+        padding: 6px 14px;
         border-bottom: 1px solid var(--line);
         background: #17191b;
       }
+      .app { grid-template-rows: auto minmax(260px, 1fr) var(--timeline) var(--footer); }
       .homeactions { flex-wrap: wrap; }
       .brand {
         display: flex;
@@ -161,6 +165,99 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+      .project-tab-strip {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+        max-width: none;
+        flex: 0 0 100%;
+        order: 1;
+      }
+      .project-tab-strip[hidden],
+      .project-tabs[hidden],
+      .project-tab-scroll[hidden],
+      .export-progress-indicator[hidden] { display: none; }
+      .project-tab-scroll {
+        width: 26px;
+        height: 30px;
+        flex: 0 0 26px;
+        color: var(--muted);
+        font-size: 17px;
+      }
+      .project-tab-scroll:hover { color: var(--text); }
+      .project-tabs {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), min(260px, 100%)));
+        align-items: center;
+        gap: 5px;
+        min-width: 0;
+        width: 100%;
+        flex: 1 1 auto;
+        overflow: visible;
+      }
+      .project-tab {
+        display: flex;
+        align-items: stretch;
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+        height: 32px;
+        overflow: hidden;
+        border: 1px solid var(--line2);
+        border-radius: 8px;
+        background: #1c1e20;
+      }
+      .project-tab.active {
+        background: #25282c;
+        border-color: var(--blue);
+      }
+      .project-tab-select,
+      .project-tab-close {
+        height: 30px;
+        border: 0;
+        color: var(--text);
+        background: transparent;
+        font: inherit;
+      }
+      .project-tab-select {
+        display: flex;
+        align-items: center;
+        flex: 1 1 0;
+        min-width: 0;
+        max-width: none;
+        padding: 0 9px;
+        cursor: pointer;
+      }
+      .project-tab-select:hover { background: #2d3135; }
+      .project-tab-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .project-tab-close {
+        width: 27px;
+        flex: 0 0 27px;
+        border-left: 1px solid var(--line2);
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 17px;
+        line-height: 1;
+      }
+      .project-tab-close:hover {
+        color: #ffdfe0;
+        background: #492d30;
+      }
+      .project-tab-select:disabled,
+      .project-tab-close:disabled { cursor: wait; opacity: .55; }
+      .export-progress-indicator {
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: #b8dbff;
+        border-color: #365674;
+        background: #1c2b38;
       }
       .workspace {
         display: grid;
@@ -2316,7 +2413,6 @@ select option, select optgroup {
   border-bottom-color: var(--control-focus);
   background: linear-gradient(180deg, rgba(255,255,255,.075), rgba(255,255,255,.025));
 }
-#homeProjectGrid .projectrename,
 #homeProjectGrid .projectdelete {
   width: 27px;
   height: 27px;
@@ -2327,7 +2423,17 @@ select option, select optgroup {
   box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
   transition: background-color 110ms ease, border-color 110ms ease, color 110ms ease;
 }
-#homeProjectGrid .projectrename:hover { border-color: #6aaea7; background: #2b3535; color: #fff; }
+#homeProjectGrid .projectrename {
+  width: 27px;
+  height: 27px;
+  border: 1px solid #4a4d52;
+  border-radius: 5px;
+  background: #222326;
+  color: #d9dbde;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+  transition: background-color 110ms ease, border-color 110ms ease, color 110ms ease;
+}
+#homeProjectGrid .projectrename:hover { border-color: #6687aa; background: #293441; color: #edf5ff; }
 #homeProjectGrid .projectdelete:hover { border-color: #9b656a; background: #3b292c; color: #ffe7e8; }
 .trackmenu button { border-radius: 4px; color: #d8dadd; }
 .trackmenu button:hover { background: #34373b; color: #fff; }
@@ -2372,6 +2478,21 @@ select option, select optgroup {
   overscroll-behavior: contain;
 }
 .dialogactions .btn { flex: 0 0 auto; }
+
+/* Keep export progress visible but let the editor remain interactive. */
+#exportModal.background-mode {
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 72px 14px 14px;
+  background: transparent;
+  pointer-events: none;
+}
+#exportModal.background-mode .dialog {
+  width: min(370px, calc(100vw - 28px));
+  max-height: calc(100dvh - 88px);
+  margin: 0;
+  pointer-events: auto;
+}
 
 @media (max-width: 1100px) {
   .topbar { gap: 6px; padding-inline: 8px; }
@@ -2733,6 +2854,11 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
         background: #1c1e21;
         transform: translateY(-1px);
       }
+      .projectcard.drop-target {
+        border-color: var(--blue);
+        background: #20252a;
+        box-shadow: 0 0 0 2px rgba(93, 153, 218, .48);
+      }
       .projectthumb {
         width: 88px;
         height: 62px;
@@ -2764,8 +2890,7 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
         margin-top: auto;
         padding-top: 2px;
       }
-      .projectdelete,
-      .projectrename {
+      .projectdelete {
         position: absolute;
         top: 8px;
         right: 8px;
@@ -2778,9 +2903,21 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
         background: rgba(22,24,26,.92);
         opacity: 1;
       }
+      .projectrename {
+        position: absolute;
+        top: 8px;
+        right: 42px;
+        z-index: 3;
+        width: 28px;
+        height: 28px;
+        border: 1px solid #454a50;
+        border-radius: 6px;
+        color: #c8ccd2;
+        background: rgba(22,24,26,.92);
+        opacity: 1;
+      }
+      .projectrename:hover { color: #fff; background: #354f70; border-color: #54749b; }
       .projectdelete:hover { color: #fff; background: #a8373e; border-color: #a8373e; }
-      .projectrename { right: 42px; }
-      .projectrename:hover { color: #fff; background: #246ca6; border-color: #3b8fd0; }
       .emptyprojects {
         flex: 1;
         display: none;
@@ -4344,7 +4481,9 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
       .zoom { accent-color: #8d8f94; }
       @media (max-height: 780px) { :root { --timeline: 310px; --timeline-track-h: 48px; } }
       /* The startup proportions take precedence over legacy fixed-width breakpoints. */
-      .app { grid-template-rows: var(--top) minmax(0, 1fr) var(--footer); }
+      /* Open project tabs can wrap onto additional rows; size the header from
+         its content so the second tab row stays visible instead of clipping. */
+      .app { grid-template-rows: auto minmax(0, 1fr) var(--footer); }
       .workspace {
         grid-template-columns: var(--side) 5px minmax(0, 1fr) 5px var(--inspector);
         grid-template-rows: minmax(220px, 1fr) minmax(160px, var(--timeline));
@@ -4480,8 +4619,12 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
             打开工程
           </button>
         </div>
-        <span class="projectname" id="projectName">未命名工程</span>
-        <button class="btn iconbtn" id="renameCurrentProject" type="button" title="修改工程名称" aria-label="修改工程名称">✎</button>
+        <span class="projectname" id="projectName" hidden>未命名工程</span>
+        <div class="project-tab-strip" id="projectTabStrip" hidden>
+          <button class="btn iconbtn project-tab-scroll" id="projectTabsPrev" type="button" title="向左查看工程" aria-label="向左查看工程" hidden>‹</button>
+          <div class="project-tabs" id="openProjectTabs" role="tablist" aria-label="已打开的工程"></div>
+          <button class="btn iconbtn project-tab-scroll" id="projectTabsNext" type="button" title="向右查看工程" aria-label="向右查看工程" hidden>›</button>
+        </div>
         <div class="topspacer"></div>
         <span class="autosave" id="autosaveState">已自动保存</span>
         <button class="btn" id="openAutosaveHistory" title="查看并恢复最近 20 个自动保存版本">恢复历史</button>
@@ -4489,6 +4632,7 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
         <button class="btn danger" id="resetProject">重置工程</button>
         <button class="btn feature-retired" id="sendResolve" hidden aria-hidden="true">发送到达芬奇</button>
         <button class="btn feature-retired" id="exportResolve" hidden aria-hidden="true">导出达芬奇文件</button>
+        <button class="btn export-progress-indicator" id="showExportProgress" type="button" hidden aria-live="polite"></button>
         <button class="btn primary" id="exportVideo">导出视频</button>
       </header>
       <section class="workspace">
@@ -6096,8 +6240,9 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
         <div class="progress exportprogress"><span id="exportBar"></span></div>
         <div class="status" id="exportStatus">准备导出……</div>
         <div class="dialogactions">
-          <button class="btn" id="cancelExport">关闭</button
-          ><button class="btn" id="revealExport" style="display: none">
+          <button class="btn" id="backgroundExport" type="button" hidden>后台运行</button>
+          <button class="btn" id="cancelExport">关闭</button>
+          <button class="btn" id="revealExport" style="display: none">
             在文件夹打开
           </button>
         </div>
@@ -6116,6 +6261,263 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
       </div>
     </div>
 <script>
+function normalizeLanguagePunctuationForScript(text) {
+        let str = String(text || "");
+        const protectedText = [];
+        str = str.replace(/(?:https?:\/\/|www\.)[^\s<>"“”]+[^\s<>"“”.,!?;:)]|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|\b(?:[A-Za-z]\.){2,}|\b[\w-]+\.(?:com|org|net|edu|gov|io|co\.nz)\b(?:\/[^\s,]*)?|\b\d+(?:,\d{3})+(?:\.\d+)?\b|\b\d+\.\d+\b/gi, value => {
+          const key = `\uE000${protectedText.length}\uE001`;
+          protectedText.push(value);
+          return key;
+        });
+        // Keep digit:digit (scripture e.g. 24:36, clock time e.g. 10:30) compact
+        str = str.replace(/(\d)\s*:\s*(\d)/g, "$1:$2");
+
+        // 1. English context: convert full-width Chinese punctuation adjacent to Latin letters/numbers to half-width
+        str = str.replace(/([a-zA-Z0-9])([，,])(?:\s*)([a-zA-Z0-9])/gu, (match, before, comma, after, offset, source) => {
+          // Keep contiguous thousands groups, but preserve spaced numeric lists.
+          if (comma === ',' && /^\d,\d$/.test(match)
+            && /^\d{3}(?=,\d{3}|\.|\b)/.test(source.slice(offset + 2))) return match;
+          return `${before}, ${after}`;
+        });
+        str = str.replace(/([a-zA-Z])([：:])(?:\s*)([a-zA-Z0-9])/gu, "$1: $3");
+        str = str.replace(/(\d)([：:])(?:\s*)([a-zA-Z])/gu, "$1: $3");
+        str = str.replace(/([a-zA-Z0-9])([；;])(?:\s*)([a-zA-Z0-9])/gu, "$1; $3");
+        str = str.replace(/([a-zA-Z0-9])，/gu, "$1, ");
+        str = str.replace(/([a-zA-Z0-9])。/gu, "$1. ");
+        str = str.replace(/([a-zA-Z0-9])！/gu, "$1! ");
+        str = str.replace(/([a-zA-Z0-9])？/gu, "$1? ");
+        str = str.replace(/([a-zA-Z])：/gu, "$1: ");
+        str = str.replace(/([a-zA-Z0-9])；/gu, "$1; ");
+
+        // 2. Chinese context: convert half-width punctuation between/after CJK characters to full-width Chinese punctuation
+        str = str.replace(/([\u3400-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]),([\u3400-\u9FFF\u3040-\u30FF\uAC00-\uD7AF])/gu, "$1，$2");
+        str = str.replace(/([\u3400-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]):([\u3400-\u9FFF\u3040-\u30FF\uAC00-\uD7AF])/gu, "$1：$2");
+        str = str.replace(/([\u3400-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]);([\u3400-\u9FFF\u3040-\u30FF\uAC00-\uD7AF])/gu, "$1；$2");
+        str = str.replace(/([\u3400-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]),(?!\s*[a-zA-Z0-9])/gu, "$1，");
+        str = str.replace(/([\u3400-\u9FFF\u3040-\u30FF\uAC00-\uD7AF])!(?!\s*[a-zA-Z0-9])/gu, "$1！");
+        str = str.replace(/([\u3400-\u9FFF\u3040-\u30FF\uAC00-\uD7AF])\?(?!\s*[a-zA-Z0-9])/gu, "$1？");
+        str = str.replace(/([\u3400-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]);(?!\s*[a-zA-Z0-9])/gu, "$1；");
+
+        // Clean redundant spaces before English punctuation
+        str = str.replace(/\s+([.,!?;:])/g, "$1");
+        // Clean redundant spaces around Chinese punctuation
+        str = str.replace(/\s*([，。、！？；：])\s*/gu, "$1");
+        str = str.replace(/\s+([”’」』》〉）】〕〗])/gu, "$1");
+        str = str.replace(/([“‘「『《〈（【〔〖])\s+/gu, "$1");
+        str = str.replace(/([\u3400-\u9FFF])\s+([“‘「『《〈（【〔〖])/gu, "$1$2");
+        str = str.replace(/([”’」』》〉）】〕〗])\s+([\u3400-\u9FFF])/gu, "$1$2");
+
+        // A manuscript newline after English punctuation is a word separator too.
+        // Lookahead keeps consecutive short items (a,b,c) from skipping a comma.
+        str = str.replace(/([A-Za-z0-9\uE001][,.]["'”’)]*)\s*(?=[A-Za-z0-9“‘(\uE000])/g,
+          (match, before) => (match.match(/\n/g) || []).length > 1 ? match : `${before} `);
+        return str.replace(/\uE000(\d+)\uE001/g, (_, index) => protectedText[Number(index)]);
+      }
+      function removeSurplusBoundaryQuotes(input) {
+        let text = String(input || "").trim();
+        // Leading quote marks are stray copied punctuation in this script field,
+        // not part of the spoken text. Remove the whole contiguous prefix run;
+        // quote marks elsewhere in the manuscript continue through normal pairing.
+        text = text.replace(/^["'“”„‟＂＇]+\s*/, "");
+        // Whole-document wrappers can contain same-style quotations. Odd quote
+        // counts in both boundary paragraphs identify a pair spanning the text,
+        // unlike two independently quoted paragraphs (even counts in each).
+        let blocks = text.split(/\n\s*\n/);
+        while (blocks.length > 1 && /^[“”„‟＂"]/.test(text) && /[“”„‟＂"]$/.test(text)
+          && (blocks[0].match(/[“”„‟＂"]/g) || []).length % 2 === 1
+          && (blocks.at(-1).match(/[“”„‟＂"]/g) || []).length % 2 === 1) {
+          text = text.slice(1, -1).trim();
+          blocks = text.split(/\n\s*\n/);
+        }
+        function pairs(value) {
+          const stack = [], matches = new Map();
+          for (let i = 0; i < value.length; i++) {
+            const c = value[i];
+            if (c === "„" || c === "‟") stack.push(i);
+            else if (c === "“") {
+              if (stack.length && value[stack.at(-1)] === "„") matches.set(stack.pop(), i);
+              else stack.push(i);
+            }
+            else if (c === "”") { if (stack.length) matches.set(stack.pop(), i); }
+            else if (c === '"' || c === '＂') {
+              const previous = value[i - 1] || "";
+              const next = value[i + 1] || "";
+              const nextStartsText = /[\p{L}\p{N}]/u.test(next)
+                || (/\s/.test(next) && /^\s+[\p{L}\p{N}]/u.test(value.slice(i + 1)));
+              const nestedOpening = stack.length && nextStartsText
+                && (/[\s:([{]/.test(previous) || /[\p{L}\p{N}]/u.test(previous));
+              if (stack.length && /["＂]/.test(value[stack.at(-1)]) && !nestedOpening) matches.set(stack.pop(), i);
+              else stack.push(i);
+            }
+          }
+          return matches;
+        }
+        // Remove only boundary quote characters or pairs enclosing whitespace.
+        // Never slice away non-quote content when an unmatched mark is found.
+        let previous;
+        do {
+          previous = text;
+          if (/^[“”„‟＂"]/.test(text)) {
+            const end = pairs(text).get(0);
+            if (end === text.length - 1) text = text.slice(1, -1).trim();
+            else if (end !== undefined && !text.slice(1, end).trim()) text = text.slice(end + 1).trimStart();
+            else if (end === undefined) text = text.slice(1).trimStart();
+          }
+          if (/[“”„‟＂"]$/.test(text)) {
+            const finalBlockStart = Math.max(0, text.lastIndexOf("\n\n") + 2);
+            const finalBlock = text.slice(finalBlockStart);
+            const localMatch = [...pairs(finalBlock)].find(([, end]) => end === finalBlock.length - 1);
+            const globalMatch = [...pairs(text)].find(([, end]) => end === text.length - 1);
+            const matchStart = localMatch ? finalBlockStart + localMatch[0] : globalMatch?.[0];
+            if (matchStart === undefined) text = text.slice(0, -1).trimEnd();
+            else if (!(localMatch ? finalBlock.slice(localMatch[0] + 1, -1) : text.slice(matchStart + 1, -1)).trim()) text = text.slice(0, matchStart).trimEnd();
+          }
+        } while (text !== previous);
+        return text;
+      }
+      function scriptSentences(block) {
+        const value = String(block || "").replace(/\s*\n\s*/g, " ").trim();
+        if (!value) return [];
+        const sentences = [];
+        // Dots inside addresses and abbreviations are not sentence boundaries.
+        const protectedSpans = [...value.matchAll(/(?:https?:\/\/|www\.)[^\s<>"“”]+[^\s<>"“”.,!?;:)]|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|\b(?:[A-Za-z]\.){2,}|\b[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}(?:\/[^\s]*)?/g)]
+          .map(match => [match.index, match.index + match[0].length]);
+        let start = 0;
+        for (let index = 0; index < value.length; index += 1) {
+          const character = value[index];
+          if (!".!?".includes(character)) continue;
+          if (protectedSpans.some(([from, to]) => index >= from && index < to)) continue;
+          if (character === ".") {
+            const previous = value[index - 1] || "";
+            const next = value[index + 1] || "";
+            if (/\d/.test(previous) && /\d/.test(next)) continue;
+            if (value.slice(index, index + 3) === "...") {
+              index += 2;
+            } else {
+              const word = (value.slice(start, index).match(/[A-Za-z]+$/) || [""])[0];
+              if (/^(?:Mr|Mrs|Ms|Dr|Prof|St|vs|etc|Rev|Jr|Sr)$/i.test(word)) continue;
+            }
+          }
+          while (/["'”’」』）)\]]/.test(value[index + 1] || "")) index += 1;
+          const sentence = value.slice(start, index + 1).trim();
+          if (sentence) sentences.push(sentence);
+          start = index + 1;
+        }
+        const tail = value.slice(start).trim();
+        if (tail) sentences.push(tail);
+        return sentences;
+      }
+      function segmentScriptParagraphs(input, maxSentences = 3, maxLength = 240) {
+        const sourceBlocks = String(input || "").split(/\n\s*\n/).filter((block) => block.trim());
+        const paragraphs = [];
+        for (const sourceBlock of sourceBlocks) {
+          const sentences = scriptSentences(sourceBlock);
+          let current = [];
+          let currentLength = 0;
+          for (const sentence of sentences) {
+            const nextLength = currentLength + (current.length ? 1 : 0) + sentence.length;
+            if (current.length && (current.length >= maxSentences || nextLength > maxLength)) {
+              paragraphs.push(current.join(" "));
+              current = [];
+              currentLength = 0;
+            }
+            current.push(sentence);
+            currentLength += (current.length > 1 ? 1 : 0) + sentence.length;
+          }
+          if (current.length) paragraphs.push(current.join(" "));
+        }
+        return paragraphs.join("\n\n");
+      }
+function cleanScriptCopy(input, options = {}) {
+        const useMarkupCleanup = options.cleanMarkup !== false;
+        const usePunctuationNormalization = options.normalizePunctuation !== false;
+        const useSymbolCollapse = options.collapseSymbols !== false;
+        const punctuation = {
+          "，": ",", "。": ".", "：": ":", "；": ";", "？": "?", "！": "!",
+          "（": "(", "）": ")", "【": "[", "】": "]", "《": "<", "》": ">",
+          "、": "、", "…": "...", "—": "-", "–": "-",
+          "‘": "'", "’": "'", "‚": "'", "‛": "'",
+          "“": '"', "”": '"', "„": '"', "‟": '"', "＇": "'", "＂": '"',
+        };
+        let text = String(input ?? "").replace(/\r\n?/g, "\n");
+        text = text.replace(/[\u00A0\u202F]/g, " ");
+        text = text.replace(/[\uFEFF\u200B\u200C\u200D]/g, "");
+        if (useMarkupCleanup) text = text.replace(/[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Modifier}\uFE0E\uFE0F\u20E3]/gu, "");
+        // Keep the readable label while removing common Markdown wrappers.
+        if (useMarkupCleanup) {
+          text = text.replace(/!\[([^\]]*)\]\([^\n)]+\)/g, "$1");
+          text = text.replace(/\[([^\]]+)\]\([^\n)]+\)/g, "$1");
+          text = text.replace(/^\s*```[^\n]*$/gm, "");
+          text = text.replace(/`([^`\n]+)`/g, "$1").replace(/`+/g, "");
+          // Keep ordered-list markers: they are part of the user's script, not decoration.
+          text = text.replace(/^\s{0,3}(?:#{1,6}|>|[-+*])\s+/gm, "");
+          text = text.replace(/~~([^~\n]+)~~/g, "$1");
+          text = text.replace(/(?:\*\*|__)([^\n]+?)(?:\*\*|__)/g, "$1");
+          text = text.replace(/(?:\*|_)([^\n]+?)(?:\*|_)/g, "$1");
+          text = text.replace(/[\*#]+/g, "");
+        }
+        text = removeSurplusBoundaryQuotes(text);
+        // Attach closing quotes before sentence splitting. Once curly quotes are
+        // normalized to straight quotes their opening/closing role is lost.
+        let doubleQuoteOpen = false;
+        let doubleQuoteOpening = "";
+        let singleQuoteOpen = false;
+        let attached = "";
+        for (let index = 0; index < text.length; index += 1) {
+          const character = text[index];
+          const apostrophe = /['’]/.test(character)
+            && /[\p{L}\p{N}]/u.test(text[index - 1] || "")
+            && (/[\p{L}\p{N}]/u.test(text[index + 1] || "") || !singleQuoteOpen);
+          let closing = /[”’」』]/.test(character) && !apostrophe;
+          if (!apostrophe) {
+            if (character === '"' || character === '＂') {
+              closing = doubleQuoteOpen;
+              doubleQuoteOpen = !doubleQuoteOpen;
+            } else if (character === "„" || character === "‟") {
+              doubleQuoteOpen = true;
+              doubleQuoteOpening = character;
+            } else if (character === "“") {
+              closing = doubleQuoteOpen && doubleQuoteOpening === "„";
+              doubleQuoteOpen = !closing;
+              doubleQuoteOpening = closing ? "" : character;
+            }
+            else if (character === "”") doubleQuoteOpen = false;
+            else if (character === "'" || character === "＇") {
+              closing = singleQuoteOpen;
+              singleQuoteOpen = !singleQuoteOpen;
+            } else if (character === "‘") singleQuoteOpen = true;
+            else if (character === "’") singleQuoteOpen = false;
+          }
+          const previous = text[index - 1] || "";
+          const next = text[index + 1] || "";
+          const word = /[\p{L}\p{N}]/u;
+          if (!closing && /["＂“„‟]/.test(character) && word.test(next)
+            && (word.test(previous) || /[:：]/.test(previous))) attached = attached.trimEnd() + " ";
+          if (closing) attached = attached.trimEnd();
+          attached += character;
+          if (closing && word.test(next)) attached += " ";
+        }
+        text = removeSurplusBoundaryQuotes(attached);
+        if (usePunctuationNormalization) text = [...text].map((character) => punctuation[character] ?? character).join("");
+        if (useSymbolCollapse) text = text
+          .replace(/"{2,}/g, '"')
+          .replace(/'{2,}/g, "'")
+          .replace(/\.{4,}/g, "...")
+          .replace(/([,;:])(?:\s*\1)+/g, "$1")
+          .replace(/[!?](?:\s*[!?])+/g, (run) => run.replace(/\s/g, "").at(-1));
+        // A damaged saved manuscript may retain the opening quote after its
+        // final `Send:` call to action but lose only the closing quote. Restore
+        // that unambiguous final quote after the sentence punctuation.
+        text = text.replace(/(\bSend\s*:\s*)(["“„])\s*([^"“”„‟\n]+[.!?])\s*$/u,
+          (match, prefix, opening, body) => `${prefix.replace(/:\s*$/u, ": ")}"${body.trim()}"`);
+        text = text.replace(/\bSend\s*:\s*"\s+([^"\n]+)"\s*$/u,
+          (match, body) => `Send: "${body.trim()}"`);
+        text = text.replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n");
+        text = text.replace(/\s+([,.;:!?])/g, "$1");
+        text = text.replace(/([\[(])\s+/g, "$1").replace(/\s+([\])])/g, "$1");
+        text = text.replace(/\n{3,}/g, "\n\n");
+        return segmentScriptParagraphs(normalizeLanguagePunctuationForScript(text.trim()));
+      }
 function isTime(value) {
   return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
 }
@@ -7539,6 +7941,7 @@ function captionMeaningContext(captions, review) {
         filterLook: { id: "none", intensity: 1, baseColor: null },
         lut: null,
         exportJobId: "",
+        exportProjectId: "",
         layout: defaultStartupLayout(),
       };
       const captionStyleDefaults = Object.freeze({ ...state.captionStyle });
@@ -7866,14 +8269,14 @@ function captionMeaningContext(captions, review) {
           );
         if (trackId === "video")
           return [
-            ...mainClips().filter((item) => !state.mainVideoTrackMap?.[item.id]),
+            ...mainClips().filter((item) => !state.mainVideoTrackMap?.[item.id] || state.mainVideoTrackMap[item.id] === "video"),
             ...state.videoLayers.filter((item) => item.trackId === trackId),
             ...state.images.filter((item) => item.trackId === trackId),
             ...state.titles.filter((item) => item.trackId === trackId),
           ];
         if (trackId === "audio")
           return [
-            ...mainAudioClips().filter((item) => !state.mainAudioTrackMap?.[item.id]),
+            ...mainAudioClips().filter((item) => !state.mainAudioTrackMap?.[item.id] || state.mainAudioTrackMap[item.id] === "audio"),
             ...state.audioAssets.filter((item) => item.trackId === trackId),
           ];
         const mappedMain = kind === "video"
@@ -8420,7 +8823,7 @@ function captionMeaningContext(captions, review) {
         for (const [day, projects] of groups.entries()) {
           template.innerHTML = `<section class="projectday"><div class="projectdayhead"><span>📁 ${escapeHtml(day)}</span><span class="small">${projects.length} 个工程</span></div><div class="projectdaygrid">${projects.map(
             (item) =>
-              `<div class="projectcard" data-project-id="${item.id}" tabindex="0">${homeSelectionMode ? `<input type="checkbox" data-select-project="${item.id}" aria-label="选择 ${escapeHtml(item.name)}" style="position:absolute;top:10px;left:10px;z-index:3;width:18px;height:18px;accent-color:#df6666">` : `<button type="button" class="projectrename" data-rename-project="${item.id}" title="修改工程名称">✎</button><button type="button" class="projectdelete" data-delete-project="${item.id}" title="删除工程">×</button>`}<div class="projectthumb">${item.thumbnailUrl ? `<img loading="lazy" decoding="async" src="${escapeHtml(item.thumbnailUrl)}" alt="工程预览" data-hide-on-error>` : escapeHtml(item.ratio || "9:16")}</div><b class="ellipsis" title="${escapeHtml(item.name || "未命名工程")}">${escapeHtml(item.name || "未命名工程")}</b><div class="projectmeta ellipsis">${escapeHtml(item.videoName || "尚未导入视频")}</div><div class="projectmeta">更新于 ${projectDate(item.updatedAt)}</div></div>`,
+            `<div class="projectcard" data-project-id="${item.id}" tabindex="0">${homeSelectionMode ? `<input type="checkbox" data-select-project="${item.id}" aria-label="选择 ${escapeHtml(item.name)}" style="position:absolute;top:10px;left:10px;z-index:3;width:18px;height:18px;accent-color:#df6666">` : `<button type="button" class="projectrename" data-rename-project="${item.id}" title="重命名工程" aria-label="重命名工程">✎</button><button type="button" class="projectdelete" data-delete-project="${item.id}" title="删除工程" aria-label="删除工程">×</button>`}<div class="projectthumb">${item.thumbnailUrl ? `<img loading="lazy" decoding="async" src="${escapeHtml(item.thumbnailUrl)}" alt="工程预览" data-hide-on-error>` : escapeHtml(item.ratio || "9:16")}</div><b class="ellipsis" title="${escapeHtml(item.name || "未命名工程")}">${escapeHtml(item.name || "未命名工程")}</b><div class="projectmeta ellipsis">${escapeHtml(item.videoName || "尚未导入视频")}</div><div class="projectmeta">更新于 ${projectDate(item.updatedAt)}</div></div>`,
           ).join("")}</div></section>`;
           fragment.appendChild(template.content.firstElementChild);
         }
@@ -8627,7 +9030,8 @@ function captionMeaningContext(captions, review) {
           beautyBypass: true,
           filterLook: { id: "none", intensity: 1, baseColor: null },
           lut: null,
-          exportJobId: "",
+          exportJobId: state.exportJobId || "",
+          exportProjectId: state.exportProjectId || "",
           layout: defaultStartupLayout(),
         });
         $("video").removeAttribute("src");
@@ -8644,6 +9048,90 @@ function captionMeaningContext(captions, review) {
         }
       }
       function currentProjectSessionRevision() { return projectSessionRevision; }
+      function promoteSoloTimelineVideoToMainSource() {
+        if (state.video?.path) return false;
+        const clips = (state.videoLayers || []).filter(item => item?.path && !item.missing);
+        if (clips.length !== 1) return false;
+        const clip = clips[0];
+        const sourceDuration = Number(clip.sourceDuration || clip.duration || 0);
+        const speed = Math.max(0.05, Number(state.audio?.speed || 1));
+        const tolerance = Math.max(0.08, 2 / Math.max(1, Number(state.timelineFrameRate || state.fps || 30)));
+        if (!Number.isFinite(sourceDuration) || sourceDuration <= 0 ||
+            Math.abs(Number(clip.start || 0)) > tolerance ||
+            Math.abs(Number(clip.sourceStart || 0)) > tolerance ||
+            Math.abs(Number(clip.sourceEnd ?? sourceDuration) - sourceDuration) > tolerance ||
+            Math.abs(Number(clip.end || 0) - sourceDuration / speed) > tolerance / speed ||
+            clip.spliceRegionId || (state.removals || []).length || (state.manualCuts || []).length ||
+            (state.mainAudioRemovals || []).length || (state.mainAudioManualCuts || []).length ||
+            (state.audioCuts || []).length) return false;
+
+        const pairedAudioAssets = (state.audioAssets || []).filter(item =>
+          item.path === clip.path && (item.id === clip.linkedAudioId || item.linkedVideoId === clip.id ||
+            (clip.linkGroupId && item.linkGroupId === clip.linkGroupId)));
+        if (pairedAudioAssets.length > 1) return false;
+        const pairedAudio = pairedAudioAssets[0] || null;
+        if (pairedAudio && (
+            Math.abs(Number(pairedAudio.start || 0) - Number(clip.start || 0)) > tolerance ||
+            Math.abs(Number(pairedAudio.end || 0) - Number(clip.end || 0)) > tolerance ||
+            Math.abs(Number(pairedAudio.sourceStart || 0) - Number(clip.sourceStart || 0)) > tolerance ||
+            Math.abs(Number(pairedAudio.sourceEnd ?? sourceDuration) - sourceDuration) > tolerance ||
+            pairedAudio.missing)) return false;
+
+        const previousVideoTrack = clip.trackId || "video";
+        const previousAudioTrack = pairedAudio?.trackId || "audio";
+        state.video = { ...clip, kind: "video" };
+        state.sourceDuration = sourceDuration;
+        state.duration = sourceDuration / speed;
+        state.timelineDuration = Math.max(Number(state.timelineDuration || 0), state.duration + 10);
+        state.waveform = pairedAudio?.waveform?.length ? pairedAudio.waveform : (clip.waveform || state.waveform || []);
+        state.videoTransform = {
+          ...(state.videoTransform || {}),
+          x: Number(clip.x || 0), y: Number(clip.y || 0),
+          scale: Number(clip.scale || 1), rotation: Number(clip.rotation || 0),
+          opacity: Number(clip.opacity ?? 1), blendMode: clip.blendMode || "normal",
+        };
+        state.videoLayers = (state.videoLayers || []).filter(item => item.id !== clip.id);
+        if (pairedAudio) state.audioAssets = (state.audioAssets || []).filter(item => item.id !== pairedAudio.id);
+
+        const mainVideoClip = (mainClips() || []).find(item =>
+          Number(item.sourceStart || 0) <= Number(clip.sourceStart || 0) + tolerance &&
+          Number(item.sourceEnd || 0) >= Number(clip.sourceEnd ?? sourceDuration) - tolerance) || mainClips()[0];
+        if (!mainVideoClip) return false;
+        state.mainVideoTrackMap = { ...(state.mainVideoTrackMap || {}), [mainVideoClip.id]: previousVideoTrack };
+        if (pairedAudio) {
+          const mainAudioClip = (mainAudioClips() || []).find(item =>
+            Number(item.sourceStart || 0) <= Number(pairedAudio.sourceStart || 0) + tolerance &&
+            Number(item.sourceEnd || 0) >= Number(pairedAudio.sourceEnd ?? sourceDuration) - tolerance) || mainAudioClips()[0];
+          if (mainAudioClip) {
+            state.mainAudioTrackMap = { ...(state.mainAudioTrackMap || {}), [mainAudioClip.id]: previousAudioTrack };
+            state.mainAudioClipSettings = {
+              ...(state.mainAudioClipSettings || {}),
+              [mainAudioClip.id]: {
+                volume: Number(pairedAudio.volume ?? 1), pan: Number(pairedAudio.pan || 0),
+                fadeIn: Number(pairedAudio.fadeIn || 0), fadeOut: Number(pairedAudio.fadeOut || 0),
+                muted: !!pairedAudio.muted,
+                ...(pairedAudio.fxRack ? { fxRack: pairedAudio.fxRack } : {}),
+                ...(pairedAudio.fxBypass != null ? { fxBypass: !!pairedAudio.fxBypass } : {}),
+              },
+            };
+          }
+        }
+
+        const ownerMappings = new Map([[clip.id, { id: mainVideoClip.id, type: "video" }]]);
+        if (pairedAudio) {
+          const mainAudioClip = (mainAudioClips() || []).find(item =>
+            Number(item.sourceStart || 0) <= Number(pairedAudio.sourceStart || 0) + tolerance &&
+            Number(item.sourceEnd || 0) >= Number(pairedAudio.sourceEnd ?? sourceDuration) - tolerance) || mainAudioClips()[0];
+          if (mainAudioClip) ownerMappings.set(pairedAudio.id, { id: mainAudioClip.id, type: "audio" });
+        }
+        for (const items of [state.captions, state.reviewCaptions, state.issues, state.matchIssues]) {
+          for (const item of items || []) {
+            const mapping = ownerMappings.get(item.ownerClipId);
+            if (mapping) { item.ownerClipId = mapping.id; item.ownerClipType = mapping.type; }
+          }
+        }
+        return true;
+      }
       async function enterProject(record) {
         state.initializing = true;
         resetEditorState();
@@ -8786,6 +9274,7 @@ function captionMeaningContext(captions, review) {
           editorActive: true,
           initializing: true,
         });
+        const promotedTimelineVideo = promoteSoloTimelineVideoToMainSource();
         if ($("timelineEditMode")) $("timelineEditMode").value = state.timelineEditMode || "overwrite";
         // Waveforms are persisted once per source path. Reuse the same array
         // across timeline slices in memory instead of inflating project files.
@@ -8842,9 +9331,11 @@ function captionMeaningContext(captions, review) {
         $("home").classList.add("hidden");
         $("app").classList.add("active");
         state.initializing = false;
+        if (promotedTimelineVideo) queueAutosave();
         await new Promise((resolve) => requestAnimationFrame(resolve));
         updateFrameSize(false);
         renderAll();
+        window.syncOpenProjectTab?.(state.projectId, state.projectName);
         setTimeout(() => {
           refreshSourceAvailability().catch((error) => console.warn(error));
           watchProjectMediaAnalysis();
@@ -8943,8 +9434,10 @@ function captionMeaningContext(captions, review) {
       async function openProjectById(id) {
         try {
           await enterProject(await nativeCall("loadProject", id));
+          return true;
         } catch (error) {
           showFatal(error.message);
+          return false;
         }
       }
       async function createNewProject() {
@@ -12260,7 +12753,11 @@ function addLibraryAsset(media, kind) {
             return asset;
           }
           snapshot();
-          if (state.video || placement === "timeline") {
+          // The first video in a project is its primary source, even when the
+          // user imports it directly onto the timeline. Overlay clips need an
+          // existing primary source so transport and caption analysis have a
+          // stable media clock.
+          if (state.video) {
             const start = clamp(Number(at) || 0, 0, visibleTimelineDuration());
             const sourceDuration = Math.max(0.04, Number(asset.duration || 3));
             const end = start + sourceDuration / Math.max(0.5, Number(state.audio.speed || 1));
@@ -14465,7 +14962,7 @@ function rulerTickPlan(zoom) {
       function timelineGapItems(trackId) {
         if (trackId === "video") return trackItems(trackId);
         if (trackId === "audio")
-          return [...mainAudioClips().filter((clip) => !state.mainAudioTrackMap?.[clip.id]), ...state.audioAssets.filter(clip => clip.trackId === trackId)];
+          return [...mainAudioClips().filter((clip) => !state.mainAudioTrackMap?.[clip.id] || state.mainAudioTrackMap[clip.id] === "audio"), ...state.audioAssets.filter(clip => clip.trackId === trackId)];
         return trackItems(trackId);
       }
       let timelineGapSelection = null;
@@ -14575,8 +15072,8 @@ function rulerTickPlan(zoom) {
         let count = 0;
         if (key === "review") count = (state.reviewCaptions || []).length;
         else if (key === "caption") count = (state.captions || []).filter((item) => !item.trackId || item.trackId === "caption").length;
-        else if (key === "video") count = mainClips().filter(clip => !state.mainVideoTrackMap?.[clip.id]).length + state.videoLayers.filter(clip => clip.trackId === key).length + state.images.filter(clip => clip.trackId === key).length + state.titles.filter(clip => clip.trackId === key).length;
-        else if (key === "audio") count = mainAudioClips().filter(clip => !state.mainAudioTrackMap?.[clip.id]).length + state.audioAssets.filter(clip => clip.trackId === key).length;
+        else if (key === "video") count = mainClips().filter(clip => !state.mainVideoTrackMap?.[clip.id] || state.mainVideoTrackMap[clip.id] === key).length + state.videoLayers.filter(clip => clip.trackId === key).length + state.images.filter(clip => clip.trackId === key).length + state.titles.filter(clip => clip.trackId === key).length;
+        else if (key === "audio") count = mainAudioClips().filter(clip => !state.mainAudioTrackMap?.[clip.id] || state.mainAudioTrackMap[clip.id] === key).length + state.audioAssets.filter(clip => clip.trackId === key).length;
         else count = (trackItems(key) || []).length;
         return `${count} 个片段`;
       }
@@ -14739,7 +15236,7 @@ function rulerTickPlan(zoom) {
             `<div class="clip video ${isSelected("video", clip.id) ? "selected" : ""}" data-type="video" data-id="${escapeHtml(clip.id)}" data-track-id="${escapeHtml(trackId)}" style="${clipGeometryStyle(clip)}"><i class="trim-handle start" data-trim="start"></i><span class="clip-sticky">${escapeHtml(state.video?.name || "视频")}</span>${clipDurationMarkup(clip)}<i class="trim-handle end" data-trim="end"></i></div>`;
           if (key === "video")
             html = mainClips()
-              .filter((clip) => visible(clip) && !state.mainVideoTrackMap?.[clip.id])
+              .filter((clip) => visible(clip) && (!state.mainVideoTrackMap?.[clip.id] || state.mainVideoTrackMap[clip.id] === key))
               .map((clip) => videoClipMarkup(clip, "video"))
               .join("") + state.videoLayers.filter(clip => visible(clip) && clip.trackId === key).map(clip => clipHtml(clip,"videolayer")).join("") +
               state.images.filter(clip => visible(clip) && clip.trackId === key).map(clip => clipHtml(clip,"image")).join("") +
@@ -14747,7 +15244,7 @@ function rulerTickPlan(zoom) {
           else if (key === "audio")
             html =
               mainAudioClips()
-                .filter((clip) => visible(clip) && !state.mainAudioTrackMap?.[clip.id])
+                .filter((clip) => visible(clip) && (!state.mainAudioTrackMap?.[clip.id] || state.mainAudioTrackMap[clip.id] === key))
                 .map((clip) => audioClipHtml(clip, "audio", "audio"))
                 .join("") + state.audioAssets.filter(clip => visible(clip) && clip.trackId === key).map(clip => audioClipHtml(clip,"audioasset",key)).join("") +
               state.audioMutes
@@ -15988,10 +16485,62 @@ function renderIssues() {
         if (typeof captionReviewDiffers === 'function' && !captionReviewDiffers(before, after)) return false;
         return !!captionCorrectionKey(before) && !!captionCorrectionKey(after) && captionCorrectionKey(before) !== captionCorrectionKey(after);
       }
+      function captionMismatchReviewGroups(caption) {
+        const groups = new Map();
+        for (const [index, word] of (caption?.words || []).entries()) {
+          const recognized = word.recognizedDisplay || word.originalDisplay || word.display || '';
+          const expected = word.expectedDisplay || word.referenceExpected || '';
+          if (word.issueType !== 'mismatch' || !expected || !captionCorrectionDiffers(recognized, expected)) continue;
+          const key = word.issueId ? `issue:${word.issueId}` : `word:${index}`;
+          if (!groups.has(key)) groups.set(key, { issueId: word.issueId || '', words: [] });
+          groups.get(key).words.push(word);
+        }
+        const seenLabels = new Map();
+        return [...groups.values()].map(group => {
+          const review = group.issueId && (state.reviewCaptions || []).find(item =>
+            (item.issueId || item.id) === group.issueId && item.type === 'mismatch' &&
+            (!item.ownerClipId || item.ownerClipId === (caption.ownerClipId || '')) &&
+            (!item.captionTrackId || item.captionTrackId === (caption.trackId || 'caption')));
+          const unique = values => [...new Map(values.filter(value => String(value || '').trim()).map(value =>
+            [captionCorrectionKey(value), String(value).trim()])).values()];
+          const spoken = review?.spokenText || unique(group.words.map(word => word.recognizedDisplay || word.originalDisplay || word.display)).join(' ');
+          const expected = review?.expectedText || unique(group.words.map(word => word.expectedDisplay || word.referenceExpected)).join(' ');
+          const times = group.words.map(word => [Number(word.start), Number(word.end)])
+            .filter(([start, end]) => Number.isFinite(start) && Number.isFinite(end) && end > start);
+          return {
+            issueId: group.issueId, spokenText: spoken, expectedText: expected,
+            start: times.length ? Math.min(...times.map(([start]) => start)) : NaN,
+            end: times.length ? Math.max(...times.map(([, end]) => end)) : NaN,
+          };
+        }).filter(group => {
+          const spoken = captionCorrectionKey(group.spokenText);
+          const expected = captionCorrectionKey(group.expectedText);
+          if (!spoken || !expected) return false;
+          const key = `${spoken}\u2192${expected}`;
+          const previous = seenLabels.get(key) || [];
+          if (previous.some(item => {
+            if (![group.start, group.end, item.start, item.end].every(Number.isFinite)) return false;
+            const overlap = Math.min(group.end, item.end) - Math.max(group.start, item.start);
+            const shorter = Math.min(group.end - group.start, item.end - item.start);
+            return (overlap > 0.005 && shorter > 0 && overlap / shorter >= 0.75) ||
+              (Math.abs(group.start - item.start) <= 0.035 && Math.abs(group.end - item.end) <= 0.06);
+          })) return false;
+          previous.push({ start: group.start, end: group.end });
+          seenLabels.set(key, previous);
+          return true;
+        });
+      }
       function renderCaptionReferenceChanges(caption) {
         caption.textAuditBaseline ??= caption.text || '';
         const differs = captionCorrectionDiffers;
-        const changes = (caption.textChanges || []).filter(change => change.kind !== 'manual' && differs(change.before, change.after)).map(change =>
+        const seen = new Set();
+        const changes = (caption.textChanges || []).filter(change => {
+          if (change.kind === 'manual' || !differs(change.before,change.after)) return false;
+          const before=captionCorrectionKey(change.before),after=captionCorrectionKey(change.after),key=`${before}→${after}`;
+          if (seen.has(key) || captionMismatchReviewGroups(caption).some(group =>
+            captionCorrectionKey(group.spokenText)===before && captionCorrectionKey(group.expectedText)===after)) return false;
+          seen.add(key);return true;
+        }).map(change =>
           `<div class="caption-mismatch-suggestion small status"><span>${escapeHtml(change.before)}（识别文案） → ${escapeHtml(change.after)}（正确文案）</span></div>`).join('');
         return changes + (caption.words || []).map((word,index) => {
           if(word.autoMildCorrected)return `<div class="caption-mild-note small">已自动处理：${escapeHtml(word.display)}</div>`;
@@ -16035,10 +16584,9 @@ function renderIssues() {
         renderAll();queueAutosave();
       }
       function renderCaptionMismatchSuggestions(caption) {
-        return renderCaptionReferenceChanges(caption) + (caption.words || []).map((word, index) =>
-          word.issueType === "mismatch" && word.expectedDisplay && captionCorrectionDiffers(word.recognizedDisplay || word.originalDisplay || word.display, word.expectedDisplay)
-            ? `<div class="caption-mismatch-suggestion"><span>${escapeHtml(word.recognizedDisplay || word.originalDisplay || word.display || "")}（识别文案） → ${escapeHtml(word.expectedDisplay)}（正确文案）</span></div>`
-            : "").join("");
+        return renderCaptionReferenceChanges(caption) + captionMismatchReviewGroups(caption).map(group =>
+          `<div class="caption-mismatch-suggestion"><span>${escapeHtml(group.spokenText)}（识别文案） → ${escapeHtml(group.expectedText)}（正确文案）</span></div>`
+        ).join("");
       }
       function renderCaptionEmphasisPicker(caption) {
         if (state.captionStyle?.keywordMode !== true) return "";
@@ -16435,6 +16983,7 @@ function syncCaptionCorrectionReviews() {
   state.reviewCaptions ||= [];
   state.issues ||= [];
   normalizeCaptionPhraseReviews();
+  dedupeCaptionMismatchReviews();
   const resolved = new Set(correctExpandedCaptionWords(state.captions));
   const cosmetic = new Set();
   const repeatKey=text=>String(text||'').toLowerCase().replace(/[^\p{L}\p{N}]/gu,'');
@@ -16535,6 +17084,7 @@ function syncCaptionCorrectionReviews() {
     }
   }
   normalizeCaptionPhraseReviews();
+  dedupeCaptionMismatchReviews();
   for(const record of state.captionRecoveryArchive || [])for(const word of [...(record.caption?.words || []),...(record.word?[record.word]:[])])if(resolved.has(word.issueId)){word.issueId='';word.issueType='';word.action='';word.reviewDismissed=true;}
   if(reviewDetailsDialog?.open && !state.reviewCaptions.some(r=>r.id===reviewDetailsDialog.reviewId))reviewDetailsDialog.close();
 }
@@ -16548,6 +17098,85 @@ function normalizeCaptionPhraseReviews() {
       const review=merged.reviews.find(r=>(r.issueId || r.id)===issue.id);
       if(review) Object.assign(issue,{start:review.start,end:review.end,spokenText:review.spokenText,expectedText:review.expectedText});
     }
+  }
+}
+
+function sameCaptionMismatchOccurrence(left, right) {
+  if (!left || !right || left.type !== 'mismatch' || right.type !== 'mismatch') return false;
+  const key = value => captionCorrectionKey(value || '');
+  if (!key(left.spokenText) || key(left.spokenText) !== key(right.spokenText) ||
+      !key(left.expectedText) || key(left.expectedText) !== key(right.expectedText)) return false;
+  const leftIssueId = String(left.issueId || ''), rightIssueId = String(right.issueId || '');
+  const sameIssue = !!leftIssueId && leftIssueId === rightIssueId;
+  for (const field of ['captionTrackId','sourceMediaId','transcriptId'])
+    if (String(left[field] || '') !== String(right[field] || '')) return false;
+  if (!sameIssue && String(left.ownerClipId || '') !== String(right.ownerClipId || '')) return false;
+  const aStart = Number(left.start), aEnd = Number(left.end), bStart = Number(right.start), bEnd = Number(right.end);
+  if (![aStart,aEnd,bStart,bEnd].every(Number.isFinite) || aEnd <= aStart || bEnd <= bStart) return false;
+  const overlap = Math.min(aEnd,bEnd) - Math.max(aStart,bStart);
+  const shorter = Math.min(aEnd-aStart,bEnd-bStart);
+  return (overlap > .005 && overlap / shorter >= .75) ||
+    (Math.abs(aStart-bStart) <= .035 && Math.abs(aEnd-bEnd) <= .06);
+}
+
+function dedupeCaptionMismatchReviews() {
+  const kept = [], aliases = new Map(), droppedReviewIds = new Set();
+  for (const review of state.reviewCaptions || []) {
+    const existing = kept.find(item => sameCaptionMismatchOccurrence(item,review));
+    if (!existing) { kept.push(review); continue; }
+    const canonical = String(existing.issueId || existing.id || '');
+    for (const alias of [review.issueId || review.id, review.id])
+      if (alias && String(alias) !== canonical) aliases.set(String(alias),canonical);
+    if (review.id) droppedReviewIds.add(String(review.id));
+    // One caption mismatch can be linked to both the video and its paired
+    // audio clip. Keep one review marker, but retain the caption-owning record
+    // so replacement actions still resolve the right subtitle words.
+    if (review.captionCorrectionReview && !existing.captionCorrectionReview) {
+      Object.assign(existing, {
+        ownerClipId: review.ownerClipId,
+        ownerClipType: review.ownerClipType,
+        sourceMediaId: review.sourceMediaId || existing.sourceMediaId,
+        sourceStart: review.sourceStart ?? existing.sourceStart,
+        sourceEnd: review.sourceEnd ?? existing.sourceEnd,
+        captionTrackId: review.captionTrackId || existing.captionTrackId,
+        transcriptId: review.transcriptId || existing.transcriptId,
+        trackId: review.trackId || existing.trackId,
+        captionCorrectionReview: true,
+        needsAudioReview: review.needsAudioReview ?? existing.needsAudioReview,
+      });
+    }
+    const words = [...(existing.words || [])];
+    for (const word of review.words || []) {
+      const duplicate = words.some(item => Number(item.start) === Number(word.start) &&
+        Number(item.end) === Number(word.end) && String(item.display || '') === String(word.display || ''));
+      if (!duplicate) words.push(word);
+    }
+    if (words.length) existing.words = words;
+  }
+  state.reviewCaptions = kept;
+  if (aliases.size) {
+    for (const caption of state.captions || []) for (const word of caption.words || []) {
+      const alias = String(word.issueId || '');
+      if (aliases.has(alias)) word.issueId = aliases.get(alias);
+      const acronymAlias = String(word.acronymReviewId || '');
+      if (aliases.has(acronymAlias)) word.acronymReviewId = aliases.get(acronymAlias);
+    }
+    for (const review of state.reviewCaptions) {
+      const alias = String(review.issueId || '');
+      if (aliases.has(alias)) review.issueId = aliases.get(alias);
+    }
+  }
+  for (const field of ['issues','matchIssues']) {
+    const seen = [];
+    state[field] = (state[field] || []).filter(issue => {
+      const alias = String(issue.issueId || issue.id || '');
+      if (aliases.has(alias)) issue.issueId = aliases.get(alias);
+      const idAlias = String(issue.id || '');
+      if (aliases.has(idAlias)) issue.id = aliases.get(idAlias);
+      if (seen.some(item => sameCaptionMismatchOccurrence(item,issue))) return false;
+      seen.push(issue);
+      return !issue.id || !droppedReviewIds.has(String(issue.id));
+    });
   }
 }
 
@@ -18201,6 +18830,14 @@ function selectedVideoGrade(create = false) {
         if (fadeOut > 0) gain = Math.min(gain, (clip.end - time) / fadeOut);
         return clamp(gain, 0, 1);
       }
+      function denoisedMainAudioAsset(asset, sourcePath) {
+        if (!sourcePath || !asset) return false;
+        if (asset.path === sourcePath || asset.sourceMediaId === sourcePath) return true;
+        const linkedVideo = (state.videoLayers || []).find(video =>
+          (asset.linkedVideoId && video.id === asset.linkedVideoId) ||
+          (asset.linkGroupId && video.linkGroupId === asset.linkGroupId));
+        return linkedVideo?.path === sourcePath;
+      }
       function syncPreviewAudio() {
         if (cutPrefetch?.reached) {
           for (const player of previewAudioPlayers.values()) player.pause();
@@ -18266,7 +18903,17 @@ function selectedVideoGrade(create = false) {
           main.pause();
         }
         const activeIds = new Set(), lanes = new Map();
-        for (const asset of [...state.audioAssets].sort((a, b) => a.start - b.start)) {
+        const denoisedSourcePath = denoisedAudio?.sourcePath || (denoisedAudio ? state.video?.path : "") || "";
+        const timelineAudioAssets = (state.audioAssets || []).map(asset => {
+          if (!denoisedAudio || !denoisedMainAudioAsset(asset, denoisedSourcePath)) return asset;
+          // Materialized main-video clips play through audioAssets rather than
+          // mainAudioClips. Route those linked clips to the full-track cache so
+          // the original source audio cannot mask the denoised playback.
+          if (mainClip && mainTrackVisible && state.currentTime >= asset.start && state.currentTime < asset.end)
+            return { ...asset, muted: true };
+          return { ...asset, url: denoisedAudio.url, playbackAudioUrl: "" };
+        });
+        for (const asset of [...timelineAudioAssets].sort((a, b) => a.start - b.start)) {
           if (!isTrackAudible(asset.trackId)) continue;
           const track = asset.trackId || "audio";
           let trackLanes = lanes.get(track);
@@ -19170,8 +19817,11 @@ function selectedVideoGrade(create = false) {
           ? { type: "video", id: "main" }
           : { type: "", id: "" };
         seekTimeline(Math.min(state.currentTime, state.duration));
-        renderAll();
-        toast(`已删除 ${selected.length} 个所选片段${selected.length < requested.length ? "；锁定轨道已跳过" : ""}${ripple ? "，并前移启用联动的轨道" : ""}`);
+        if (!deleteSelected.deferRender) {
+          renderAll();
+          toast(`已删除 ${selected.length} 个所选片段${selected.length < requested.length ? "；锁定轨道已跳过" : ""}${ripple ? "，并前移启用联动的轨道" : ""}`);
+        }
+        return true;
       }
       function shiftTracks(at, len) {
         rippleShiftAllTracks(state,at+len,-len);
@@ -19523,7 +20173,8 @@ function filterSpeechLanguageList(query, languages) {
         }
       }
       async function matchScript({alignmentOnly = false, forceRecognition = false} = {}) {
-        if (!state.video) {
+        const sourceVideo = manuscriptSourceVideo();
+        if (!sourceVideo?.path) {
           toast("请先导入视频");
           return false;
         }
@@ -19534,6 +20185,7 @@ function filterSpeechLanguageList(query, languages) {
         let matchJobId='';
         try {
           const matchContext = createAutoCaptionContext();
+          const sourceDuration = manuscriptSourceDuration(sourceVideo);
           const model = unwrap(await window.native.modelStatus());
           assertAutoCaptionContext(matchContext);
           if (!model.ready && !model.installed) {
@@ -19561,8 +20213,8 @@ function filterSpeechLanguageList(query, languages) {
           if (!sourceClips.length) throw new Error("时间线没有保留的源音频片段，无法匹配文案");
           const { jobId } = unwrap(
             await window.native.startScriptAnalysis({
-              inputPath: state.video.path,
-              duration: state.sourceDuration,
+              inputPath: sourceVideo.path,
+              duration: sourceDuration,
               script: $("scriptText").value,
               scriptLanguage: $("manuscriptLanguage")?.value || "",
               removals: [],
@@ -19595,13 +20247,13 @@ function filterSpeechLanguageList(query, languages) {
               state.issues = [...otherIssues,...(s.result.issues || [])];
               state.matchIssues = (s.result.issues || []).map((issue) => ({ ...issue }));
               state.alignmentOperations = s.result.operations || [];
-              state.alignmentDuration = Number(s.result.outputDuration || state.sourceDuration || 0);
+              state.alignmentDuration = Number(s.result.outputDuration || sourceDuration || 0);
               const reconciliation = reconcileCaptionAdditions(
                 bindMatchedCaptionSources(await applyCaptionGrouping(s.result.captions, state.captionLines), sourceClips),
                 targetCaptions,alignmentOnly?[]:state.autoTranscript?.additionBaseline || [],alignmentOnly?[]:state.autoTranscript?.editBaseline || [],deletedSources);
               const binding = bindGeneratedTranscript(reconciliation.captions,targetTrack);
               state.captions = [...otherCaptions,...reconciliation.captions];
-              state.autoTranscript = {...binding,deletedSources,additionBaseline:reconciliation.baseline,editBaseline:reconciliation.editBaseline,trackId:state.autoTranscript?.trackId || "caption",text:state.recognizedText,sourcePath:state.video.path,sourceSegments:s.result.sourceSegments || [],scriptAssisted:true,panelOpen:true};
+              state.autoTranscript = {...binding,deletedSources,additionBaseline:reconciliation.baseline,editBaseline:reconciliation.editBaseline,trackId:state.autoTranscript?.trackId || "caption",text:state.recognizedText,sourcePath:sourceVideo.path,sourceSegments:s.result.sourceSegments || [],scriptAssisted:true,panelOpen:true};
               state.reviewCaptions = (s.result.reviewCaptions || []).filter((item) =>
                 ["missing","mismatch","repeat"].includes(item.type)
               );
@@ -20532,7 +21184,9 @@ function polishSectionHtml(title, rows, emptyText) {
         return true;
       }
       function dismissReviewHints(ids) {
-        const reviews = state.reviewCaptions.filter(r => ids.includes(r.id));
+        const requested = state.reviewCaptions.filter(r => ids.includes(r.id));
+        const reviews = state.reviewCaptions.filter(r => requested.some(target =>
+          r.id === target.id || (typeof sameCaptionMismatchOccurrence === 'function' && sameCaptionMismatchOccurrence(target,r))));
         if (!reviews.length || isTrackLocked('review')) return;
         snapshot();
         const issues = new Set(reviews.map(r => r.issueId || r.id));
@@ -20660,7 +21314,9 @@ function polishSectionHtml(title, rows, emptyText) {
         return true;
       }
       function batchReviewAction(ids, mode) {
-        const selected=[...new Set(ids)].map(id=>state.reviewCaptions.find(r=>r.id===id)).filter(Boolean);
+        const requested=[...new Set(ids)].map(id=>state.reviewCaptions.find(r=>r.id===id)).filter(Boolean);
+        const selected=state.reviewCaptions.filter(r=>requested.some(target=>
+          r.id===target.id || (typeof sameCaptionMismatchOccurrence === 'function' && sameCaptionMismatchOccurrence(target,r))));
         if(!selected.length)return;
         if(isTrackLocked('review'))return toast('待处理轨道已锁定');
         if(mode==='deleteCaptions'){
@@ -21245,7 +21901,17 @@ function polishSectionHtml(title, rows, emptyText) {
           return;
         }
         state.selected = anchor; state.selectedItems = targets();
-        deleteSelected(true, {record:false});
+        // Defer the generic deletion render: its review reconciliation would
+        // observe captions before this function restores their exact ripple
+        // mapping, and could recreate the same mismatch issue a second time.
+        let deleted = false;
+        deleteSelected.deferRender = true;
+        try { deleted = deleteSelected(true, {record:false}) === true; }
+        finally { deleteSelected.deferRender = false; }
+        if (!deleted) {
+          rollback('重复片段删除未完成，已恢复原工程');
+          return;
+        }
         // Rebuild visible captions from the pre-edit snapshot. Generic ripple
         // deletion can remap a whole source-backed caption group through an
         // owner clip that was just removed, dropping unrelated words as well.
@@ -22174,6 +22840,19 @@ function persistedMediaItem(item, preserveWaveform = false) {
         }
       }
       let cachedExportHardware = null;
+      function updateExportProgressIndicator(label, visible = true) {
+        const button = $("showExportProgress");
+        if (!button) return;
+        button.hidden = !visible;
+        button.textContent = label || "";
+        button.title = label || "查看导出进度";
+      }
+      function showExportProgressPanel() {
+        const modal = $("exportModal");
+        if (!modal) return;
+        modal.classList.add("on");
+        modal.classList.toggle("background-mode", !!state.exportJobId);
+      }
       function hardwareExportLabel() {
         if (selectedExportDevice() === "cpu") return "⚙️ CPU 软件编码导出";
         const vendor = cachedExportHardware?.vendor;
@@ -22231,6 +22910,10 @@ function persistedMediaItem(item, preserveWaveform = false) {
         return cachedExportHardware;
       }
       async function openExportSettings() {
+        if (state.exportJobId) {
+          showExportProgressPanel();
+          return;
+        }
         if (!state.video) {
           toast("请先导入视频");
           return;
@@ -22757,6 +23440,9 @@ function persistedMediaItem(item, preserveWaveform = false) {
           }
           $("exportSettingsModal").classList.remove("on");
           $("exportModal").classList.add("on");
+          $("exportModal").classList.remove("background-mode");
+          $("backgroundExport").hidden = true;
+          updateExportProgressIndicator("", false);
           $("cancelExport").textContent = "取消导出";
           $("exportBar").style.width = "0";
           $("exportStatus").textContent = "正在检查音频修复参数…";
@@ -22859,6 +23545,9 @@ function persistedMediaItem(item, preserveWaveform = false) {
               spliceMuteUntil,
             };
           });
+          const denoisedSourcePath = mainAudioPath
+            ? state.denoisedAudio?.sourcePath || state.video?.path || ""
+            : "";
           const config = {
             inputPath: exportSourcePath,
             noMainVideoSource,
@@ -22880,9 +23569,19 @@ function persistedMediaItem(item, preserveWaveform = false) {
             audioAssets: state.audioAssets.map((x) => {
               const videoOwner = state.videoLayers.find((video) =>
                 (x.linkedVideoId && video.id === x.linkedVideoId) || (x.linkGroupId && video.linkGroupId === x.linkGroupId));
+              const linkedToDenoisedSource = !!denoisedSourcePath && (
+                x.path === denoisedSourcePath ||
+                x.sourceMediaId === denoisedSourcePath ||
+                (!!x.sourceMediaId && !!state.video?.sourceMediaId && x.sourceMediaId === state.video.sourceMediaId) ||
+                videoOwner?.path === denoisedSourcePath
+              );
+              const overlapsMainAudio = linkedToDenoisedSource && exportMainAudioClips.some((clip) =>
+                Number(x.start || 0) < Number(clip.end || 0) && Number(x.end || 0) > Number(clip.start || 0));
               const playbackMode = videoOwner?.splicePlaybackMode || "normal-audio";
               return ({
-              path: resolvedPath(x) || x.path,
+              path: linkedToDenoisedSource && !overlapsMainAudio
+                ? mainAudioPath
+                : resolvedPath(x) || x.path,
               start: x.start,
               end: x.end,
               sourceStart: x.sourceStart || 0,
@@ -22893,7 +23592,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
               pan: x.pan || 0,
               fadeIn: x.fadeIn || 0,
               fadeOut: x.fadeOut || 0,
-              muted: !!x.muted || playbackMode === "normal-muted" || playbackMode === "freeze-hold",
+              muted: !!x.muted || overlapsMainAudio || playbackMode === "normal-muted" || playbackMode === "freeze-hold",
               spliceMuteStart: playbackMode === "freeze-resume" ? Math.max(Number(x.start || 0), Number(videoOwner.start || 0)) : 0,
               spliceMuteUntil: playbackMode === "freeze-resume" ? Number(videoOwner.spliceFreezeUntil || videoOwner.start || 0) : 0,
               linkedVideoId: x.linkedVideoId || "",
@@ -23030,6 +23729,10 @@ function persistedMediaItem(item, preserveWaveform = false) {
           };
           const { jobId } = await nativeCall("startExport", config);
           state.exportJobId = jobId;
+          state.exportProjectId = state.projectId || "";
+          $("exportModal").classList.add("background-mode");
+          $("backgroundExport").hidden = false;
+          updateExportProgressIndicator("导出 0%");
           $("exportSummary").textContent =
             format === "mp3"
               ? `MP3 · ${formatTime(exportDuration / exportSpeed, false)} · ${exportSpeed} 倍速`
@@ -23041,6 +23744,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
             const elapsed = Math.max(0, Number(s.elapsed || 0));
             const clock = `${Math.floor(elapsed / 60)}:${String(Math.floor(elapsed % 60)).padStart(2, "0")}`;
             $("exportBar").style.width = `${Math.max(2, (s.progress || 0) * 100)}%`;
+            updateExportProgressIndicator(`导出 ${Math.round((s.progress || 0) * 100)}%`);
             $("exportBar").parentElement?.classList.toggle(
               "waiting",
               (s.state === "queued" || s.state === "exporting" || s.state === "preparing") && (s.progress || 0) < 0.18,
@@ -23062,16 +23766,22 @@ function persistedMediaItem(item, preserveWaveform = false) {
                 : "导出完成");
               $("revealExport").style.display = "inline-block";
               $("cancelExport").textContent = "关闭";
+              $("backgroundExport").hidden = true;
               $("revealExport").onclick = () =>
                 window.native.revealFile(s.outputPath);
               state.exportJobId = "";
+              state.exportProjectId = "";
+              updateExportProgressIndicator("导出完成");
               resetExportSpeed();
               break;
             }
             if (s.state === "cancelled") {
               $("exportStatus").textContent = "已取消导出";
               $("cancelExport").textContent = "关闭";
+              $("backgroundExport").hidden = true;
               state.exportJobId = "";
+              state.exportProjectId = "";
+              updateExportProgressIndicator("导出已取消");
               resetExportSpeed();
               break;
             }
@@ -23081,9 +23791,13 @@ function persistedMediaItem(item, preserveWaveform = false) {
           chooseButton.disabled = false;
           chooseButton.textContent = originalChooseText;
           state.exportJobId = "";
+          state.exportProjectId = "";
           resetExportSpeed();
           $("cancelExport").textContent = "关闭";
           $("exportStatus").textContent = e.message;
+          $("backgroundExport").hidden = true;
+          $("exportModal").classList.remove("background-mode");
+          updateExportProgressIndicator("导出失败");
           showExportSettingsFeedback(e.message || "导出失败，请重试");
           toast(e.message);
         }
@@ -23263,26 +23977,40 @@ function persistedMediaItem(item, preserveWaveform = false) {
           "永久删除工程",
         );
       }
+      async function renameHomeProject(projectId, event) {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        if (homeBusy) return;
+        const item = (window.__projectItems || []).find((project) => project.id === projectId);
+        if (!item) return;
+        homeBusy = true;
+        updateHomeSelection();
+        try {
+          const requestedName = await openRenameProjectDialog(item.name || "未命名工程");
+          if (requestedName == null) return;
+          const name = String(requestedName).trim().slice(0, 80);
+          if (!name) throw new Error("工程名称不能为空。");
+          if (state.projectId === projectId) await flushAutoSave();
+          await nativeCall("renameProject", { projectId, name });
+          if (state.projectId === projectId) {
+            state.projectName = name;
+            $("projectName").textContent = name;
+            window.syncOpenProjectTab?.(projectId, name);
+            queueAutosave();
+          }
+          toast("工程名称已修改");
+        } catch (error) {
+          toast(error.message);
+        } finally {
+          homeBusy = false;
+          updateHomeSelection();
+          await refreshHome();
+        }
+      }
       $("homeProjectGrid").onclick = (event) => {
         const rename = event.target.closest("[data-rename-project]");
         if (rename) {
-          const projectId = rename.dataset.renameProject;
-          const item = (window.__projectItems || []).find((project) => project.id === projectId);
-          openRenameProjectDialog(item?.name || "未命名工程").then((nextName) => {
-            if (nextName === null) return;
-            const name = nextName.trim().slice(0, 80);
-            if (!name) { toast("工程名称不能为空"); return; }
-            nativeCall("renameProject", { projectId, name })
-              .then(async () => {
-                if (state.projectId === projectId) {
-                  state.projectName = name;
-                  if ($("projectName")) $("projectName").textContent = state.projectName;
-                }
-                await refreshHome();
-                toast("工程名称已修改");
-              })
-              .catch((error) => toast(error.message));
-          });
+          renameHomeProject(rename.dataset.renameProject, event);
           return;
         }
         const remove = event.target.closest("[data-delete-project]");
@@ -23294,8 +24022,8 @@ function persistedMediaItem(item, preserveWaveform = false) {
         if (card) openProjectById(card.dataset.projectId);
       };
       $("homeProjectGrid").onpointerdown = (event) => {
-        const remove = event.target.closest("[data-delete-project], [data-rename-project]");
-        if (!remove) return;
+        const action = event.target.closest("[data-delete-project], [data-rename-project]");
+        if (!action) return;
         event.stopPropagation();
       };
       $("backHome").onclick = backToHome;
@@ -23923,6 +24651,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
                 if (!result) throw Error('工程不存在或已删除');
                 cleanupFailures += Number(result.cacheCleanupFailures || 0);
                 cleanupPending += Number(result.cleanupPending === true);
+                window.removeOpenProjectTab?.(item.id);
                 succeeded++; homeSelected.delete(item.id);
               } catch(error) { failed.push(error.message); }
               $('homeSelectedCount').textContent = '正在删除 '+(succeeded+failed.length)+' / '+chosen.length;
@@ -27398,20 +28127,37 @@ function registerFontFace(font) {
         if (
           e.target === $("exportModal") &&
           $("revealExport").style.display !== "none"
-        )
+        ) {
           $("exportModal").classList.remove("on");
+          $("exportModal").classList.remove("background-mode");
+          updateExportProgressIndicator("", false);
+        }
       };
+      $("showExportProgress").onclick = showExportProgressPanel;
+      $("backgroundExport").onclick = () => $("exportModal").classList.remove("on");
+      document.addEventListener("pointerdown", (event) => {
+        const modal = $("exportModal");
+        if (!modal?.classList.contains("on") || !modal.classList.contains("background-mode")) return;
+        if (event.target.closest?.("#showExportProgress")) return;
+        if (modal.querySelector(".dialog")?.contains(event.target)) return;
+        modal.classList.remove("on");
+      }, true);
       $("cancelExport").onclick = async () => {
         if (state.exportJobId) {
+          const jobId = state.exportJobId;
           try {
-            await nativeCall("cancelExport", state.exportJobId);
+            await nativeCall("cancelExport", jobId);
           } catch {}
           state.exportJobId = "";
+          state.exportProjectId = "";
+          $("backgroundExport").hidden = true;
           $("exportStatus").textContent = "已取消导出";
           $("cancelExport").textContent = "关闭";
+          updateExportProgressIndicator("导出已取消");
           return;
         }
-        $("exportModal").classList.remove("on");
+        $("exportModal").classList.remove("on", "background-mode");
+        updateExportProgressIndicator("", false);
       };
       $("colorControls").oninput = (e) => {
         const grade = selectedVideoGrade?.(true);
@@ -27435,211 +28181,6 @@ function registerFontFace(font) {
           queueAutosave();
         }
       };
-      function removeSurplusBoundaryQuotes(input) {
-        let text = String(input || "").trim();
-        // Leading quote marks are stray copied punctuation in this script field,
-        // not part of the spoken text. Remove the whole contiguous prefix run;
-        // quote marks elsewhere in the manuscript continue through normal pairing.
-        text = text.replace(/^["'“”„‟＂＇]+\s*/, "");
-        // Whole-document wrappers can contain same-style quotations. Odd quote
-        // counts in both boundary paragraphs identify a pair spanning the text,
-        // unlike two independently quoted paragraphs (even counts in each).
-        let blocks = text.split(/\n\s*\n/);
-        while (blocks.length > 1 && /^[“”„‟＂"]/.test(text) && /[“”„‟＂"]$/.test(text)
-          && (blocks[0].match(/[“”„‟＂"]/g) || []).length % 2 === 1
-          && (blocks.at(-1).match(/[“”„‟＂"]/g) || []).length % 2 === 1) {
-          text = text.slice(1, -1).trim();
-          blocks = text.split(/\n\s*\n/);
-        }
-        function pairs(value) {
-          const stack = [], matches = new Map();
-          for (let i = 0; i < value.length; i++) {
-            const c = value[i];
-            if (c === "„" || c === "‟") stack.push(i);
-            else if (c === "“") {
-              if (stack.length && value[stack.at(-1)] === "„") matches.set(stack.pop(), i);
-              else stack.push(i);
-            }
-            else if (c === "”") { if (stack.length) matches.set(stack.pop(), i); }
-            else if (c === '"' || c === '＂') {
-              const previous = value[i - 1] || "";
-              const next = value[i + 1] || "";
-              const nextStartsText = /[\p{L}\p{N}]/u.test(next)
-                || (/\s/.test(next) && /^\s+[\p{L}\p{N}]/u.test(value.slice(i + 1)));
-              const nestedOpening = stack.length && nextStartsText
-                && (/[\s:([{]/.test(previous) || /[\p{L}\p{N}]/u.test(previous));
-              if (stack.length && /["＂]/.test(value[stack.at(-1)]) && !nestedOpening) matches.set(stack.pop(), i);
-              else stack.push(i);
-            }
-          }
-          return matches;
-        }
-        // Remove only boundary quote characters or pairs enclosing whitespace.
-        // Never slice away non-quote content when an unmatched mark is found.
-        let previous;
-        do {
-          previous = text;
-          if (/^[“”„‟＂"]/.test(text)) {
-            const end = pairs(text).get(0);
-            if (end === text.length - 1) text = text.slice(1, -1).trim();
-            else if (end !== undefined && !text.slice(1, end).trim()) text = text.slice(end + 1).trimStart();
-            else if (end === undefined) text = text.slice(1).trimStart();
-          }
-          if (/[“”„‟＂"]$/.test(text)) {
-            const finalBlockStart = Math.max(0, text.lastIndexOf("\n\n") + 2);
-            const finalBlock = text.slice(finalBlockStart);
-            const localMatch = [...pairs(finalBlock)].find(([, end]) => end === finalBlock.length - 1);
-            const globalMatch = [...pairs(text)].find(([, end]) => end === text.length - 1);
-            const matchStart = localMatch ? finalBlockStart + localMatch[0] : globalMatch?.[0];
-            if (matchStart === undefined) text = text.slice(0, -1).trimEnd();
-            else if (!(localMatch ? finalBlock.slice(localMatch[0] + 1, -1) : text.slice(matchStart + 1, -1)).trim()) text = text.slice(0, matchStart).trimEnd();
-          }
-        } while (text !== previous);
-        return text;
-      }
-      function cleanScriptCopy(input, options = {}) {
-        const useMarkupCleanup = options.cleanMarkup !== false;
-        const usePunctuationNormalization = options.normalizePunctuation !== false;
-        const useSymbolCollapse = options.collapseSymbols !== false;
-        const punctuation = {
-          "，": ",", "。": ".", "：": ":", "；": ";", "？": "?", "！": "!",
-          "（": "(", "）": ")", "【": "[", "】": "]", "《": "<", "》": ">",
-          "、": "、", "…": "...", "—": "-", "–": "-",
-          "‘": "'", "’": "'", "‚": "'", "‛": "'",
-          "“": '"', "”": '"', "„": '"', "‟": '"', "＇": "'", "＂": '"',
-        };
-        let text = String(input ?? "").replace(/\r\n?/g, "\n");
-        text = text.replace(/[\u00A0\u202F]/g, " ");
-        text = text.replace(/[\uFEFF\u200B\u200C\u200D]/g, "");
-        if (useMarkupCleanup) text = text.replace(/[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Modifier}\uFE0E\uFE0F\u20E3]/gu, "");
-        // Keep the readable label while removing common Markdown wrappers.
-        if (useMarkupCleanup) {
-          text = text.replace(/!\[([^\]]*)\]\([^\n)]+\)/g, "$1");
-          text = text.replace(/\[([^\]]+)\]\([^\n)]+\)/g, "$1");
-          text = text.replace(/^\s*```[^\n]*$/gm, "");
-          text = text.replace(/`([^`\n]+)`/g, "$1").replace(/`+/g, "");
-          // Keep ordered-list markers: they are part of the user's script, not decoration.
-          text = text.replace(/^\s{0,3}(?:#{1,6}|>|[-+*])\s+/gm, "");
-          text = text.replace(/~~([^~\n]+)~~/g, "$1");
-          text = text.replace(/(?:\*\*|__)([^\n]+?)(?:\*\*|__)/g, "$1");
-          text = text.replace(/(?:\*|_)([^\n]+?)(?:\*|_)/g, "$1");
-          text = text.replace(/[\*#]+/g, "");
-        }
-        text = removeSurplusBoundaryQuotes(text);
-        // Attach closing quotes before sentence splitting. Once curly quotes are
-        // normalized to straight quotes their opening/closing role is lost.
-        let doubleQuoteOpen = false;
-        let doubleQuoteOpening = "";
-        let singleQuoteOpen = false;
-        let attached = "";
-        for (let index = 0; index < text.length; index += 1) {
-          const character = text[index];
-          const apostrophe = /['’]/.test(character)
-            && /[\p{L}\p{N}]/u.test(text[index - 1] || "")
-            && (/[\p{L}\p{N}]/u.test(text[index + 1] || "") || !singleQuoteOpen);
-          let closing = /[”’」』]/.test(character) && !apostrophe;
-          if (!apostrophe) {
-            if (character === '"' || character === '＂') {
-              closing = doubleQuoteOpen;
-              doubleQuoteOpen = !doubleQuoteOpen;
-            } else if (character === "„" || character === "‟") {
-              doubleQuoteOpen = true;
-              doubleQuoteOpening = character;
-            } else if (character === "“") {
-              closing = doubleQuoteOpen && doubleQuoteOpening === "„";
-              doubleQuoteOpen = !closing;
-              doubleQuoteOpening = closing ? "" : character;
-            }
-            else if (character === "”") doubleQuoteOpen = false;
-            else if (character === "'" || character === "＇") {
-              closing = singleQuoteOpen;
-              singleQuoteOpen = !singleQuoteOpen;
-            } else if (character === "‘") singleQuoteOpen = true;
-            else if (character === "’") singleQuoteOpen = false;
-          }
-          const previous = text[index - 1] || "";
-          const next = text[index + 1] || "";
-          const word = /[\p{L}\p{N}]/u;
-          if (!closing && /["＂“„‟]/.test(character) && word.test(next)
-            && (word.test(previous) || /[:：]/.test(previous))) attached = attached.trimEnd() + " ";
-          if (closing) attached = attached.trimEnd();
-          attached += character;
-          if (closing && word.test(next)) attached += " ";
-        }
-        text = removeSurplusBoundaryQuotes(attached);
-        if (usePunctuationNormalization) text = [...text].map((character) => punctuation[character] ?? character).join("");
-        if (useSymbolCollapse) text = text
-          .replace(/"{2,}/g, '"')
-          .replace(/'{2,}/g, "'")
-          .replace(/\.{4,}/g, "...")
-          .replace(/([,;:])(?:\s*\1)+/g, "$1")
-          .replace(/[!?](?:\s*[!?])+/g, (run) => run.replace(/\s/g, "").at(-1));
-        // A damaged saved manuscript may retain the opening quote after its
-        // final `Send:` call to action but lose only the closing quote. Restore
-        // that unambiguous final quote after the sentence punctuation.
-        text = text.replace(/(\bSend\s*:\s*)(["“„])\s*([^"“”„‟\n]+[.!?])\s*$/u,
-          (match, prefix, opening, body) => `${prefix.replace(/:\s*$/u, ": ")}"${body.trim()}"`);
-        text = text.replace(/\bSend\s*:\s*"\s+([^"\n]+)"\s*$/u,
-          (match, body) => `Send: "${body.trim()}"`);
-        text = text.replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n");
-        text = text.replace(/\s+([,.;:!?])/g, "$1");
-        text = text.replace(/([\[(])\s+/g, "$1").replace(/\s+([\])])/g, "$1");
-        text = text.replace(/\n{3,}/g, "\n\n");
-        return segmentScriptParagraphs(normalizeLanguagePunctuation(text.trim()));
-      }
-      function scriptSentences(block) {
-        const value = String(block || "").replace(/\s*\n\s*/g, " ").trim();
-        if (!value) return [];
-        const sentences = [];
-        // Dots inside addresses and abbreviations are not sentence boundaries.
-        const protectedSpans = [...value.matchAll(/(?:https?:\/\/|www\.)[^\s<>"“”]+[^\s<>"“”.,!?;:)]|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|\b(?:[A-Za-z]\.){2,}|\b[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}(?:\/[^\s]*)?/g)]
-          .map(match => [match.index, match.index + match[0].length]);
-        let start = 0;
-        for (let index = 0; index < value.length; index += 1) {
-          const character = value[index];
-          if (!".!?".includes(character)) continue;
-          if (protectedSpans.some(([from, to]) => index >= from && index < to)) continue;
-          if (character === ".") {
-            const previous = value[index - 1] || "";
-            const next = value[index + 1] || "";
-            if (/\d/.test(previous) && /\d/.test(next)) continue;
-            if (value.slice(index, index + 3) === "...") {
-              index += 2;
-            } else {
-              const word = (value.slice(start, index).match(/[A-Za-z]+$/) || [""])[0];
-              if (/^(?:Mr|Mrs|Ms|Dr|Prof|St|vs|etc|Rev|Jr|Sr)$/i.test(word)) continue;
-            }
-          }
-          while (/["'”’」』）)\]]/.test(value[index + 1] || "")) index += 1;
-          const sentence = value.slice(start, index + 1).trim();
-          if (sentence) sentences.push(sentence);
-          start = index + 1;
-        }
-        const tail = value.slice(start).trim();
-        if (tail) sentences.push(tail);
-        return sentences;
-      }
-      function segmentScriptParagraphs(input, maxSentences = 3, maxLength = 240) {
-        const sourceBlocks = String(input || "").split(/\n\s*\n/).filter((block) => block.trim());
-        const paragraphs = [];
-        for (const sourceBlock of sourceBlocks) {
-          const sentences = scriptSentences(sourceBlock);
-          let current = [];
-          let currentLength = 0;
-          for (const sentence of sentences) {
-            const nextLength = currentLength + (current.length ? 1 : 0) + sentence.length;
-            if (current.length && (current.length >= maxSentences || nextLength > maxLength)) {
-              paragraphs.push(current.join(" "));
-              current = [];
-              currentLength = 0;
-            }
-            current.push(sentence);
-            currentLength += (current.length > 1 ? 1 : 0) + sentence.length;
-          }
-          if (current.length) paragraphs.push(current.join(" "));
-        }
-        return paragraphs.join("\n\n");
-      }
       $("cleanScriptText").onclick = () => {
         const input = $("scriptText");
         const cleaned = cleanScriptCopy(input.value);
@@ -27700,6 +28241,27 @@ function registerFontFace(font) {
         const textEditing = isTypingField(target);
         const command = e.metaKey || e.ctrlKey;
         const code = e.code || "";
+        if (e.ctrlKey && e.altKey && !e.shiftKey) {
+          const mainArea = code === "Digit1" ? "download" : code === "Digit2" ? "projects" : "";
+          if (mainArea) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (!e.repeat) window.chrome?.webview?.postMessage({ type: "mainAreaRequest", area: mainArea });
+            return;
+          }
+          if (code === "KeyM") {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (!e.repeat && !$("matchScript")?.disabled) $("matchScript")?.click();
+            return;
+          }
+          if (code === "KeyE") {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (!e.repeat && !$("exportVideo")?.disabled) $("exportVideo")?.click();
+            return;
+          }
+        }
         if (!e.isComposing && e.shiftKey && !command && !e.altKey && (code === "KeyF" || String(e.key).toLowerCase() === "f") && !textEditing) {
           e.preventDefault();
           e.stopImmediatePropagation();
@@ -27889,7 +28451,7 @@ function registerFontFace(font) {
           nudgeSelectedClips(frameDuration());
           return;
         }
-        if (code === "Space") {
+        if (code === "Space" || e.key === " " || e.key === "Spacebar") {
           e.preventDefault();
           e.stopImmediatePropagation();
           // Space is exclusively the transport play/pause command. Ignore OS
@@ -27980,6 +28542,101 @@ function registerFontFace(font) {
       function hasDragType(event, type) {
         return [...(event.dataTransfer?.types || [])].includes(type);
       }
+      function projectCardDropTarget(event) {
+        return event.target?.closest?.("#homeProjectGrid .projectcard[data-project-id]") || null;
+      }
+      function isExternalFileDrop(event) {
+        return [...(event.dataTransfer?.types || [])].includes("Files") ||
+          [...(event.dataTransfer?.items || [])].some((item) => item.kind === "file") ||
+          (event.dataTransfer?.files?.length || 0) > 0;
+      }
+      function isVideoFile(file) {
+        const name = String(file?.name || file?.path || "");
+        return /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(name);
+      }
+      function droppedFilePath(item) {
+        return typeof item === "string" ? item : String(item?.path || "");
+      }
+      function droppedFileName(item, fallback = "") {
+        if (typeof item === "string") return fallback || item.split(/[\\/]/).pop() || "";
+        return String(item?.originalName || item?.name || fallback || droppedFilePath(item).split(/[\\/]/).pop() || "");
+      }
+      async function resolveProjectCardDropPaths(files) {
+        const direct = files.map((file) => ({ path: String(file.path || ""), originalName: file.name || "" }))
+          .filter((item) => /^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(item.path));
+        if (direct.length) return direct;
+        window.__clipAssistantExternalDropFiles = files;
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 450));
+          const queued = window.native?.takeDroppedFiles
+            ? unwrap(await window.native.takeDroppedFiles())
+            : [];
+          const queuedPaths = (queued || []).map((item, index) => ({
+            path: droppedFilePath(item),
+            originalName: droppedFileName(item, files[index]?.name || ""),
+          })).filter((item) => item.path);
+          if (queuedPaths.length) return queuedPaths;
+          const resolved = await nativeCall("resolveDroppedFilePaths");
+          return (resolved || []).map((item, index) => ({
+            path: droppedFilePath(item),
+            originalName: droppedFileName(item, files[index]?.name || ""),
+          })).filter((item) => item.path);
+        } finally {
+          window.__clipAssistantExternalDropFiles = null;
+        }
+      }
+      async function uploadProjectCardDropFiles(files) {
+        const endpoint = await nativeCall("uploadEndpoint");
+        const paths = [];
+        for (const file of files) {
+          const response = await fetch(`${endpoint}?name=${encodeURIComponent(file.name || "video.mp4")}`, {
+            method: "PUT",
+            headers: { "Content-Type": file.type || "application/octet-stream" },
+            body: file,
+          });
+          if (!response.ok) throw new Error(`无法读取拖入的视频：${file.name || "素材"}`);
+          const result = await response.json();
+          if (result?.path) paths.push({ path: result.path, originalName: file.name || "video.mp4" });
+        }
+        return paths;
+      }
+      async function importVideosIntoProjectCard(projectId, droppedFiles, card) {
+        const files = [...(droppedFiles || [])].filter(isVideoFile);
+        if (!files.length) {
+          toast("请把 MP4、MOV、M4V、WEBM、AVI 或 MKV 视频拖到工程卡片");
+          return;
+        }
+        card?.classList.remove("drop-target");
+        card?.classList.add("importing");
+        card?.setAttribute("aria-busy", "true");
+        try {
+          toast("正在打开工程并将视频放到时间线首帧…");
+          let paths = await resolveProjectCardDropPaths(files);
+          if (!paths.length) paths = await uploadProjectCardDropFiles(files);
+          if (!paths.length) throw new Error("没有取得拖入视频的文件路径");
+          if (!(await openProjectById(projectId))) return;
+          let cursor = 0;
+          let imported = 0;
+          const preferredTrackId = (state.trackOrder || [])
+            .find((id) => trackInfo(id).kind === "video" && !isTrackLocked(id)) || "";
+          for (const item of paths) {
+            if (!isVideoFile({ name: item.originalName, path: item.path })) continue;
+            const info = await nativeCall("addVideoPath", { projectId: state.projectId, path: item.path });
+            const asset = await importVideo(info, "timeline", cursor, preferredTrackId, "", "insert");
+            if (!asset) continue;
+            cursor += Math.max(0.04, Number(asset.duration || 3)) /
+              Math.max(0.5, Number(state.audio?.speed || 1));
+            imported += 1;
+          }
+          if (imported) seekTimeline(0);
+          else toast("没有导入可用的视频文件");
+        } catch (error) {
+          toast(error.message || String(error));
+        } finally {
+          card?.classList.remove("drop-target", "importing");
+          card?.removeAttribute("aria-busy");
+        }
+      }
       function isImageDrop(event) {
         if (hasDragType(event, "application/x-clipassistant-image-asset")) return true;
         const imageExtension = /\.(png|jpe?g|webp|gif|heic|bmp|tiff?)$/i;
@@ -27993,6 +28650,8 @@ function registerFontFace(font) {
         dragDepth = 0;
         hideSnapGuide();
         $("dropVeil").classList.remove("on");
+        document.querySelectorAll("#homeProjectGrid .projectcard.drop-target")
+          .forEach((card) => card.classList.remove("drop-target"));
         document
           .querySelectorAll("[data-drop-zone]")
           .forEach((zone) => zone.classList.remove("drag"));
@@ -28161,7 +28820,11 @@ function registerFontFace(font) {
           if (hasDragType(event, "application/x-clipassistant-track")) return;
           event.preventDefault();
           if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
-          if (!state.editorActive) return;
+          if (!state.editorActive) {
+            const card = projectCardDropTarget(event);
+            if (card && isExternalFileDrop(event)) card.classList.add("drop-target");
+            return;
+          }
           const intent = dropLocation(event);
           sendDropIntent(intent);
           showDropUi(intent);
@@ -28173,6 +28836,7 @@ function registerFontFace(font) {
         (event) => {
           if (hasDragType(event, "application/x-clipassistant-track")) return;
           event.preventDefault();
+          projectCardDropTarget(event)?.classList.remove("drop-target");
           dragDepth = Math.max(0, dragDepth - 1);
           if (!event.relatedTarget || dragDepth === 0) clearDropUi();
         },
@@ -28185,6 +28849,12 @@ function registerFontFace(font) {
           event.preventDefault();
           event.stopPropagation();
           if (!state.editorActive) {
+            const card = projectCardDropTarget(event);
+            const files = [...(event.dataTransfer?.files || [])];
+            if (card && files.length) {
+              void importVideosIntoProjectCard(card.dataset.projectId, files, card);
+              return;
+            }
             toast("请先新建或打开一个工程");
             return;
           }
@@ -28321,34 +28991,51 @@ function registerFontFace(font) {
         const cached = state.denoisedAudio;
         return !!(cached?.path && !cached.missing && cached.sourcePath === state.video?.path);
       }
+      function manuscriptSourceVideo() {
+        if (state.video?.path) return state.video;
+        const selected = state.selected?.type === "videolayer"
+          ? (state.videoLayers || []).find(item => item.id === state.selected.id && item.path)
+          : null;
+        if (selected) return selected;
+        const candidates = (state.videoLayers || []).filter(item => item?.path && !item.missing)
+          .sort((left, right) => Number(left.start || 0) - Number(right.start || 0));
+        return candidates.find(item => (state.audioAssets || []).some(audio =>
+          audio.path === item.path || audio.sourceMediaId === item.path)) || candidates[0] || null;
+      }
+      function manuscriptSourceDuration(media = manuscriptSourceVideo()) {
+        return Math.max(0, Number(media?.sourceDuration || media?.duration ||
+          (Number(media?.sourceEnd || 0) - Number(media?.sourceStart || 0)) ||
+          (Number(media?.end || 0) - Number(media?.start || 0)) || 0));
+      }
       function autoCaptionSourcePath() {
         // Match the manuscript entry point: denoising may erase quiet syllables.
-        return state.video?.path;
+        return manuscriptSourceVideo()?.path || "";
       }
       function autoCaptionTimelineSignature() {
         return [...mainClips(),...mainAudioClips(),...state.videoLayers,...state.audioAssets].map((clip) => [clip.id,clip.path||'',clip.trackId||'',Number(clip.start||0).toFixed(7), Number(clip.end||0).toFixed(7), Number(clip.sourceStart||0).toFixed(7), Number(clip.sourceEnd||0).toFixed(7)]).join("|");
       }
       function autoCaptionMediaSignature() {
-        const v = state.video || {};
-        return [v.path || "", v.url || "", v.id || "", v.name || "", Number(state.sourceDuration||0).toFixed(4)].join("|");
+        const v = manuscriptSourceVideo() || {};
+        return [v.path || "", v.url || "", v.id || "", v.name || "", manuscriptSourceDuration(v).toFixed(4)].join("|");
       }
       function manuscriptSourceClips() {
-        const path=state.video?.path;
+        const path=autoCaptionSourcePath();
         const audio=[...mainAudioClips().map(c=>({...c,ownerClipType:"audio"})),...(state.audioAssets||[]).filter(c=>c.path===path||c.sourceMediaId===path).map(c=>({...c,ownerClipType:"audioasset"}))];
         return audio.map(c=>({...c,sourceStart:Number(c.sourceStart||0),sourceEnd:Number(c.sourceEnd??(Number(c.sourceStart||0)+(c.end-c.start)*Number(state.audio.speed||1)))}));
       }
       function bindMatchedCaptionSources(captions, clips) {
+        const sourcePath=autoCaptionSourcePath();
         return (captions||[]).flatMap(caption=>clips.flatMap(clip=>{
           const rate=(clip.sourceEnd-clip.sourceStart)/(clip.end-clip.start);
           const words=(caption.words||[]).filter(w=>(w.start+w.end)/2>=clip.start&&(w.start+w.end)/2<clip.end).map(w=>({...w,sourceStart:clip.sourceStart+(Math.max(w.start,clip.start)-clip.start)*rate,sourceEnd:clip.sourceStart+(Math.min(w.end,clip.end)-clip.start)*rate,start:Math.max(w.start,clip.start),end:Math.min(w.end,clip.end)}));
-          return words.length?[{...caption,id:uid(),ownerClipId:clip.id,ownerClipType:clip.ownerClipType,sourceMediaId:state.video.path,start:words[0].start,end:words.at(-1).end,sourceStart:words[0].sourceStart,sourceEnd:words.at(-1).sourceEnd,text:joinCaptionWords(words.map(w=>w.display)),words}]:[];
+          return words.length?[{...caption,id:uid(),ownerClipId:clip.id,ownerClipType:clip.ownerClipType,sourceMediaId:sourcePath,start:words[0].start,end:words.at(-1).end,sourceStart:words[0].sourceStart,sourceEnd:words.at(-1).sourceEnd,text:joinCaptionWords(words.map(w=>w.display)),words}]:[];
         }));
       }
       function createAutoCaptionContext() {
         return {
           projectId: state.projectId,
           sessionRevision: typeof currentProjectSessionRevision === "function" ? currentProjectSessionRevision() : 0,
-          videoPath: state.video?.path || "",
+          videoPath: autoCaptionSourcePath(),
           mediaSignature: autoCaptionMediaSignature(),
           timelineSignature: autoCaptionTimelineSignature(),
           transcriptSourcePath: autoCaptionSourcePath(),
@@ -28357,6 +29044,7 @@ function registerFontFace(font) {
         };
       }
       function bindMatchedReviewSources(reviews, clips = manuscriptSourceClips()) {
+        const sourcePath=autoCaptionSourcePath();
         return (reviews || []).flatMap(review => {
           const words=review.words?.length ? review.words.map(w=>({...w,display:w.display || w.text})) : [];
           return clips.flatMap(clip=>{
@@ -28364,7 +29052,7 @@ function registerFontFace(font) {
             if(end<=start)return [];
             const rate=(clip.sourceEnd-clip.sourceStart)/(clip.end-clip.start);
             const bound=words.filter(w=>w.start<end&&w.end>start).map(w=>({...w,start:Math.max(w.start,start),end:Math.min(w.end,end),sourceStart:clip.sourceStart+(Math.max(w.start,start)-clip.start)*rate,sourceEnd:clip.sourceStart+(Math.min(w.end,end)-clip.start)*rate}));
-            return [{...review,id:uid(),issueId:review.issueId||review.id,ownerClipId:clip.id,ownerClipType:clip.ownerClipType,sourceMediaId:state.video.path,start,end,sourceStart:clip.sourceStart+(start-clip.start)*rate,sourceEnd:clip.sourceStart+(end-clip.start)*rate,words:bound,text:bound.length?joinCaptionWords(bound.map(w=>w.display)):review.text}];
+            return [{...review,id:uid(),issueId:review.issueId||review.id,ownerClipId:clip.id,ownerClipType:clip.ownerClipType,sourceMediaId:sourcePath,start,end,sourceStart:clip.sourceStart+(start-clip.start)*rate,sourceEnd:clip.sourceStart+(end-clip.start)*rate,words:bound,text:bound.length?joinCaptionWords(bound.map(w=>w.display)):review.text}];
           });
         });
       }
@@ -28507,7 +29195,7 @@ function registerFontFace(font) {
         return result;
       }
       function mapTranscribedCaptionsToTimeline(captions = []) {
-        const sourcePath=state.video?.path;
+        const sourcePath=autoCaptionSourcePath();
         const audioClips=[...mainAudioClips(),...(state.audioAssets||[]).filter(c=>c.path===sourcePath||c.sourceMediaId===sourcePath)];
         const ownerClipType=audioClips.length?'audio':'video';
         const clips=(audioClips.length?audioClips:[...mainClips(),...(state.videoLayers||[]).filter(c=>c.path===sourcePath||c.sourceMediaId===sourcePath)]).map(c=>({...c,sourceEnd:Number(c.sourceEnd??(Number(c.sourceStart||0)+(c.end-c.start)*Number(state.audio.speed||1)))}));
@@ -28564,7 +29252,7 @@ function registerFontFace(font) {
           <button class="auto-transcript-time" type="button" data-auto-caption-seek="${Number(caption.start) || 0}" title="跳到这句">${formatTime(caption.start, false)}</button>
             <textarea class="auto-transcript-edit" data-auto-caption-edit="${escapeHtml(caption.id)}" aria-label="转录第 ${index + 1} 段">${escapeHtml(caption.text || "")}</textarea>
             ${renderCaptionReferenceChanges(caption)}
-            ${(caption.words || []).map((word, wordIndex) => word.issueType === "mismatch" && captionCorrectionDiffers(word.recognizedDisplay||word.originalDisplay||word.display,word.expectedDisplay) ? `<div class="auto-transcript-mismatch small status"><span>${escapeHtml(word.recognizedDisplay||word.originalDisplay||word.display)}（识别文案） → ${escapeHtml(word.expectedDisplay)}（正确文案）</span></div>` : "").join("")}
+            ${captionMismatchReviewGroups(caption).map(group => `<div class="auto-transcript-mismatch small status"><span>${escapeHtml(group.spokenText)}（识别文案） → ${escapeHtml(group.expectedText)}（正确文案）</span></div>`).join("")}
           </div>`).join("");
         requestAnimationFrame(() => list.querySelectorAll("textarea").forEach(fitCaptionTextarea));
       }
@@ -28655,7 +29343,7 @@ function registerFontFace(font) {
             }
       }
       async function generateAutoCaptions({forceRecognition = false} = {}) {
-        if (!state.video?.path) return toast("请先导入视频或音频");
+        if (!autoCaptionSourcePath()) return toast("请先导入视频或音频");
         if (state.autoTranscript?.trackId && isTrackLocked(state.autoTranscript.trackId))
           return toast("CC 字幕轨道已锁定，请先解锁再重新识别");
         const proofread=$("ccProofread").checked;
@@ -28676,7 +29364,7 @@ function registerFontFace(font) {
           }
           const started = unwrap(await window.native.startAutoCaptionAnalysis({
             inputPath: autoCaptionSourcePath(),
-            duration: state.sourceDuration || state.duration,
+            duration: manuscriptSourceDuration() || state.sourceDuration || state.duration,
             captionLines: state.captionLines,
             script: correctScript,
             scriptLanguage: $("manuscriptLanguage")?.value || "",
@@ -28768,7 +29456,7 @@ function registerFontFace(font) {
         }
       }
       async function forceAlignScriptCaptions() {
-        if (!state.video?.path) return toast("请先导入视频或音频");
+        if (!autoCaptionSourcePath()) return toast("请先导入视频或音频");
         const script = String($("scriptText")?.value || "").trim();
         if (!script) return toast("请先粘贴正确文案");
         const model = unwrap(await window.native.modelStatus());
@@ -28787,7 +29475,7 @@ function registerFontFace(font) {
           const context = createAutoCaptionContext();
           const started = unwrap(await window.native.startAutoCaptionAnalysis({
             inputPath: autoCaptionSourcePath(),
-            duration: state.sourceDuration || state.duration,
+            duration: manuscriptSourceDuration() || state.sourceDuration || state.duration,
             captionLines: state.captionLines,
             script,
             scriptLanguage: $("manuscriptLanguage")?.value || "en",
@@ -28910,29 +29598,157 @@ function registerFontFace(font) {
       }
       if (typeof document !== 'undefined') document.addEventListener('click', handleCaptionReferenceChoice);
       renderAutoTranscript();
-      $('renameCurrentProject').onclick = async () => {
-        const id=state.projectId;
-        if (!id) return;
-        const input=await openRenameProjectDialog(state.projectName || '未命名工程');
-        if (input===null) return;
-        const name=input.trim().slice(0,80);
-        if (!name) { toast('工程名称不能为空'); return; }
-        const button=$('renameCurrentProject'); button.disabled=true;
-        try {
-          await flushAutoSave();
-          if (state.projectId!==id) return;
-          const result=await nativeCall('renameProject',{projectId:id,name});
-          if (state.projectId===id) {
-            state.projectName=result.name;
-            $('projectName').textContent=result.name;
-            $('projectName').title=result.name;
-            queueAutosave();
-          }
-          window.__projectItems=(window.__projectItems || []).map(item=>item.id===id?{...item,name:result.name}:item);
-          toast('工程名称已修改');
-        } catch(error) {toast(error.message);}
-        finally {button.disabled=false;}
-      };
+let openProjectTabs = [];
+let projectTabSwitchBusy = false;
+
+function renderOpenProjectTabs() {
+  const bar = $('openProjectTabs');
+  const strip = $('projectTabStrip');
+  if (!bar || !strip) return;
+  bar.replaceChildren();
+  bar.hidden = !openProjectTabs.length;
+  strip.hidden = !openProjectTabs.length;
+  for (const project of openProjectTabs) {
+    const active = state.editorActive && state.projectId === project.id;
+    const wrapper = document.createElement('div');
+    wrapper.className = `project-tab${active ? ' active' : ''}`;
+    wrapper.setAttribute('role', 'presentation');
+    const select = document.createElement('button');
+    select.className = 'project-tab-select';
+    select.type = 'button';
+    select.setAttribute('role', 'tab');
+    select.setAttribute('aria-selected', String(active));
+    select.title = project.name;
+    select.disabled = projectTabSwitchBusy;
+    const name = document.createElement('span');
+    name.className = 'project-tab-name';
+    name.textContent = project.name || '未命名工程';
+    select.append(name);
+    select.onclick = () => { void activateOpenProjectTab(project.id); };
+    const close = document.createElement('button');
+    close.className = 'project-tab-close';
+    close.type = 'button';
+    close.textContent = '×';
+    close.title = '关闭标签（不会删除工程）';
+    close.setAttribute('aria-label', `关闭工程标签：${project.name || '未命名工程'}`);
+    close.disabled = projectTabSwitchBusy;
+    close.onclick = event => {
+      event.preventDefault();
+      event.stopPropagation();
+      void closeOpenProjectTab(project.id);
+    };
+    wrapper.append(select, close);
+    bar.append(wrapper);
+  }
+  updateProjectTabScrollControls();
+  const reveal = bar.querySelector('.project-tab.active') || bar.lastElementChild;
+  if (reveal) requestAnimationFrame(() => {
+    if (!bar.clientWidth || !reveal.isConnected) return;
+    const barRect = bar.getBoundingClientRect();
+    const tabRect = reveal.getBoundingClientRect();
+    if (tabRect.left < barRect.left) bar.scrollBy({ left: tabRect.left - barRect.left - 8, behavior: 'smooth' });
+    else if (tabRect.right > barRect.right) bar.scrollBy({ left: tabRect.right - barRect.right + 8, behavior: 'smooth' });
+    updateProjectTabScrollControls();
+  });
+}
+
+function updateProjectTabScrollControls() {
+  const bar = $('openProjectTabs');
+  const previous = $('projectTabsPrev');
+  const next = $('projectTabsNext');
+  if (!bar || !previous || !next) return;
+  const canScroll = bar.scrollWidth > bar.clientWidth + 1;
+  previous.hidden = !canScroll || bar.scrollLeft <= 1;
+  next.hidden = !canScroll || bar.scrollLeft + bar.clientWidth >= bar.scrollWidth - 1;
+}
+
+const openProjectTabScroller = $('openProjectTabs');
+openProjectTabScroller?.addEventListener('scroll', updateProjectTabScrollControls, { passive: true });
+window.addEventListener('resize', updateProjectTabScrollControls);
+$('projectTabsPrev')?.addEventListener('click', () => {
+  const bar = $('openProjectTabs');
+  if (bar) bar.scrollBy({ left: -Math.max(200, Math.round(bar.clientWidth * 0.72)), behavior: 'smooth' });
+});
+$('projectTabsNext')?.addEventListener('click', () => {
+  const bar = $('openProjectTabs');
+  if (bar) bar.scrollBy({ left: Math.max(200, Math.round(bar.clientWidth * 0.72)), behavior: 'smooth' });
+});
+openProjectTabScroller?.addEventListener('wheel', event => {
+  if (Math.abs(event.deltaY) > Math.abs(event.deltaX) && openProjectTabScroller.scrollWidth > openProjectTabScroller.clientWidth) {
+    openProjectTabScroller.scrollLeft += event.deltaY;
+    event.preventDefault();
+  }
+}, { passive: false });
+
+function syncOpenProjectTab(id, name) {
+  if (!id) return;
+  const existing = openProjectTabs.find(project => project.id === id);
+  if (existing) existing.name = name || existing.name || '未命名工程';
+  else openProjectTabs.push({ id, name: name || '未命名工程' });
+  renderOpenProjectTabs();
+}
+
+async function activateOpenProjectTab(id) {
+  if (!id || id === state.projectId || projectTabSwitchBusy) return;
+  if (!openProjectTabs.some(project => project.id === id)) return;
+  if (window.mediaOperationBusy) {
+    toast('请先完成当前素材处理，再切换工程');
+    return;
+  }
+  projectTabSwitchBusy = true;
+  renderOpenProjectTabs();
+  try {
+    if (state.playing && typeof togglePlay === 'function') await togglePlay();
+    await flushAutoSave();
+    const record = await nativeCall('loadProject', id);
+    await enterProject(record);
+  } catch (error) {
+    toast(`切换工程失败：${error.message || error}`);
+  } finally {
+    projectTabSwitchBusy = false;
+    renderOpenProjectTabs();
+  }
+}
+
+async function closeOpenProjectTab(id) {
+  if (projectTabSwitchBusy) return;
+  const index = openProjectTabs.findIndex(project => project.id === id);
+  if (index < 0) return;
+  const isActive = state.editorActive && state.projectId === id;
+  if (state.exportJobId && state.exportProjectId === id) {
+    toast('该工程正在后台导出，导出完成前不能关闭它');
+    return;
+  }
+  if (isActive) {
+    if (window.mediaOperationBusy) {
+      toast('请先完成当前素材处理，再关闭工程标签');
+      return;
+    }
+    const next = openProjectTabs[index + 1] || openProjectTabs[index - 1];
+    try {
+      if (next) {
+        await activateOpenProjectTab(next.id);
+        if (state.projectId === id) return;
+      } else {
+        await backToHome();
+      }
+    } catch (error) {
+      toast(`关闭工程标签失败：${error.message || error}`);
+      return;
+    }
+  }
+  openProjectTabs = openProjectTabs.filter(project => project.id !== id);
+  renderOpenProjectTabs();
+}
+
+function removeOpenProjectTab(id) {
+  if (state.editorActive && state.projectId === id) return;
+  openProjectTabs = openProjectTabs.filter(project => project.id !== id);
+  renderOpenProjectTabs();
+}
+
+window.syncOpenProjectTab = syncOpenProjectTab;
+window.removeOpenProjectTab = removeOpenProjectTab;
       renderRecognizedCopy();
       async function copyRecognizedText(id) {
         const field=$(id), text=String(field?.value || '');
@@ -29483,6 +30299,27 @@ window.addEventListener("pointercancel",()=>{ if(cropPointer) { Object.assign(cr
         const fps = timelineFrameRate();
         const video = normalizeExportFrameBoundaries(mainClips(), fps).clips.map(clip => ({...clip, trackId:state.mainVideoTrackMap?.[clip.id] || 'video', settings:{...mainVideoSettings(clip)}}));
         const audio = normalizeExportFrameBoundaries(mainAudioClips(), fps).clips.map(clip => ({...clip,...mainAudioSettings(clip),trackId:state.mainAudioTrackMap?.[clip.id] || 'audio',muted:!isTrackAudible(state.mainAudioTrackMap?.[clip.id] || 'audio') || !!mainAudioSettings(clip)?.muted}));
+        const denoisedSourcePath = state.denoiseEnabled && state.denoisedAudio?.path
+          ? state.denoisedAudio.sourcePath || state.video.path
+          : '';
+        const audioAssets = (state.audioAssets || []).map(item => {
+          const videoOwner = (state.videoLayers || []).find(video =>
+            (item.linkedVideoId && video.id === item.linkedVideoId) ||
+            (item.linkGroupId && video.linkGroupId === item.linkGroupId));
+          const linkedToDenoisedSource = !!denoisedSourcePath && (
+            item.path === denoisedSourcePath ||
+            item.sourceMediaId === denoisedSourcePath ||
+            (!!item.sourceMediaId && !!state.video?.sourceMediaId && item.sourceMediaId === state.video.sourceMediaId) ||
+            videoOwner?.path === denoisedSourcePath
+          );
+          const overlapsMainAudio = linkedToDenoisedSource && audio.some(clip =>
+            Number(item.start || 0) < Number(clip.end || 0) && Number(item.end || 0) > Number(clip.start || 0));
+          return {
+            ...item,
+            ...(linkedToDenoisedSource && !overlapsMainAudio ? {path:state.denoisedAudio.path} : {}),
+            ...(overlapsMainAudio ? {muted:true} : {}),
+          };
+        });
         return {
           inputPath:state.video.path, mainAudioPath:state.denoiseEnabled ? state.denoisedAudio?.path || '' : '',
           width:state.width,height:state.height,fps,outputDuration:state.duration,
@@ -29494,7 +30331,7 @@ window.addEventListener("pointercancel",()=>{ if(cropPointer) { Object.assign(cr
           trackOrder:state.trackOrder,trackDefinitions:state.trackDefinitions,trackVisibility:effectiveTrackVisibility(),
           videoTransform:{x:0,y:0,scale:1,rotation:0,opacity:1,blendMode:'normal'},
           includeVideo:true,includeAudio:true,
-          images:state.images.map(item=>({...item})),videoLayers:state.videoLayers.map(item=>({...item})),audioAssets:state.audioAssets.map(item=>({...item})),
+          images:state.images.map(item=>({...item})),videoLayers:state.videoLayers.map(item=>({...item})),audioAssets,
           titles:state.titles.filter(item=>state.trackVisibility[item.trackId]!==false),
           captions:state.captions.filter(item=>state.trackVisibility[item.trackId || 'caption']!==false).map(item=>({...item,...state.captionTransform,style:{...state.captionStyle,captionLines:state.captionLines}})),
         };

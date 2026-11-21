@@ -43,8 +43,8 @@ def extract_phone_input(text, region='US'):
     return re.sub(r'\s+', ' ', match.raw_string.translate(str.maketrans({'＋': '+'}))).strip()
 
 
-def _format_us_phone(text, region='US', country_code_hint=1):
-    """Return US numbers in the downloader's established +1(area)xxx-xxxx style."""
+def _format_nanp_phone(text, region='US', country_code_hint=1):
+    """Format North American numbering-plan numbers in the established +1(area)xxx-xxxx style."""
     clean = str(text or '').strip()
     if not clean:
         return ''
@@ -54,7 +54,7 @@ def _format_us_phone(text, region='US', country_code_hint=1):
         clean = re.sub(r'^\+\s*', '+1', clean, count=1)
     try:
         number = phonenumbers.parse(clean, None if clean.startswith('+') else (region or 'US'))
-        if (phonenumbers.region_code_for_number(number) != 'US'
+        if (number.country_code != 1
                 or not phonenumbers.is_possible_number(number)
                 or number.extension):
             return ''
@@ -70,8 +70,8 @@ def format_phone(text):
     clean=extract_phone_input(text)
     if not clean:return ''
     clean=re.sub(r'[ \t]+',' ',clean)
-    us_phone=_format_us_phone(clean)
-    if us_phone:return us_phone
+    nanp_phone=_format_nanp_phone(clean)
+    if nanp_phone:return nanp_phone
     if '(' in clean or ')' in clean:
         clean=re.sub(r'[ \t]*([()])[ \t]*',r'\1',clean)
         return re.sub(r'[ \t]*-[ \t]*','-',clean)
@@ -113,8 +113,8 @@ def format_phone_like(existing,text):
         pass
     text=extract_phone_input(text,region)
     if not text:return ''
-    us_phone=_format_us_phone(text,region,country_code_hint)
-    if us_phone:return us_phone
+    nanp_phone=_format_nanp_phone(text,region,country_code_hint)
+    if nanp_phone:return nanp_phone
     if text and not text.startswith('+'):
         try:
             old_number=phonenumbers.parse(existing,None)

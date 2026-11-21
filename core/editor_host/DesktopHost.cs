@@ -5,6 +5,7 @@ using System.IO;
 using System.ComponentModel;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -54,6 +55,8 @@ public class DesktopHost : Form
     static readonly string storageRoot = Environment.GetEnvironmentVariable("CLIPASSIST_STORAGE_ROOT") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ChatGPT", "剪辑助手", "用户数据");
     readonly string data = Environment.GetEnvironmentVariable("CLIPASSIST_DESKTOP_DATA") ?? Path.Combine(storageRoot, "运行配置");
     readonly object logLock = new object();
+    readonly object downloadProjectResultsLock = new object();
+    readonly Queue<string> downloadProjectResults = new Queue<string>();
     string log;
     string hostState = "created";
     string lastError = "";
@@ -62,6 +65,7 @@ public class DesktopHost : Form
     public bool IsClosed { get { return IsDisposed; } }
     public string HostState { get { return hostState; } }
     public string LastError { get { return lastError; } }
+    public event Action<string> MainAreaRequested;
     public DesktopHost()
     {
         Text = "剪辑助手";
@@ -113,14 +117,113 @@ public class DesktopHost : Form
     public void ShowEmbedded()
     {
         if (IsDisposed) throw new ObjectDisposedException("DesktopHost");
-        Show();
+        StartEmbedded();
         BringToFront();
         ResizeEmbedded(0, 0, Math.Max(1, Width), Math.Max(1, Height));
+        RefreshProjectHome();
+    }
+    void RefreshProjectHome()
+    {
+        if (IsDisposed) return;
+        Action refresh = () => {
+            if (IsDisposed || view.CoreWebView2 == null) return;
+            try {
+                view.CoreWebView2.ExecuteScriptAsync(
+                    "if (typeof window.__refreshProjectHome === 'function') window.__refreshProjectHome();"
+                );
+                Log("PROJECT_HOME_REFRESH_REQUESTED");
+            } catch (Exception ex) {
+                Log("PROJECT_HOME_REFRESH_FAILED " + ex.Message);
+            }
+        };
+        try {
+            if (InvokeRequired) BeginInvoke(refresh);
+            else refresh();
+        } catch (Exception ex) {
+            Log("PROJECT_HOME_REFRESH_DISPATCH_FAILED " + ex.Message);
+        }
+    }
+    public void StartEmbedded()
+    {
+        if (IsDisposed) throw new ObjectDisposedException("DesktopHost");
+        // Showing once fires Shown and starts the local editor service. The
+        // Tk parent may be on a hidden page, so do not activate or reorder it.
+        Show();
     }
     public void SetWorkspaceMode(string mode)
     {
         workspaceMode = mode == "splice" ? "splice" : "edit";
         ApplyWorkspaceMode();
+    }
+    public void CreateDownloadProject(string requestId, string name, string scriptText)
+    {
+        if (IsDisposed || String.IsNullOrWhiteSpace(editorOrigin) || String.IsNullOrWhiteSpace(sessionToken))
+            throw new InvalidOperationException("剪辑工程服务尚未就绪。");
+        string origin = editorOrigin;
+        string token = sessionToken;
+        Log("DOWNLOAD_PROJECT_RPC_BEGIN request_id=" + requestId + " script_length=" + (scriptText ?? "").Length);
+        Task.Run(() => {
+            bool succeeded = false;
+            string detail = "";
+            string projectId = "";
+            try {
+                var serializer = new JavaScriptSerializer();
+                serializer.MaxJsonLength = Int32.MaxValue;
+                string payload = serializer.Serialize(new object[] { new {
+                    requestId = requestId,
+                    name = name,
+                    script = scriptText
+                }});
+                var request = (HttpWebRequest)WebRequest.Create(origin.TrimEnd('/') + "/rpc/createDownloadProject");
+                request.Method = "POST";
+                request.ContentType = "application/json";
+                request.Headers["X-Editor-Session"] = token;
+                request.AllowAutoRedirect = false;
+                request.Timeout = 60000;
+                request.ReadWriteTimeout = 60000;
+                byte[] body = Encoding.UTF8.GetBytes(payload);
+                request.ContentLength = body.Length;
+                using (var stream = request.GetRequestStream()) stream.Write(body, 0, body.Length);
+                using (var response = (HttpWebResponse)request.GetResponse())
+                using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8)) {
+                    var envelope = serializer.Deserialize<Dictionary<string, object>>(reader.ReadToEnd());
+                    if (envelope == null || !envelope.ContainsKey("ok") || !Convert.ToBoolean(envelope["ok"])) {
+                        var error = envelope != null && envelope.ContainsKey("error")
+                            ? envelope["error"] as Dictionary<string, object> : null;
+                        throw new InvalidOperationException(error != null && error.ContainsKey("message")
+                            ? Convert.ToString(error["message"]) : "剪辑工程创建失败。");
+                    }
+                    var result = envelope.ContainsKey("value")
+                        ? envelope["value"] as Dictionary<string, object> : null;
+                    if (result == null || !result.ContainsKey("id"))
+                        throw new InvalidOperationException("剪辑工程服务没有返回工程编号。");
+                    projectId = Convert.ToString(result["id"]);
+                    detail = result.ContainsKey("name") ? Convert.ToString(result["name"]) : name;
+                    succeeded = true;
+                }
+            } catch (Exception ex) {
+                detail = ex.Message;
+                Log("DOWNLOAD_PROJECT_RPC_ERROR request_id=" + requestId + " error=" + ex);
+            }
+            var completion = new JavaScriptSerializer();
+            string completionJson = completion.Serialize(new {
+                requestId = requestId,
+                succeeded = succeeded,
+                detail = detail,
+                projectId = projectId
+            });
+            lock (downloadProjectResultsLock) downloadProjectResults.Enqueue(completionJson);
+            Log("DOWNLOAD_PROJECT_RPC_RESULT_QUEUED request_id=" + requestId + " success=" + (succeeded ? "1" : "0"));
+        });
+    }
+    public string TakeDownloadProjectResults()
+    {
+        var results = new List<string>();
+        lock (downloadProjectResultsLock) {
+            while (downloadProjectResults.Count > 0) results.Add(downloadProjectResults.Dequeue());
+        }
+        Log("DOWNLOAD_PROJECT_RESULT_POLLED count=" + results.Count);
+        return "[" + String.Join(",", results.ToArray()) + "]";
     }
     void ApplyWorkspaceMode()
     {
@@ -268,7 +371,21 @@ public class DesktopHost : Form
             backend = new Process { StartInfo = info, EnableRaisingEvents = true };
             backend.OutputDataReceived += (s, e) => { if (e.Data == null) return; Log(e.Data); if (e.Data.StartsWith("CLIPASSIST_EDITOR_URL=")) ready.TrySetResult(e.Data.Substring("CLIPASSIST_EDITOR_URL=".Length)); };
             backend.ErrorDataReceived += (s, e) => { if (e.Data != null) Log(e.Data); };
-            backend.Exited += (s, e) => { ready.TrySetException(new Exception("剪辑工作区服务已退出。")); if (!closing && IsHandleCreated) BeginInvoke((Action)(() => { closing = true; MessageBox.Show(this, "剪辑工作区服务已退出，请重新打开剪辑首页。\n日志：" + log, "剪辑助手"); Close(); })); };
+            backend.Exited += (s, e) => {
+                const string message = "剪辑工作区服务已退出；下载任务仍会继续。";
+                ready.TrySetException(new Exception(message));
+                if (closing || !IsHandleCreated) return;
+                try {
+                    BeginInvoke((Action)(() => {
+                        if (closing || IsDisposed) return;
+                        hostState = "error";
+                        lastError = message;
+                        Log("BACKEND_EXITED; embedded host kept open");
+                        status.Text = message;
+                        status.Show();
+                    }));
+                } catch { }
+            };
             backend.Start();
             if (!AssignProcessToJobObject(job, backend.Handle)) throw new Exception("无法关联后台进程管理。");
             backend.BeginOutputReadLine(); backend.BeginErrorReadLine();
@@ -434,6 +551,14 @@ public class DesktopHost : Form
             if (!Uri.TryCreate(args.Source, UriKind.Absolute, out source) || source.GetLeftPart(UriPartial.Authority) != editorOrigin) return;
             var message = json.Deserialize<Dictionary<string,object>>(args.WebMessageAsJson);
             string type = message.ContainsKey("type") ? Convert.ToString(message["type"]) : "";
+            if (type == "mainAreaRequest") {
+                string area = message.ContainsKey("area") ? Convert.ToString(message["area"]) : "";
+                if (area == "download" || area == "projects") {
+                    var handler = MainAreaRequested;
+                    if (handler != null) handler(area);
+                }
+                return;
+            }
             if (type == "closeReady") { if (closeReply != null && message.ContainsKey("id") && Convert.ToString(message["id"]) == closeRequestId) closeReply.TrySetResult(message); return; }
             if (type == "rendererError") {
                 string kind = message.ContainsKey("kind") ? Convert.ToString(message["kind"]) : "error";

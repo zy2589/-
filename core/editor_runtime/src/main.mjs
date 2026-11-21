@@ -98,6 +98,7 @@ import {
 } from "./ai-settings.mjs";
 import { translateAuxiliaryCaptions } from "./caption-translation.mjs";
 import { applyCaptionPolish, blockingScriptureIssues, DEFAULT_REVIEW_PROMPTS } from "./script-judge.mjs";
+import { cleanScriptCopy } from "./script-copy.mjs";
 import {reviewCaptionMeanings} from './caption-meaning-review.mjs';
 import {dictionaryCaptionMeanings} from './english-chinese-dictionary.mjs';
 import { planEditAssistant } from './edit-assistant.mjs';
@@ -1505,6 +1506,22 @@ nativeMethods = {
     })),
   ),
   createProject: safe((input) => createProject(input || {})),
+  createDownloadProject: safe((input = {}) => {
+    const name = String(input.name || "").trim().slice(0, 80) || "未命名工程";
+    const script = cleanScriptCopy(String(input.script || ""));
+    if (!script.trim()) throw new Error("正确文案为空，已取消创建工程。视频下载不会受影响。");
+    const created = createProject({
+      name,
+      workspaceMode: "edit",
+      ratio: "9:16",
+      data: {
+        script,
+        manuscriptLanguage: "en",
+      },
+    });
+    console.info(`DOWNLOAD_PROJECT_CREATED request_id=${String(input.requestId || "")} project_id=${created.id}`);
+    return { id: created.id, name };
+  }),
   queryProjects: safe(async (query = {}) => {
     const result = await queryProjects(query);
     result.items = result.items.map(record => ({ ...record,

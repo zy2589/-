@@ -10,6 +10,7 @@ import {
   reviewCaptionBlockIsCovered,
   reviewCaptionWordMatches,
 } from '../review-caption-deletion.mjs';
+import { buildCaptions, regroupCaptions } from '../alignment/regroup.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,10 +38,14 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
   const inspector = fs.readFileSync(inspectorPath, 'utf8');
   const stagePreview = fs.readFileSync(path.join(uiDir, 'html/05-stage-preview.html'), 'utf8');
   const timelineStyle = fs.readFileSync(path.join(uiDir, 'styles/06-timeline-davinci.css'), 'utf8');
+  const topbarStyle = fs.readFileSync(path.join(uiDir, 'styles/02-topbar-nav.css'), 'utf8');
   const stageStyle = fs.readFileSync(path.join(uiDir, 'styles/04-stage-preview.css'), 'utf8');
   const baseStyle = fs.readFileSync(path.join(uiDir, 'html/01-body-prefix.html'), 'utf8');
   const waveformScript = fs.readFileSync(path.join(uiDir, 'scripts/09-timeline-clips-waveform.js'), 'utf8');
+  const playbackEngineScript = fs.readFileSync(path.join(uiDir, 'scripts/12-playback-engine.js'), 'utf8');
+  const denoiseWorkstationScript = fs.readFileSync(path.join(uiDir, 'scripts/16-audio-denoise-workstation.js'), 'utf8');
   const exportUiScript = fs.readFileSync(path.join(uiDir, 'scripts/17-project-export-resolve.js'), 'utf8');
+  const editorHostScript = fs.readFileSync(path.join(uiDir, '../main.mjs'), 'utf8');
   const projectStoreScript = fs.readFileSync(path.join(uiDir, '../project-store.mjs'), 'utf8');
   const projectTrashCleaner = fs.readFileSync(path.join(uiDir, '../project-trash-cleaner.mjs'), 'utf8');
   const timelineMarkup = fs.readFileSync(path.join(uiDir, 'html/07-timeline.html'), 'utf8');
@@ -50,6 +55,18 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
   const gradingEventsScript = fs.readFileSync(path.join(uiDir, 'scripts/19-fonts-shortcuts-dragdrop.js'), 'utf8');
   const spliceStyle = fs.readFileSync(path.join(uiDir, 'styles/37-video-splice.css'), 'utf8');
   const blemishRetouchScript = fs.readFileSync(path.join(uiDir, 'scripts/35-blemish-retouch.js'), 'utf8');
+  requireBuildCheck(
+    playbackEngineScript.includes('state.denoiseEnabled && state.denoisedAudio?.url') &&
+      playbackEngineScript.includes('denoisedAudio?.url || state.video?.url') &&
+      playbackEngineScript.includes('!!denoisedAudio') &&
+      denoiseWorkstationScript.includes('state.denoiseEnabled = true;') &&
+      denoiseWorkstationScript.includes('syncPreviewAudio();') &&
+      denoiseWorkstationScript.includes('queueAutosave();') &&
+      editorHostScript.includes('path.join(projectStoragePath(input.projectId), "media")') &&
+      editorHostScript.includes('if (data.denoisedAudio?.path)') &&
+      exportUiScript.includes('mainAudioPath = state.denoisedAudio.path'),
+    '整轨降噪必须保存到工程媒体目录，并同时用于主界面播放、重开恢复与导出。',
+  );
   // The editor UI is also built from a staged copy under .build. Resolve the
   // download regression guard against both the source tree and that staging
   // tree so a package build validates the same downloader code as local UI
@@ -61,6 +78,72 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
   const downloaderSourcePath = downloaderSourceCandidates.find((candidate) => fs.existsSync(candidate));
   requireBuildCheck(!!downloaderSourcePath, '无法定位下载器源码以执行下载完成布局回归检查。');
   const downloaderScript = fs.readFileSync(downloaderSourcePath, 'utf8');
+  requireBuildCheck(
+    countMatches(downloaderScript, /title_entry\.bind\('<ButtonRelease-1>'.*self\.schedule_title_preview\(/g) === 1 &&
+      downloaderScript.includes('if index is not None and self.title_preview_index==index:') &&
+      downloaderScript.includes('self.schedule_title_preview(index,180)') &&
+      !downloaderScript.includes("title_entry.bind('<Enter>'") &&
+      !downloaderScript.includes("title_entry.bind('<Motion>'") &&
+      !downloaderScript.includes("title_entry.bind('<FocusIn>',lambda _,i=index:self.schedule_title_preview"),
+    '视频名称标题预览只能由点击触发，鼠标悬停不能弹出预览。',
+  );
+  requireBuildCheck(
+    baseStyle.includes('.app { grid-template-rows: auto minmax(0, 1fr) var(--footer); }') &&
+      topbarStyle.includes('flex-wrap: wrap;') &&
+      topbarStyle.includes('grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), min(260px, 100%)))') &&
+      topbarStyle.includes('overflow: visible;'),
+    '多工程标签必须自动换行显示，顶部栏高度随标签行数展开。',
+  );
+  const spokenAdditionCases = [
+    [
+      { display: 'says,', start: 79.44, end: 79.568, matchType: 'spoken_addition', issueType: 'addition' },
+      { display: ':5', start: 79.58, end: 79.62, matchType: 'match', issueType: 'mismatch' },
+      { display: 'While', start: 80.24, end: 80.468, matchType: 'match' },
+      { display: 'the', start: 80.48, end: 80.628, matchType: 'match' },
+    ],
+    [
+      { display: 'survival', start: 118.55, end: 118.59, matchType: 'spoken_addition', issueType: 'addition' },
+      { display: 'He', start: 119.12, end: 119.348, matchType: 'match' },
+      { display: 'gave', start: 119.36, end: 119.588, matchType: 'match' },
+      { display: 'it', start: 119.6, end: 119.748, matchType: 'match' },
+    ],
+  ];
+  const hasEarlyGreenMerge = captions =>
+    captions.some(caption => caption.words.some(word => word.matchType === 'spoken_addition') &&
+      caption.words.some(word => word.matchType !== 'spoken_addition'));
+  for (const naturalPunctuation of [false, true]) {
+    const rebuiltCaptions = spokenAdditionCases.map(words =>
+      buildCaptions(words, { maxWords: 10, maxChars: 34, maxLines: 2, naturalPunctuation }));
+    const firstWhile = rebuiltCaptions[0].find(caption => caption.words.some(word => word.display === 'While'));
+    const secondHe = rebuiltCaptions[1].find(caption => caption.words.some(word => word.display === 'He'));
+    requireBuildCheck(
+      !rebuiltCaptions.some(hasEarlyGreenMerge) &&
+        firstWhile?.start >= 80.24 - 0.001 &&
+        secondHe?.start >= 119.12 - 0.001 &&
+        rebuiltCaptions[0].some(caption => caption.words.length === 1 && caption.words[0].display === 'says,') &&
+        rebuiltCaptions[1].some(caption => caption.words.length === 1 && caption.words[0].display === 'survival'),
+      '绿色口语词必须保留独立声学时间；后续正文不得提前并入口语词字幕。',
+    );
+    const regroupedCaptions = spokenAdditionCases.map(words => regroupCaptions(words, { naturalPunctuation, maxChars: 34 }));
+    requireBuildCheck(
+      !regroupedCaptions.some(hasEarlyGreenMerge) &&
+        regroupedCaptions[0].find(caption => caption.words.some(word => word.display === 'While'))?.start >= 80.24 - 0.001 &&
+        regroupedCaptions[1].find(caption => caption.words.some(word => word.display === 'He'))?.start >= 119.12 - 0.001,
+      '重新分组时也必须保留绿色口语与正文之间的时间边界。',
+    );
+  }
+  requireBuildCheck(
+    downloaderScript.includes('self.script_vars.append(script);self.create_project_vars.append(create_project)') &&
+      downloaderScript.includes('if not self.create_project_vars[row_index].get():') &&
+      downloaderScript.includes("project_name = ' - '.join(value.strip() for value in (person, title) if value.strip())") &&
+      downloaderScript.includes('script_text = self.script_vars[row_index].get()') &&
+      downloaderScript.includes('if not script_text.strip():') &&
+      downloaderScript.includes('self.root.after_idle(lambda rid=request_id, row=row_index, pname=project_name, script=script_text:') &&
+      editorHostScript.includes('const script = cleanScriptCopy(String(input.script || ""));') &&
+      editorHostScript.includes('data: {\n        script,\n        manuscriptLanguage: "en",\n      }') &&
+      editorHostScript.includes('if (!script.trim()) throw new Error("正确文案为空，已取消创建工程。视频下载不会受影响。");'),
+    '下载行勾选建工程必须使用该行手填的人名、视频名称和正确文案，并在后台创建；未勾选或空文案不得创建。',
+  );
   const downloaderDesktopCandidates = [
     path.resolve(uiDir, '../../../downloader_runtime/desktop_ui.py'),
     path.resolve(uiDir, '../../../../../../../core/downloader_runtime/desktop_ui.py'),
@@ -75,6 +158,21 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
   const uiHostPath = uiHostCandidates.find(candidate => fs.existsSync(candidate));
   requireBuildCheck(!!uiHostPath, '无法定位主窗口源码以执行抠图入口回归检查。');
   const uiHost = fs.readFileSync(uiHostPath, 'utf8');
+  const desktopHostCandidates = [
+    path.resolve(uiDir, '../../../editor_host/DesktopHost.cs'),
+    path.resolve(uiDir, '../../../../../../../core/editor_host/DesktopHost.cs'),
+  ];
+  const desktopHostPath = desktopHostCandidates.find(candidate => fs.existsSync(candidate));
+  requireBuildCheck(!!desktopHostPath, '无法定位剪辑宿主源码以检查后台建工程后首页刷新。');
+  const desktopHost = fs.readFileSync(desktopHostPath, 'utf8');
+  const projectHomeScript = fs.readFileSync(path.join(uiDir, 'scripts/18-home-management.js'), 'utf8');
+  requireBuildCheck(
+    uiHost.includes('editor.show(activate=False)') &&
+      desktopHost.includes('public void ShowEmbedded()') &&
+      desktopHost.includes('RefreshProjectHome();') &&
+      projectHomeScript.includes('window.__refreshProjectHome = refreshHome;'),
+    '后台建工程不得切换下载界面；用户进入剪辑区时必须刷新首页工程列表。',
+  );
   const compressSourceCandidates = [
     path.resolve(uiDir, '../../../downloader_runtime/compress_video.py'),
     path.resolve(uiDir, '../../../../../../../core/downloader_runtime/compress_video.py'),
@@ -83,6 +181,7 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
   requireBuildCheck(!!compressSourcePath, '无法定位压缩源码以执行横竖屏比例回归检查。');
   const compressScript = fs.readFileSync(compressSourcePath, 'utf8');
   const reviewScript = fs.readFileSync(path.join(uiDir, 'scripts/15-ai-review-polish.js'), 'utf8');
+  const captionReviewScript = fs.readFileSync(path.join(uiDir, 'scripts/10a-caption-review.js'), 'utf8');
   const deleteScript = fs.readFileSync(path.join(uiDir, 'scripts/13-pause-cut-split.js'), 'utf8');
   const renderScript = fs.readFileSync(path.join(uiDir, '../media/render.mjs'), 'utf8');
   const nestedTimelineScript = fs.readFileSync(path.join(uiDir, '../nested-timeline.mjs'), 'utf8');
@@ -99,8 +198,10 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
   requireBuildCheck(
     !dragDropScript.includes('activeBatchDropModal') &&
       countMatches(dragDropScript, /if \(!state\.editorActive\) return;/g) >= 2 &&
-      dragDropScript.includes('if (!state.editorActive) {\n            toast("请先新建或打开一个工程");\n            return;'),
-    '工程首页的拖放监听不得调用未定义的弹窗判断函数，也不得在工程外处理素材。',
+      dragDropScript.includes('if (!state.editorActive) {\n            const card = projectCardDropTarget(event);') &&
+      dragDropScript.includes('if (card && files.length) {\n              void importVideosIntoProjectCard(card.dataset.projectId, files, card);') &&
+      dragDropScript.includes('toast("请先新建或打开一个工程");'),
+    '工程首页只能接收拖到具体工程卡片的视频，其他区域仍不得在工程外处理素材。',
   );
   const mediaClickStart = mediaScript.indexOf('card.onclick = (event) => {');
   const mediaClickEnd = mediaScript.indexOf('card.oncontextmenu', mediaClickStart);
@@ -799,6 +900,51 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
       repeatEffects.toast.includes('全部文案'),
     '重复片段实际删除执行器必须在快照前拒绝清空全部文案。');
 
+  const sameMismatchStart = captionReviewScript.indexOf('function sameCaptionMismatchOccurrence(');
+  const sameMismatchEnd = captionReviewScript.indexOf('\nfunction ', sameMismatchStart + 10);
+  const dedupeMismatchStart = captionReviewScript.indexOf('function dedupeCaptionMismatchReviews(');
+  const dedupeMismatchEnd = captionReviewScript.indexOf('\nfunction ', dedupeMismatchStart + 10);
+  requireBuildCheck(sameMismatchStart >= 0 && sameMismatchEnd > sameMismatchStart &&
+      dedupeMismatchStart > sameMismatchEnd && dedupeMismatchEnd > dedupeMismatchStart,
+    '字幕差异去重器缺失，无法检查关联音视频重复提示。');
+  const audioMismatchReview = {
+    id: 'audio-review', issueId: 'shared-mismatch', type: 'mismatch',
+    spokenText: 'and', expectedText: 'in', start: 153.633, end: 153.941,
+    captionTrackId: 'caption', transcriptId: 'transcript-1', sourceMediaId: 'same-source',
+    ownerClipId: 'linked-audio', ownerClipType: 'audioasset', action: 'replace',
+  };
+  const videoMismatchReview = {
+    ...audioMismatchReview, id: 'video-review', ownerClipId: 'linked-video',
+    ownerClipType: 'videolayer', trackId: 'review', captionCorrectionReview: true,
+    needsAudioReview: true, action: 'review',
+  };
+  const separateMismatchReview = {
+    ...videoMismatchReview, id: 'separate-review', issueId: 'separate-mismatch',
+    ownerClipId: 'separate-video', captionCorrectionReview: false,
+  };
+  const duplicateMismatchState = { reviewCaptions: [audioMismatchReview, videoMismatchReview, separateMismatchReview],
+    captions: [], issues: [], matchIssues: [] };
+  const dedupeMismatch = vm.runInNewContext(
+    `${captionReviewScript.slice(sameMismatchStart, sameMismatchEnd)}\n`+
+      `${captionReviewScript.slice(dedupeMismatchStart, dedupeMismatchEnd)}\ndedupeCaptionMismatchReviews;`,
+    { state: duplicateMismatchState,
+      captionCorrectionKey: value => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() },
+  );
+  dedupeMismatch();
+  const keptLinkedMismatch = duplicateMismatchState.reviewCaptions.find(item => item.issueId === 'shared-mismatch');
+  requireBuildCheck(duplicateMismatchState.reviewCaptions.length === 2 &&
+      keptLinkedMismatch?.ownerClipId === 'linked-video' && keptLinkedMismatch?.captionCorrectionReview === true &&
+      duplicateMismatchState.reviewCaptions.some(item => item.issueId === 'separate-mismatch'),
+    '同一个 issueId 的关联音视频只应保留一条待处理提示，并保留字幕所属记录；其他问题不得被合并。');
+  const repeatDeleteBody = reviewScript.slice(repeatDeleteStart, repeatDeleteEnd);
+  const deferredRenderAt = repeatDeleteBody.indexOf('deleteSelected.deferRender = true');
+  const restoredCaptionsAt = repeatDeleteBody.indexOf('state.captions=captionsAfterRepeatCut');
+  const finalRepeatRenderAt = repeatDeleteBody.indexOf('renderAll();', deferredRenderAt);
+  requireBuildCheck(deferredRenderAt >= 0 &&
+      repeatDeleteBody.includes('finally { deleteSelected.deferRender = false; }') &&
+      restoredCaptionsAt > deferredRenderAt && finalRepeatRenderAt > restoredCaptionsAt,
+    '删除重复片段时必须先恢复字幕时间映射再运行字幕复核，不能在中间状态重复生成疑似错读标签。');
+
   const issueHelpersStart = reviewScript.indexOf('      function planIssueWordsRemoval(');
   const issueHelpersEnd = reviewScript.indexOf('      function dismissTrimmedIssues(', issueHelpersStart);
   const cutIssueStart = reviewScript.indexOf('      function cutScriptIssue(id,', issueHelpersEnd);
@@ -939,10 +1085,11 @@ export function buildUiHtml() {
   const nestedKernel=fs.readFileSync(path.join(uiDir,'../nested-timeline.mjs'),'utf8').replaceAll('export function ','function ');
   const numericKernel=fs.readFileSync(path.join(uiDir,'../numeric-caption-correction.mjs'),'utf8').replaceAll('export function ','function ');
   const reviewDeletionKernel=fs.readFileSync(path.join(uiDir,'../review-caption-deletion.mjs'),'utf8').replaceAll('export function ','function ');
+  const scriptCopyKernel=fs.readFileSync(path.join(uiDir,'../script-copy.mjs'),'utf8').replaceAll('export function ','function ');
   const meaningContext=fs.readFileSync(path.join(uiDir,'../caption-meaning-review.mjs'),'utf8').split('export function captionMeaningContext')[1].split('export function parseCaptionMeanings')[0];
   const phraseKernel=fs.readFileSync(path.join(uiDir,'../caption-phrase-reviews.mjs'),'utf8').replaceAll('export function ','function ');
   const mildKernel=fs.readFileSync(path.join(uiDir,'../harmless-caption-correction.mjs'),'utf8').replaceAll('export function ','function ');
-  const combinedJs = reviewDeletionKernel + mildKernel + phraseKernel + editKernel + comparisonKernel + nestedKernel + numericKernel + 'function captionMeaningContext'+meaningContext + scriptFiles
+  const combinedJs = scriptCopyKernel + reviewDeletionKernel + mildKernel + phraseKernel + editKernel + comparisonKernel + nestedKernel + numericKernel + 'function captionMeaningContext'+meaningContext + scriptFiles
     .map(f => fs.readFileSync(path.join(uiDir, 'scripts', f), 'utf8'))
     .join('');
 

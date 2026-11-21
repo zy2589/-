@@ -828,20 +828,37 @@ function registerFontFace(font) {
         if (
           e.target === $("exportModal") &&
           $("revealExport").style.display !== "none"
-        )
+        ) {
           $("exportModal").classList.remove("on");
+          $("exportModal").classList.remove("background-mode");
+          updateExportProgressIndicator("", false);
+        }
       };
+      $("showExportProgress").onclick = showExportProgressPanel;
+      $("backgroundExport").onclick = () => $("exportModal").classList.remove("on");
+      document.addEventListener("pointerdown", (event) => {
+        const modal = $("exportModal");
+        if (!modal?.classList.contains("on") || !modal.classList.contains("background-mode")) return;
+        if (event.target.closest?.("#showExportProgress")) return;
+        if (modal.querySelector(".dialog")?.contains(event.target)) return;
+        modal.classList.remove("on");
+      }, true);
       $("cancelExport").onclick = async () => {
         if (state.exportJobId) {
+          const jobId = state.exportJobId;
           try {
-            await nativeCall("cancelExport", state.exportJobId);
+            await nativeCall("cancelExport", jobId);
           } catch {}
           state.exportJobId = "";
+          state.exportProjectId = "";
+          $("backgroundExport").hidden = true;
           $("exportStatus").textContent = "已取消导出";
           $("cancelExport").textContent = "关闭";
+          updateExportProgressIndicator("导出已取消");
           return;
         }
-        $("exportModal").classList.remove("on");
+        $("exportModal").classList.remove("on", "background-mode");
+        updateExportProgressIndicator("", false);
       };
       $("colorControls").oninput = (e) => {
         const grade = selectedVideoGrade?.(true);
@@ -865,211 +882,6 @@ function registerFontFace(font) {
           queueAutosave();
         }
       };
-      function removeSurplusBoundaryQuotes(input) {
-        let text = String(input || "").trim();
-        // Leading quote marks are stray copied punctuation in this script field,
-        // not part of the spoken text. Remove the whole contiguous prefix run;
-        // quote marks elsewhere in the manuscript continue through normal pairing.
-        text = text.replace(/^["'“”„‟＂＇]+\s*/, "");
-        // Whole-document wrappers can contain same-style quotations. Odd quote
-        // counts in both boundary paragraphs identify a pair spanning the text,
-        // unlike two independently quoted paragraphs (even counts in each).
-        let blocks = text.split(/\n\s*\n/);
-        while (blocks.length > 1 && /^[“”„‟＂"]/.test(text) && /[“”„‟＂"]$/.test(text)
-          && (blocks[0].match(/[“”„‟＂"]/g) || []).length % 2 === 1
-          && (blocks.at(-1).match(/[“”„‟＂"]/g) || []).length % 2 === 1) {
-          text = text.slice(1, -1).trim();
-          blocks = text.split(/\n\s*\n/);
-        }
-        function pairs(value) {
-          const stack = [], matches = new Map();
-          for (let i = 0; i < value.length; i++) {
-            const c = value[i];
-            if (c === "„" || c === "‟") stack.push(i);
-            else if (c === "“") {
-              if (stack.length && value[stack.at(-1)] === "„") matches.set(stack.pop(), i);
-              else stack.push(i);
-            }
-            else if (c === "”") { if (stack.length) matches.set(stack.pop(), i); }
-            else if (c === '"' || c === '＂') {
-              const previous = value[i - 1] || "";
-              const next = value[i + 1] || "";
-              const nextStartsText = /[\p{L}\p{N}]/u.test(next)
-                || (/\s/.test(next) && /^\s+[\p{L}\p{N}]/u.test(value.slice(i + 1)));
-              const nestedOpening = stack.length && nextStartsText
-                && (/[\s:([{]/.test(previous) || /[\p{L}\p{N}]/u.test(previous));
-              if (stack.length && /["＂]/.test(value[stack.at(-1)]) && !nestedOpening) matches.set(stack.pop(), i);
-              else stack.push(i);
-            }
-          }
-          return matches;
-        }
-        // Remove only boundary quote characters or pairs enclosing whitespace.
-        // Never slice away non-quote content when an unmatched mark is found.
-        let previous;
-        do {
-          previous = text;
-          if (/^[“”„‟＂"]/.test(text)) {
-            const end = pairs(text).get(0);
-            if (end === text.length - 1) text = text.slice(1, -1).trim();
-            else if (end !== undefined && !text.slice(1, end).trim()) text = text.slice(end + 1).trimStart();
-            else if (end === undefined) text = text.slice(1).trimStart();
-          }
-          if (/[“”„‟＂"]$/.test(text)) {
-            const finalBlockStart = Math.max(0, text.lastIndexOf("\n\n") + 2);
-            const finalBlock = text.slice(finalBlockStart);
-            const localMatch = [...pairs(finalBlock)].find(([, end]) => end === finalBlock.length - 1);
-            const globalMatch = [...pairs(text)].find(([, end]) => end === text.length - 1);
-            const matchStart = localMatch ? finalBlockStart + localMatch[0] : globalMatch?.[0];
-            if (matchStart === undefined) text = text.slice(0, -1).trimEnd();
-            else if (!(localMatch ? finalBlock.slice(localMatch[0] + 1, -1) : text.slice(matchStart + 1, -1)).trim()) text = text.slice(0, matchStart).trimEnd();
-          }
-        } while (text !== previous);
-        return text;
-      }
-      function cleanScriptCopy(input, options = {}) {
-        const useMarkupCleanup = options.cleanMarkup !== false;
-        const usePunctuationNormalization = options.normalizePunctuation !== false;
-        const useSymbolCollapse = options.collapseSymbols !== false;
-        const punctuation = {
-          "，": ",", "。": ".", "：": ":", "；": ";", "？": "?", "！": "!",
-          "（": "(", "）": ")", "【": "[", "】": "]", "《": "<", "》": ">",
-          "、": "、", "…": "...", "—": "-", "–": "-",
-          "‘": "'", "’": "'", "‚": "'", "‛": "'",
-          "“": '"', "”": '"', "„": '"', "‟": '"', "＇": "'", "＂": '"',
-        };
-        let text = String(input ?? "").replace(/\r\n?/g, "\n");
-        text = text.replace(/[\u00A0\u202F]/g, " ");
-        text = text.replace(/[\uFEFF\u200B\u200C\u200D]/g, "");
-        if (useMarkupCleanup) text = text.replace(/[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Modifier}\uFE0E\uFE0F\u20E3]/gu, "");
-        // Keep the readable label while removing common Markdown wrappers.
-        if (useMarkupCleanup) {
-          text = text.replace(/!\[([^\]]*)\]\([^\n)]+\)/g, "$1");
-          text = text.replace(/\[([^\]]+)\]\([^\n)]+\)/g, "$1");
-          text = text.replace(/^\s*```[^\n]*$/gm, "");
-          text = text.replace(/`([^`\n]+)`/g, "$1").replace(/`+/g, "");
-          // Keep ordered-list markers: they are part of the user's script, not decoration.
-          text = text.replace(/^\s{0,3}(?:#{1,6}|>|[-+*])\s+/gm, "");
-          text = text.replace(/~~([^~\n]+)~~/g, "$1");
-          text = text.replace(/(?:\*\*|__)([^\n]+?)(?:\*\*|__)/g, "$1");
-          text = text.replace(/(?:\*|_)([^\n]+?)(?:\*|_)/g, "$1");
-          text = text.replace(/[\*#]+/g, "");
-        }
-        text = removeSurplusBoundaryQuotes(text);
-        // Attach closing quotes before sentence splitting. Once curly quotes are
-        // normalized to straight quotes their opening/closing role is lost.
-        let doubleQuoteOpen = false;
-        let doubleQuoteOpening = "";
-        let singleQuoteOpen = false;
-        let attached = "";
-        for (let index = 0; index < text.length; index += 1) {
-          const character = text[index];
-          const apostrophe = /['’]/.test(character)
-            && /[\p{L}\p{N}]/u.test(text[index - 1] || "")
-            && (/[\p{L}\p{N}]/u.test(text[index + 1] || "") || !singleQuoteOpen);
-          let closing = /[”’」』]/.test(character) && !apostrophe;
-          if (!apostrophe) {
-            if (character === '"' || character === '＂') {
-              closing = doubleQuoteOpen;
-              doubleQuoteOpen = !doubleQuoteOpen;
-            } else if (character === "„" || character === "‟") {
-              doubleQuoteOpen = true;
-              doubleQuoteOpening = character;
-            } else if (character === "“") {
-              closing = doubleQuoteOpen && doubleQuoteOpening === "„";
-              doubleQuoteOpen = !closing;
-              doubleQuoteOpening = closing ? "" : character;
-            }
-            else if (character === "”") doubleQuoteOpen = false;
-            else if (character === "'" || character === "＇") {
-              closing = singleQuoteOpen;
-              singleQuoteOpen = !singleQuoteOpen;
-            } else if (character === "‘") singleQuoteOpen = true;
-            else if (character === "’") singleQuoteOpen = false;
-          }
-          const previous = text[index - 1] || "";
-          const next = text[index + 1] || "";
-          const word = /[\p{L}\p{N}]/u;
-          if (!closing && /["＂“„‟]/.test(character) && word.test(next)
-            && (word.test(previous) || /[:：]/.test(previous))) attached = attached.trimEnd() + " ";
-          if (closing) attached = attached.trimEnd();
-          attached += character;
-          if (closing && word.test(next)) attached += " ";
-        }
-        text = removeSurplusBoundaryQuotes(attached);
-        if (usePunctuationNormalization) text = [...text].map((character) => punctuation[character] ?? character).join("");
-        if (useSymbolCollapse) text = text
-          .replace(/"{2,}/g, '"')
-          .replace(/'{2,}/g, "'")
-          .replace(/\.{4,}/g, "...")
-          .replace(/([,;:])(?:\s*\1)+/g, "$1")
-          .replace(/[!?](?:\s*[!?])+/g, (run) => run.replace(/\s/g, "").at(-1));
-        // A damaged saved manuscript may retain the opening quote after its
-        // final `Send:` call to action but lose only the closing quote. Restore
-        // that unambiguous final quote after the sentence punctuation.
-        text = text.replace(/(\bSend\s*:\s*)(["“„])\s*([^"“”„‟\n]+[.!?])\s*$/u,
-          (match, prefix, opening, body) => `${prefix.replace(/:\s*$/u, ": ")}"${body.trim()}"`);
-        text = text.replace(/\bSend\s*:\s*"\s+([^"\n]+)"\s*$/u,
-          (match, body) => `Send: "${body.trim()}"`);
-        text = text.replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n");
-        text = text.replace(/\s+([,.;:!?])/g, "$1");
-        text = text.replace(/([\[(])\s+/g, "$1").replace(/\s+([\])])/g, "$1");
-        text = text.replace(/\n{3,}/g, "\n\n");
-        return segmentScriptParagraphs(normalizeLanguagePunctuation(text.trim()));
-      }
-      function scriptSentences(block) {
-        const value = String(block || "").replace(/\s*\n\s*/g, " ").trim();
-        if (!value) return [];
-        const sentences = [];
-        // Dots inside addresses and abbreviations are not sentence boundaries.
-        const protectedSpans = [...value.matchAll(/(?:https?:\/\/|www\.)[^\s<>"“”]+[^\s<>"“”.,!?;:)]|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|\b(?:[A-Za-z]\.){2,}|\b[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}(?:\/[^\s]*)?/g)]
-          .map(match => [match.index, match.index + match[0].length]);
-        let start = 0;
-        for (let index = 0; index < value.length; index += 1) {
-          const character = value[index];
-          if (!".!?".includes(character)) continue;
-          if (protectedSpans.some(([from, to]) => index >= from && index < to)) continue;
-          if (character === ".") {
-            const previous = value[index - 1] || "";
-            const next = value[index + 1] || "";
-            if (/\d/.test(previous) && /\d/.test(next)) continue;
-            if (value.slice(index, index + 3) === "...") {
-              index += 2;
-            } else {
-              const word = (value.slice(start, index).match(/[A-Za-z]+$/) || [""])[0];
-              if (/^(?:Mr|Mrs|Ms|Dr|Prof|St|vs|etc|Rev|Jr|Sr)$/i.test(word)) continue;
-            }
-          }
-          while (/["'”’」』）)\]]/.test(value[index + 1] || "")) index += 1;
-          const sentence = value.slice(start, index + 1).trim();
-          if (sentence) sentences.push(sentence);
-          start = index + 1;
-        }
-        const tail = value.slice(start).trim();
-        if (tail) sentences.push(tail);
-        return sentences;
-      }
-      function segmentScriptParagraphs(input, maxSentences = 3, maxLength = 240) {
-        const sourceBlocks = String(input || "").split(/\n\s*\n/).filter((block) => block.trim());
-        const paragraphs = [];
-        for (const sourceBlock of sourceBlocks) {
-          const sentences = scriptSentences(sourceBlock);
-          let current = [];
-          let currentLength = 0;
-          for (const sentence of sentences) {
-            const nextLength = currentLength + (current.length ? 1 : 0) + sentence.length;
-            if (current.length && (current.length >= maxSentences || nextLength > maxLength)) {
-              paragraphs.push(current.join(" "));
-              current = [];
-              currentLength = 0;
-            }
-            current.push(sentence);
-            currentLength += (current.length > 1 ? 1 : 0) + sentence.length;
-          }
-          if (current.length) paragraphs.push(current.join(" "));
-        }
-        return paragraphs.join("\n\n");
-      }
       $("cleanScriptText").onclick = () => {
         const input = $("scriptText");
         const cleaned = cleanScriptCopy(input.value);
@@ -1130,6 +942,27 @@ function registerFontFace(font) {
         const textEditing = isTypingField(target);
         const command = e.metaKey || e.ctrlKey;
         const code = e.code || "";
+        if (e.ctrlKey && e.altKey && !e.shiftKey) {
+          const mainArea = code === "Digit1" ? "download" : code === "Digit2" ? "projects" : "";
+          if (mainArea) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (!e.repeat) window.chrome?.webview?.postMessage({ type: "mainAreaRequest", area: mainArea });
+            return;
+          }
+          if (code === "KeyM") {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (!e.repeat && !$("matchScript")?.disabled) $("matchScript")?.click();
+            return;
+          }
+          if (code === "KeyE") {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (!e.repeat && !$("exportVideo")?.disabled) $("exportVideo")?.click();
+            return;
+          }
+        }
         if (!e.isComposing && e.shiftKey && !command && !e.altKey && (code === "KeyF" || String(e.key).toLowerCase() === "f") && !textEditing) {
           e.preventDefault();
           e.stopImmediatePropagation();
@@ -1319,7 +1152,7 @@ function registerFontFace(font) {
           nudgeSelectedClips(frameDuration());
           return;
         }
-        if (code === "Space") {
+        if (code === "Space" || e.key === " " || e.key === "Spacebar") {
           e.preventDefault();
           e.stopImmediatePropagation();
           // Space is exclusively the transport play/pause command. Ignore OS
@@ -1410,6 +1243,101 @@ function registerFontFace(font) {
       function hasDragType(event, type) {
         return [...(event.dataTransfer?.types || [])].includes(type);
       }
+      function projectCardDropTarget(event) {
+        return event.target?.closest?.("#homeProjectGrid .projectcard[data-project-id]") || null;
+      }
+      function isExternalFileDrop(event) {
+        return [...(event.dataTransfer?.types || [])].includes("Files") ||
+          [...(event.dataTransfer?.items || [])].some((item) => item.kind === "file") ||
+          (event.dataTransfer?.files?.length || 0) > 0;
+      }
+      function isVideoFile(file) {
+        const name = String(file?.name || file?.path || "");
+        return /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(name);
+      }
+      function droppedFilePath(item) {
+        return typeof item === "string" ? item : String(item?.path || "");
+      }
+      function droppedFileName(item, fallback = "") {
+        if (typeof item === "string") return fallback || item.split(/[\\/]/).pop() || "";
+        return String(item?.originalName || item?.name || fallback || droppedFilePath(item).split(/[\\/]/).pop() || "");
+      }
+      async function resolveProjectCardDropPaths(files) {
+        const direct = files.map((file) => ({ path: String(file.path || ""), originalName: file.name || "" }))
+          .filter((item) => /^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(item.path));
+        if (direct.length) return direct;
+        window.__clipAssistantExternalDropFiles = files;
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 450));
+          const queued = window.native?.takeDroppedFiles
+            ? unwrap(await window.native.takeDroppedFiles())
+            : [];
+          const queuedPaths = (queued || []).map((item, index) => ({
+            path: droppedFilePath(item),
+            originalName: droppedFileName(item, files[index]?.name || ""),
+          })).filter((item) => item.path);
+          if (queuedPaths.length) return queuedPaths;
+          const resolved = await nativeCall("resolveDroppedFilePaths");
+          return (resolved || []).map((item, index) => ({
+            path: droppedFilePath(item),
+            originalName: droppedFileName(item, files[index]?.name || ""),
+          })).filter((item) => item.path);
+        } finally {
+          window.__clipAssistantExternalDropFiles = null;
+        }
+      }
+      async function uploadProjectCardDropFiles(files) {
+        const endpoint = await nativeCall("uploadEndpoint");
+        const paths = [];
+        for (const file of files) {
+          const response = await fetch(`${endpoint}?name=${encodeURIComponent(file.name || "video.mp4")}`, {
+            method: "PUT",
+            headers: { "Content-Type": file.type || "application/octet-stream" },
+            body: file,
+          });
+          if (!response.ok) throw new Error(`无法读取拖入的视频：${file.name || "素材"}`);
+          const result = await response.json();
+          if (result?.path) paths.push({ path: result.path, originalName: file.name || "video.mp4" });
+        }
+        return paths;
+      }
+      async function importVideosIntoProjectCard(projectId, droppedFiles, card) {
+        const files = [...(droppedFiles || [])].filter(isVideoFile);
+        if (!files.length) {
+          toast("请把 MP4、MOV、M4V、WEBM、AVI 或 MKV 视频拖到工程卡片");
+          return;
+        }
+        card?.classList.remove("drop-target");
+        card?.classList.add("importing");
+        card?.setAttribute("aria-busy", "true");
+        try {
+          toast("正在打开工程并将视频放到时间线首帧…");
+          let paths = await resolveProjectCardDropPaths(files);
+          if (!paths.length) paths = await uploadProjectCardDropFiles(files);
+          if (!paths.length) throw new Error("没有取得拖入视频的文件路径");
+          if (!(await openProjectById(projectId))) return;
+          let cursor = 0;
+          let imported = 0;
+          const preferredTrackId = (state.trackOrder || [])
+            .find((id) => trackInfo(id).kind === "video" && !isTrackLocked(id)) || "";
+          for (const item of paths) {
+            if (!isVideoFile({ name: item.originalName, path: item.path })) continue;
+            const info = await nativeCall("addVideoPath", { projectId: state.projectId, path: item.path });
+            const asset = await importVideo(info, "timeline", cursor, preferredTrackId, "", "insert");
+            if (!asset) continue;
+            cursor += Math.max(0.04, Number(asset.duration || 3)) /
+              Math.max(0.5, Number(state.audio?.speed || 1));
+            imported += 1;
+          }
+          if (imported) seekTimeline(0);
+          else toast("没有导入可用的视频文件");
+        } catch (error) {
+          toast(error.message || String(error));
+        } finally {
+          card?.classList.remove("drop-target", "importing");
+          card?.removeAttribute("aria-busy");
+        }
+      }
       function isImageDrop(event) {
         if (hasDragType(event, "application/x-clipassistant-image-asset")) return true;
         const imageExtension = /\.(png|jpe?g|webp|gif|heic|bmp|tiff?)$/i;
@@ -1423,6 +1351,8 @@ function registerFontFace(font) {
         dragDepth = 0;
         hideSnapGuide();
         $("dropVeil").classList.remove("on");
+        document.querySelectorAll("#homeProjectGrid .projectcard.drop-target")
+          .forEach((card) => card.classList.remove("drop-target"));
         document
           .querySelectorAll("[data-drop-zone]")
           .forEach((zone) => zone.classList.remove("drag"));
@@ -1591,7 +1521,11 @@ function registerFontFace(font) {
           if (hasDragType(event, "application/x-clipassistant-track")) return;
           event.preventDefault();
           if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
-          if (!state.editorActive) return;
+          if (!state.editorActive) {
+            const card = projectCardDropTarget(event);
+            if (card && isExternalFileDrop(event)) card.classList.add("drop-target");
+            return;
+          }
           const intent = dropLocation(event);
           sendDropIntent(intent);
           showDropUi(intent);
@@ -1603,6 +1537,7 @@ function registerFontFace(font) {
         (event) => {
           if (hasDragType(event, "application/x-clipassistant-track")) return;
           event.preventDefault();
+          projectCardDropTarget(event)?.classList.remove("drop-target");
           dragDepth = Math.max(0, dragDepth - 1);
           if (!event.relatedTarget || dragDepth === 0) clearDropUi();
         },
@@ -1615,6 +1550,12 @@ function registerFontFace(font) {
           event.preventDefault();
           event.stopPropagation();
           if (!state.editorActive) {
+            const card = projectCardDropTarget(event);
+            const files = [...(event.dataTransfer?.files || [])];
+            if (card && files.length) {
+              void importVideosIntoProjectCard(card.dataset.projectId, files, card);
+              return;
+            }
             toast("请先新建或打开一个工程");
             return;
           }

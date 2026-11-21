@@ -1165,7 +1165,8 @@ def update_processing_markers(marker_paths, state, detail=''):
 
 
 class App:
-    def __init__(self, root, *, host=None, resource_dir=None, editor_callback=None, cutout_callback=None):
+    def __init__(self, root, *, host=None, resource_dir=None, editor_callback=None,
+                 cutout_callback=None, project_callback=None):
         self.root = root
         self.host = host or root
         self.embedded = host is not None
@@ -1173,6 +1174,7 @@ class App:
             getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[2])) / 'resources'
         self.editor_callback = editor_callback
         self.cutout_callback = cutout_callback
+        self.project_callback = project_callback
         self._stopped = False
         # The downloader remains alive while other pages are shown.  Keep
         # background widget construction paused when its page is hidden.
@@ -1285,21 +1287,18 @@ class App:
         task_box.pack(fill='both',expand=True,pady=(0,6))
         task_content=ttk.Frame(task_box,padding=0)
         task_content.pack(fill='both',expand=True)
-        header_form = ttk.Frame(task_content)
-        header_form.pack(fill='x', pady=(0, 2))
-        for column, text in enumerate(('序号', '人名', '号码', '视频名称', '视频链接', '语言', '降噪', '进度', '清空')):
-            ttk.Label(header_form, text=text, style='Muted.TLabel').grid(row=0, column=column, sticky='w', padx=4, pady=(0, 8))
-        column_weights=(0,1,1,2,3,0,0,0,0)
-        column_minimums=(34,56,72,76,110,68,52,128,42) if window_width<900 else ((40,65,84,92,130,72,58,138,44) if window_width<1120 else (48,85,112,130,180,78,64,148,46))
-        for column,(weight,minimum) in enumerate(zip(column_weights,column_minimums)):
-            header_form.columnconfigure(column,weight=weight,minsize=minimum)
+        column_weights=(0,0,1,1,2,3,3,0,0,0,0)
+        column_minimums=(28,34,52,70,72,120,90,68,52,115,42) if window_width<900 else ((30,40,65,84,92,165,115,72,58,128,44) if window_width<1120 else (34,44,75,96,110,210,150,78,64,145,46))
         self.rows=[];self.row_statuses=[];self.row_clear_buttons=[]
+        self.script_vars=[];self.create_project_vars=[];self.project_request_rows={}
+        self._script_edit_after=None
         self.page_vars=[];self.language_vars=[];self.title_layout_vars=[];self.denoise_vars=[];self.denoise_picks=[];self.auto_page_values=[];self.auto_page_people=[];self.page_match_issues=[]
         self.suggested_page_values=[];self.match_jobs={};self.page_entries=[]
         self.title_entries=[];self.title_font_paths=[];self.title_color_ranges=[]
         self.title_last_values=[];self.title_selection_ranges=[];self.title_manual_lines=[]
         self.phone_vars=[];self.phone_source_numbers=[];self.original_phone_values=[];self.auto_phone_values=[]
         self.background_vars=[];self.background_checks=[];self.progress_labels=[];self.input_entries=[];self.title_layout_picks=[]
+        self.script_entries=[]
         self.title_preview_popup=None;self.title_preview_image_label=None;self.title_preview_heading=None
         self.title_preview_manual_text=None;self.title_preview_manual_syncing=False
         self.title_preview_photo=None;self.title_preview_index=None
@@ -1317,7 +1316,9 @@ class App:
         self.row_form.grid(row=0,column=0,sticky='nsew')
         for column,(weight,minimum) in enumerate(zip(column_weights,column_minimums)):
             self.row_form.columnconfigure(column,weight=weight,minsize=minimum)
-            header_form.columnconfigure(column,weight=weight,minsize=minimum)
+        for column, text in enumerate(('建工程', '序号', '人名', '号码', '视频名称', '正确文案', '视频链接', '语言', '降噪', '进度', '清空')):
+            ttk.Label(self.row_form, text=text, style='Muted.TLabel').grid(
+                row=0, column=column, sticky='w', padx=4, pady=(0, 8))
         self.rows_ready = False
         self.row_build_after = None
         for entry in self.input_entries:
@@ -1454,6 +1455,10 @@ class App:
         if not self.embedded or self._stopped:
             return
         self._stopped = True
+        if self._script_edit_after is not None:
+            try:self.root.after_cancel(self._script_edit_after)
+            except tk.TclError:pass
+            self._script_edit_after=None
         if self._poll_id is not None:
             try:
                 self.root.after_cancel(self._poll_id)
@@ -1484,17 +1489,20 @@ class App:
         if getattr(self,'active',False):
             self.status.config(text='下载期间不能增加任务行。')
             return
-        index=len(self.rows);row=self.row_form;grid_row=index*2
+        index=len(self.rows);row=self.row_form;grid_row=index*2+1
         row.rowconfigure(grid_row+1,weight=1,minsize=34)
         separator=ttk.Separator(row)
-        separator.grid(row=grid_row,column=0,columnspan=9,sticky='sew')
+        separator.grid(row=grid_row,column=0,columnspan=11,sticky='sew')
         name,title,link=tk.StringVar(),tk.StringVar(),tk.StringVar()
+        script=tk.StringVar()
+        create_project=tk.BooleanVar(value=False)
         page,phone=tk.StringVar(value='1'),tk.StringVar()
         language=tk.StringVar(value=DEFAULT_LANGUAGE)
         background=tk.BooleanVar(value=False)
         title_layout=tk.StringVar(value='全局')
         denoise=tk.StringVar(value='全局')
         self.rows.append((name,title,link));self.page_vars.append(page);self.language_vars.append(language);self.phone_vars.append(phone);self.title_layout_vars.append(title_layout)
+        self.script_vars.append(script);self.create_project_vars.append(create_project)
         self.row_statuses.append('待下载')
         self.title_entries.append(None);self.title_font_paths.append('');self.title_color_ranges.append([])
         self.title_last_values.append(title.get());self.title_selection_ranges.append(None)
@@ -1503,16 +1511,26 @@ class App:
         self.background_vars.append(background);self.auto_page_values.append('');self.auto_page_people.append('');self.page_match_issues.append('')
         self.suggested_page_values.append('');self.phone_source_numbers.append(None)
         self.original_phone_values.append('');self.auto_phone_values.append('')
+        project_colors=PALETTES['深色']
+        project_check=tk.Checkbutton(
+            row, variable=create_project, takefocus=False,
+            background=project_colors['bg'], foreground=project_colors['fg'],
+            activebackground=project_colors['bg'], activeforeground=project_colors['fg'],
+            selectcolor=project_colors['field'], disabledforeground=project_colors['disabled'],
+            indicatoron=True, relief='flat', borderwidth=0,
+            highlightthickness=0, padx=0, pady=0, cursor='hand2')
+        project_check.grid(row=grid_row+1,column=0,padx=(8,2),sticky='w')
+        ToolTip(project_check,'勾选后，本行开始下载时会在后台新建同名剪辑工程并自动校对文案；不会导入视频或切换页面。')
         number_label=ttk.Label(row,text=f'{index+1:02}',style='Muted.TLabel',anchor='w')
-        number_label.grid(row=grid_row+1,column=0,padx=6,sticky='w')
+        number_label.grid(row=grid_row+1,column=1,padx=6,sticky='w')
         name_entry=ttk.Entry(row,textvariable=name,width=7,justify='left',style='Cell.TEntry')
-        name_entry.grid(row=grid_row+1,column=1,sticky='ew',pady=4,padx=3)
+        name_entry.grid(row=grid_row+1,column=2,sticky='ew',pady=4,padx=3)
         name_entry.bind('<<Paste>>',lambda event,i=index:self.paste_column_values(event,i,'name'),add='+')
         phone_entry=ttk.Entry(row,textvariable=phone,width=15,justify='left',style='Cell.TEntry')
-        phone_entry.grid(row=grid_row+1,column=2,sticky='ew',padx=3,pady=4)
+        phone_entry.grid(row=grid_row+1,column=3,sticky='ew',padx=3,pady=4)
         phone_entry.bind('<<Paste>>',lambda event,i=index:self.paste_column_values(event,i,'phone'),add='+')
         title_cell=ttk.Frame(row)
-        title_cell.grid(row=grid_row+1,column=3,sticky='ew',padx=3,pady=4)
+        title_cell.grid(row=grid_row+1,column=4,sticky='ew',padx=3,pady=4)
         title_cell.columnconfigure(0,weight=1)
         title_entry=ttk.Entry(title_cell,textvariable=title,width=10,justify='left',style='Cell.TEntry')
         title_entry.grid(row=0,column=0,sticky='ew')
@@ -1521,28 +1539,33 @@ class App:
         title_layout_pick=ttk.Combobox(title_cell,textvariable=title_layout,values=['全局','1行','2行','3行','4行'],state='readonly',width=4)
         title_layout_pick.grid(row=0,column=1,sticky='e',padx=(3,0))
         self.title_layout_picks.append(title_layout_pick)
-        ToolTip(title_layout_pick,'只调整本行标题：跟随全局，或至少排成 1、2、3、4 行；当前行数放不下时会自动增加到四行。悬停标题可查看最终效果。')
+        ToolTip(title_layout_pick,'只调整本行标题：跟随全局，或至少排成 1、2、3、4 行；当前行数放不下时会自动增加到四行。点击视频名称可查看最终效果。')
+        script_entry=ttk.Entry(row,textvariable=script,width=20,justify='left',style='Cell.TEntry')
+        script_entry.grid(row=grid_row+1,column=5,sticky='ew',padx=3,pady=4)
+        script_entry.bind('<<Paste>>',lambda event,i=index:self.paste_script_values(event,i),add='+')
+        ToolTip(script_entry,'可输入或粘贴较长的正确文案；单行显示，内容超出时可横向查看。勾选建工程后会自动执行“自动校对文案”。')
+        self.script_entries.append(script_entry)
         link_entry=ttk.Entry(row,textvariable=link,width=10,justify='left',style='Cell.TEntry')
-        link_entry.grid(row=grid_row+1,column=4,sticky='ew',padx=3,pady=4)
+        link_entry.grid(row=grid_row+1,column=6,sticky='ew',padx=3,pady=4)
         link_entry.bind('<<Paste>>',lambda event,i=index:self.paste_column_values(event,i,'link'),add='+')
         ToolTip(link_entry,'可粘贴多个视频链接；同一行内的链接分别下载到同一人名-视频名称文件夹。直接从 Google 表格复制时会读取单元格里的真实链接地址。')
         page_entry=ttk.Combobox(row,textvariable=language,values=list(LANGUAGES),state='readonly',width=8,style='Cell.TEntry')
-        page_entry.grid(row=grid_row+1,column=5,sticky='ew',padx=3,pady=4)
+        page_entry.grid(row=grid_row+1,column=7,sticky='ew',padx=3,pady=4)
         page_entry.bind('<<ComboboxSelected>>',lambda _,i=index:self.preview_page(i))
         denoise_pick=ttk.Combobox(row,textvariable=denoise,
                                   values=['全局']+[f'{value}%' for value in range(0,101)],
                                   state='readonly',width=5,style='Cell.TEntry')
-        denoise_pick.grid(row=grid_row+1,column=6,sticky='ew',padx=3,pady=4)
+        denoise_pick.grid(row=grid_row+1,column=8,sticky='ew',padx=3,pady=4)
         self.denoise_picks.append(denoise_pick)
         ToolTip(denoise_pick, '该行只覆盖降噪强度；剪辑页和下载区统一使用 DeepFilterNet。')
         progress=ttk.Label(row,text=self.row_statuses[index],width=18,anchor='w',style='Muted.TLabel')
-        progress.grid(row=grid_row+1,column=7,sticky='w',padx=2)
+        progress.grid(row=grid_row+1,column=9,sticky='w',padx=2)
         clear_row_button=icon_button(row,'clear','清空本行（保留已下载文件）',
                                      lambda i=index:self.clear_task_row(i))
-        clear_row_button.grid(row=grid_row+1,column=8,sticky='w',padx=(1,3))
+        clear_row_button.grid(row=grid_row+1,column=10,sticky='w',padx=(1,3))
         self.row_clear_buttons.append(clear_row_button)
         self.page_entries.append(page_entry);self.progress_labels.append(progress)
-        self.input_entries.extend((name_entry,phone_entry,title_entry,link_entry,page_entry))
+        self.input_entries.extend((name_entry,phone_entry,title_entry,script_entry,link_entry,page_entry))
         name_entry.bind('<FocusIn>',lambda _,i=index:self.preview_folder(i))
         page_entry.bind('<FocusIn>',lambda _,i=index:self.preview_page(i))
         page_entry.bind('<KeyRelease>',lambda _,i=index:self.preview_page(i))
@@ -1552,13 +1575,11 @@ class App:
         for entry in (name_entry,title_entry,link_entry):
             entry.bind('<FocusIn>',lambda _,i=index:self.preview_folder(i))
             entry.bind('<KeyRelease>',lambda _,i=index:self.preview_folder(i),add='+')
-        title_entry.bind('<Enter>',lambda _,i=index:self.schedule_title_preview(i),add='+')
         title_entry.bind('<Leave>',lambda _:self.schedule_title_preview_close(),add='+')
         title_entry.bind('<FocusOut>',lambda _,i=index:self.clean_title_field(i),add='+')
         title_entry.bind('<ButtonRelease-1>',lambda _,i=index:self.root.after_idle(lambda:self._capture_title_selection(i)),add='+')
+        title_entry.bind('<ButtonRelease-1>',lambda _,i=index:self.schedule_title_preview(i,100),add='+')
         title_entry.bind('<KeyRelease>',lambda _,i=index:self.root.after_idle(lambda:self._capture_title_selection(i)),add='+')
-        title_entry.bind('<KeyRelease>',lambda _,i=index:self.schedule_title_preview(i,180),add='+')
-        title_entry.bind('<<Paste>>',lambda _,i=index:self.schedule_title_preview(i,80),add='+')
         title.trace_add('write',lambda *_,i=index:self.refresh_title_preview(i))
         title_layout.trace_add('write',lambda *_,i=index:self._title_layout_changed(i))
         page.trace_add('write',lambda *_,i=index:self.refresh_title_preview(i))
@@ -1569,9 +1590,10 @@ class App:
         ToolTip(page_entry,'选择本行引流模板语种。每种语言使用“引流模板”里保存的独立文案；还没有的语种可从英语模板复制后编辑。')
         ToolTip(progress,lambda label=progress:label.cget('text'))
         if hasattr(self,'last_snapshot'):
-            for variable in (name,title,link,page,language,phone,background,title_layout,denoise):
+            for variable in (name,title,link,page,language,phone,background,title_layout,denoise,create_project):
                 variable.trace_add('write',lambda *_:self.record_edit())
-            for widget in (name_entry,phone_entry,title_entry,link_entry,page_entry):
+            script.trace_add('write',lambda *_:self._schedule_script_edit())
+            for widget in (name_entry,phone_entry,title_entry,script_entry,link_entry,page_entry):
                 widget.bind('<Control-z>',lambda event:self.restore_edit(False))
                 widget.bind('<Control-y>',lambda event:self.restore_edit(True))
                 widget.bind('<Control-Shift-Z>',lambda event:self.restore_edit(True))
@@ -1885,7 +1907,7 @@ class App:
         """Return only a user-entered phone, ignoring the page's auto-filled default."""
         value=self.phone_vars[index].get().strip()
         automatic=self.auto_phone_values[index].strip()
-        if not value or value==automatic:return ''
+        if not value:return ''
         from page_cache import format_phone_like
         formatted=format_phone_like(automatic or '+1',value)
         # Phone parsing is intentionally permissive at the input stage. If a
@@ -1893,6 +1915,10 @@ class App:
         # user typed so later validation can explain the problem without erasing it.
         if not formatted:return value
         if formatted!=value:self.phone_vars[index].set(formatted)
+        if value==automatic:
+            self.auto_phone_values[index]=formatted
+            self.original_phone_values[index]=formatted
+            return ''
         return '' if formatted==automatic else formatted
 
     def show_title_preview(self,index):
@@ -2086,6 +2112,8 @@ class App:
         self.record_edit()
         self.history_paused=True
         for variable in self.rows[index]:variable.set('')
+        self.script_vars[index].set('')
+        self.create_project_vars[index].set(False)
         self.page_vars[index].set('1')
         self.language_vars[index].set(DEFAULT_LANGUAGE)
         self.phone_vars[index].set('')
@@ -2160,9 +2188,9 @@ class App:
 
     def snapshot(self):
         rows=[]
-        for index,(values,page,language,background,phone,title_layout,denoise) in enumerate(
-                zip(self.rows,self.page_vars,self.language_vars,self.background_vars,self.phone_vars,self.title_layout_vars,self.denoise_vars)):
-            row_values=tuple(variable.get() for variable in (*values,page,language,background,phone,title_layout,denoise))
+        for index,(values,page,language,background,phone,title_layout,denoise,script,create_project) in enumerate(
+                zip(self.rows,self.page_vars,self.language_vars,self.background_vars,self.phone_vars,self.title_layout_vars,self.denoise_vars,self.script_vars,self.create_project_vars)):
+            row_values=tuple(variable.get() for variable in (*values,page,language,background,phone,title_layout,denoise,script,create_project))
             manual_lines=(tuple(self.title_manual_lines[index])
                           if self.title_manual_lines[index] is not None else None)
             rows.append((*row_values,self.title_font_paths[index],tuple(self.title_color_ranges[index]),manual_lines))
@@ -2178,6 +2206,18 @@ class App:
             self.redo_stack.clear()
             self.last_snapshot = current
 
+    def _schedule_script_edit(self):
+        if self.history_paused or self.active:
+            return
+        if self._script_edit_after is not None:
+            try:self.root.after_cancel(self._script_edit_after)
+            except tk.TclError:pass
+        self._script_edit_after=self.root.after(300,self._finish_script_edit)
+
+    def _finish_script_edit(self):
+        self._script_edit_after=None
+        self.record_edit()
+
     def bulk_changed(self, event=None):
         if self.bulk_text.edit_modified():
             self.record_edit()
@@ -2188,6 +2228,24 @@ class App:
             event.widget.tag_add('sel', '1.0', 'end-1c')
         else:
             event.widget.selection_range(0, 'end')
+        return 'break'
+
+    def paste_script_values(self, event, index):
+        """Paste arbitrarily long script text into the single-line task field."""
+        try:
+            value = self.root.clipboard_get()
+        except tk.TclError:
+            return 'break'
+        value = str(value).replace('\r\n', '\n').replace('\r', '\n')
+        value = re.sub(r'[\t \u00a0]*\n[\t \u00a0]*', ' ', value)
+        value = re.sub(r'[\t \u00a0]+', ' ', value)
+        entry = event.widget
+        try:
+            if entry.selection_present():
+                entry.delete('sel.first', 'sel.last')
+            entry.insert(tk.INSERT, value)
+        except tk.TclError:
+            return 'break'
         return 'break'
 
     def restore_edit(self, redo=False):
@@ -2202,12 +2260,12 @@ class App:
         self.history_paused = True
         self.bulk_text.delete('1.0', 'end')
         self.bulk_text.insert('1.0', bulk)
-        for index,(variables,page,language,background,phone,title_layout,denoise, values) in enumerate(zip(self.rows,self.page_vars,self.language_vars,self.background_vars,self.phone_vars,self.title_layout_vars,self.denoise_vars,rows)):
-            for variable, value in zip((*variables,page,language,background,phone,title_layout,denoise),values[:9]):
+        for index,(variables,page,language,background,phone,title_layout,denoise,script,create_project, values) in enumerate(zip(self.rows,self.page_vars,self.language_vars,self.background_vars,self.phone_vars,self.title_layout_vars,self.denoise_vars,self.script_vars,self.create_project_vars,rows)):
+            for variable, value in zip((*variables,page,language,background,phone,title_layout,denoise,script,create_project),values[:11]):
                 variable.set(value)
-            self.title_font_paths[index]=values[9]
-            self.title_color_ranges[index]=list(values[10])
-            self.title_manual_lines[index]=(list(values[11]) if len(values)>11 and values[11] is not None else None)
+            self.title_font_paths[index]=values[11]
+            self.title_color_ranges[index]=list(values[12])
+            self.title_manual_lines[index]=(list(values[13]) if len(values)>13 and values[13] is not None else None)
             self.title_last_values[index]=variables[1].get()
         for index,value in enumerate(progress):
             self._set_row_progress(index,value)
@@ -2226,6 +2284,10 @@ class App:
         for variables in self.rows:
             for variable in variables:
                 variable.set('')
+        for variable in self.script_vars:
+            variable.set('')
+        for variable in self.create_project_vars:
+            variable.set(False)
         for index in range(len(self.title_font_paths)):
             self.title_font_paths[index]=''
             self.title_color_ranges[index]=[]
@@ -2541,7 +2603,6 @@ class App:
             self.status.config(text=f'第{index+1}行: 模板语种 {language}, {phone}\n人名: {person.get()}\n标题: {title.get()}\n链接: {link.get()}')
         except (OSError, ValueError, KeyError):
             self.status.config(text='选择模板并填写号码，可预览本行引流模板效果')
-        self.schedule_title_preview(index,120)
 
     def match_person(self,index,force=False):
         if self.active:return
@@ -2574,13 +2635,16 @@ class App:
         except (ValueError,OSError) as exc:self.status.config(text=str(exc))
 
     def load_matched_phone(self,index):
-        from page_cache import read_pages,page_number_for_position,page_footer
+        from page_cache import read_pages,page_number_for_position,page_footer,format_phone_like
         try:
             pages=read_pages(self.cache_path)
             position=int(self.page_vars[index].get())
             source_number=page_number_for_position(pages,position,self.selected_template_language_code(index))
             _,phone=page_footer(pages[source_number])
         except (ValueError,OSError,KeyError):return
+        if phone:
+            formatted_phone=format_phone_like(phone,phone)
+            if formatted_phone:phone=formatted_phone
         if self.phone_source_numbers[index]!=source_number:
             # A name/title edit can finish matching after the user has already
             # typed a replacement number. Keep that explicit value when the
@@ -2615,7 +2679,11 @@ class App:
             except (ValueError,OSError,KeyError,IndexError):
                 existing=''
         formatted=format_phone_like(existing,value) if existing else format_phone_like('+1',value)
-        if formatted and formatted!=value:self.phone_vars[index].set(formatted)
+        if formatted:
+            if value==existing:
+                self.auto_phone_values[index]=formatted
+                self.original_phone_values[index]=formatted
+            if formatted!=value:self.phone_vars[index].set(formatted)
 
     def clear_auto_phone(self,index):
         if self.phone_vars[index].get().strip()==self.auto_phone_values[index]:
@@ -2746,6 +2814,38 @@ class App:
                     stem = media_name(person or f'第{index + 1}行', title, generated_at)
                 media_stems[index] = stem
                 last_generated_at = generated_at
+            project_requests = {}
+            seen_project_rows = set()
+            missing_project_script_rows = []
+            for task in tasks:
+                row_index, _, url = task[:3]
+                if row_index in seen_project_rows or not url:
+                    continue
+                seen_project_rows.add(row_index)
+                if retry_keys:
+                    previous = self.jobs.get(task[6]) if len(task) > 6 else None
+                    if (not previous or not previous.get('create_project')
+                            or previous.get('project_status') not in ('失败', '未启动')):
+                        continue
+                    project_name = previous.get('project_name') or f'第{row_index + 1}行'
+                    script_text = previous.get('project_script', '')
+                else:
+                    if not self.create_project_vars[row_index].get():
+                        continue
+                    person, title, _link = values[row_index]
+                    project_name = ' - '.join(value.strip() for value in (person, title) if value.strip())
+                    if not project_name:
+                        project_name = f'第{row_index + 1}行'
+                    script_text = self.script_vars[row_index].get()
+                if not script_text.strip():
+                    missing_project_script_rows.append(row_index)
+                    continue
+                project_requests[row_index] = (uuid.uuid4().hex, project_name, script_text)
+            if missing_project_script_rows:
+                missing_rows = '、'.join(str(index + 1) for index in sorted(set(missing_project_script_rows)))
+                self.status.config(
+                    text=f'第 {missing_rows} 行已勾选建工程，但“正确文案”为空；视频照常下载，本次跳过建工程。'
+                )
             cookie_path = Path(self.cookies.get().strip()).expanduser() if self.cookies.get().strip() else None
             has_drive_task = any((urlparse(task[2]).hostname or '').lower() in ('drive.google.com', 'docs.google.com')
                                  for task in tasks)
@@ -2816,12 +2916,32 @@ class App:
             previous_job = self.jobs.get(prior_key) if prior_key else None
             retry_denoise_files = (list(previous_job.get('denoise_failed_files') or [])
                                    if previous_job and previous_job.get('state') == DENOISE_PRESERVED_STATE else [])
+            project_request = project_requests.get(row_index)
+            if project_request:
+                project_request_id, project_name, project_script = project_request
+                create_project = True
+                project_status = '排队中'
+            elif previous_job and previous_job.get('create_project'):
+                project_request_id = previous_job.get('project_request_id', '')
+                project_name = previous_job.get('project_name', '')
+                project_script = previous_job.get('project_script', '')
+                create_project = True
+                project_status = previous_job.get('project_status', '排队中')
+            else:
+                project_request_id = project_name = project_script = ''
+                create_project = False
+                project_status = ''
             self.jobs[key] = {'row': row_index, 'name': name, 'url': url, 'path': path,
                               'media_stem': media_stems[row_index], 'cancel': event, 'state': '排队中',
                               'link_index': link_index, 'link_count': link_count,
                               'title_error': title_image_errors.get(row_index),
                               'denoise_strength': strength, 'denoise_failed_files': [],
-                              'retry_denoise_files': retry_denoise_files}
+                              'retry_denoise_files': retry_denoise_files,
+                              'create_project': create_project,
+                              'project_request_id': project_request_id,
+                              'project_name': project_name,
+                              'project_script': project_script,
+                              'project_status': project_status}
             self.batch_keys.append(key)
             initial_progress = (f'0% · 链接 {link_index}/{link_count} 排队中'
                                 if link_count > 1 else '0% · 排队中')
@@ -2837,6 +2957,31 @@ class App:
                     future.result()
             self.events.put((None, 'batch_done', ''))
         threading.Thread(target=run_batch, daemon=True).start()
+        for row_index, (request_id, project_name, script_text) in project_requests.items():
+            self.project_request_rows[request_id] = (row_index, project_name)
+            self.root.after_idle(lambda rid=request_id, row=row_index, pname=project_name, script=script_text:
+                                 self._begin_project_creation(rid, row, pname, script))
+
+    def _begin_project_creation(self, request_id, row_index, project_name, script_text):
+        self.status.config(text=f'下载进行中，正在后台创建并校对剪辑工程：{project_name}')
+
+        def completed(success, detail='', project_id=''):
+            self.events.put((None, 'project_result', {
+                'request_id': request_id,
+                'row': row_index,
+                'name': project_name,
+                'success': bool(success),
+                'detail': str(detail or ''),
+                'project_id': str(project_id or ''),
+            }))
+
+        if not self.project_callback:
+            completed(False, '剪辑工程服务尚未启动；视频下载仍会继续。')
+            return
+        try:
+            self.project_callback(request_id, project_name, script_text, completed)
+        except Exception as exc:
+            completed(False, str(exc))
 
     def download(self, key, url, cancel, settings):
         return self._download_uncached(key, url, cancel, settings)
@@ -3280,10 +3425,43 @@ class App:
         if keys and not self.active:
             self.start(keys)
 
+    def _project_batch_summary(self):
+        rows = {}
+        for key in getattr(self, 'batch_keys', []):
+            job = self.jobs.get(key, {})
+            if job.get('create_project'):
+                rows[job.get('row')] = job.get('project_status', '排队中')
+        if not rows:
+            return ''
+        completed = sum(state == '完成' for state in rows.values())
+        failed = sum(state == '失败' for state in rows.values())
+        pending = len(rows) - completed - failed
+        parts = []
+        if completed:
+            parts.append(f'{completed} 个剪辑工程已创建并自动校对')
+        if pending:
+            parts.append(f'{pending} 个剪辑工程仍在后台处理')
+        if failed:
+            parts.append(f'{failed} 个剪辑工程创建失败（下载不受影响）')
+        return '；'.join(parts)
+
     def poll(self):
         try:
             while True:
                 key, state, detail = self.events.get_nowait()
+                if key is None and state == 'project_result':
+                    request_id = detail.get('request_id', '')
+                    succeeded = detail.get('success') is True
+                    self.project_request_rows.pop(request_id, None)
+                    for job in self.jobs.values():
+                        if job.get('project_request_id') == request_id:
+                            job['project_status'] = '完成' if succeeded else '失败'
+                            job['project_id'] = detail.get('project_id', '')
+                    if succeeded:
+                        self.status.config(text=f"剪辑工程已在后台创建并自动校对：{detail.get('name', '')}")
+                    else:
+                        self.status.config(text=f"剪辑工程创建失败（下载会继续）：{detail.get('detail', '')}")
+                    continue
                 if key is None:
                     self.active = False
                     self.start_button.config(state='normal')
@@ -3336,6 +3514,9 @@ class App:
                         if warnings:
                             status_text+='\n标题图保存失败（视频下载已继续）：\n'+'\n'.join(warnings)
                         self.status.config(text=status_text)
+                    project_summary = self._project_batch_summary()
+                    if project_summary:
+                        self.status.config(text=f"{self.status.cget('text')}\n{project_summary}")
                     if any(self.jobs[key].get('url') for key in self.batch_keys) and (all_resolved or any(
                             self.jobs[key]['state'] in ('完成', DENOISE_PRESERVED_STATE)
                             for key in self.batch_keys)):

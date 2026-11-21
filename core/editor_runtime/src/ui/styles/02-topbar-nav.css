@@ -2,14 +2,18 @@
       .topbar {
         display: flex;
         align-items: center;
-        flex-wrap: nowrap;
+        flex-wrap: wrap;
         min-width: 0;
-        flex: 0 0 var(--top);
+        min-height: var(--top);
+        height: auto;
+        flex: 0 0 auto;
         gap: 10px;
-        padding: 0 14px;
+        row-gap: 5px;
+        padding: 6px 14px;
         border-bottom: 1px solid var(--line);
         background: #17191b;
       }
+      .app { grid-template-rows: auto minmax(260px, 1fr) var(--timeline) var(--footer); }
       .homeactions { flex-wrap: wrap; }
       .brand {
         display: flex;
@@ -86,6 +90,99 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+      .project-tab-strip {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+        max-width: none;
+        flex: 0 0 100%;
+        order: 1;
+      }
+      .project-tab-strip[hidden],
+      .project-tabs[hidden],
+      .project-tab-scroll[hidden],
+      .export-progress-indicator[hidden] { display: none; }
+      .project-tab-scroll {
+        width: 26px;
+        height: 30px;
+        flex: 0 0 26px;
+        color: var(--muted);
+        font-size: 17px;
+      }
+      .project-tab-scroll:hover { color: var(--text); }
+      .project-tabs {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), min(260px, 100%)));
+        align-items: center;
+        gap: 5px;
+        min-width: 0;
+        width: 100%;
+        flex: 1 1 auto;
+        overflow: visible;
+      }
+      .project-tab {
+        display: flex;
+        align-items: stretch;
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+        height: 32px;
+        overflow: hidden;
+        border: 1px solid var(--line2);
+        border-radius: 8px;
+        background: #1c1e20;
+      }
+      .project-tab.active {
+        background: #25282c;
+        border-color: var(--blue);
+      }
+      .project-tab-select,
+      .project-tab-close {
+        height: 30px;
+        border: 0;
+        color: var(--text);
+        background: transparent;
+        font: inherit;
+      }
+      .project-tab-select {
+        display: flex;
+        align-items: center;
+        flex: 1 1 0;
+        min-width: 0;
+        max-width: none;
+        padding: 0 9px;
+        cursor: pointer;
+      }
+      .project-tab-select:hover { background: #2d3135; }
+      .project-tab-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .project-tab-close {
+        width: 27px;
+        flex: 0 0 27px;
+        border-left: 1px solid var(--line2);
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 17px;
+        line-height: 1;
+      }
+      .project-tab-close:hover {
+        color: #ffdfe0;
+        background: #492d30;
+      }
+      .project-tab-select:disabled,
+      .project-tab-close:disabled { cursor: wait; opacity: .55; }
+      .export-progress-indicator {
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: #b8dbff;
+        border-color: #365674;
+        background: #1c2b38;
       }
       .workspace {
         display: grid;

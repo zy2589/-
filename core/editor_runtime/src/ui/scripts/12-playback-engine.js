@@ -1044,6 +1044,14 @@
         if (fadeOut > 0) gain = Math.min(gain, (clip.end - time) / fadeOut);
         return clamp(gain, 0, 1);
       }
+      function denoisedMainAudioAsset(asset, sourcePath) {
+        if (!sourcePath || !asset) return false;
+        if (asset.path === sourcePath || asset.sourceMediaId === sourcePath) return true;
+        const linkedVideo = (state.videoLayers || []).find(video =>
+          (asset.linkedVideoId && video.id === asset.linkedVideoId) ||
+          (asset.linkGroupId && video.linkGroupId === asset.linkGroupId));
+        return linkedVideo?.path === sourcePath;
+      }
       function syncPreviewAudio() {
         if (cutPrefetch?.reached) {
           for (const player of previewAudioPlayers.values()) player.pause();
@@ -1109,7 +1117,17 @@
           main.pause();
         }
         const activeIds = new Set(), lanes = new Map();
-        for (const asset of [...state.audioAssets].sort((a, b) => a.start - b.start)) {
+        const denoisedSourcePath = denoisedAudio?.sourcePath || (denoisedAudio ? state.video?.path : "") || "";
+        const timelineAudioAssets = (state.audioAssets || []).map(asset => {
+          if (!denoisedAudio || !denoisedMainAudioAsset(asset, denoisedSourcePath)) return asset;
+          // Materialized main-video clips play through audioAssets rather than
+          // mainAudioClips. Route those linked clips to the full-track cache so
+          // the original source audio cannot mask the denoised playback.
+          if (mainClip && mainTrackVisible && state.currentTime >= asset.start && state.currentTime < asset.end)
+            return { ...asset, muted: true };
+          return { ...asset, url: denoisedAudio.url, playbackAudioUrl: "" };
+        });
+        for (const asset of [...timelineAudioAssets].sort((a, b) => a.start - b.start)) {
           if (!isTrackAudible(asset.trackId)) continue;
           const track = asset.trackId || "audio";
           let trackLanes = lanes.get(track);

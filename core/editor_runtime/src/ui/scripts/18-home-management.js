@@ -47,6 +47,7 @@
                 if (!result) throw Error('工程不存在或已删除');
                 cleanupFailures += Number(result.cacheCleanupFailures || 0);
                 cleanupPending += Number(result.cleanupPending === true);
+                window.removeOpenProjectTab?.(item.id);
                 succeeded++; homeSelected.delete(item.id);
               } catch(error) { failed.push(error.message); }
               $('homeSelectedCount').textContent = '正在删除 '+(succeeded+failed.length)+' / '+chosen.length;

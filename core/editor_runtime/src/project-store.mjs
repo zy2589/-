@@ -102,23 +102,19 @@ export function createProject(input = {}) {
   const workspaceMode = normalizeWorkspaceMode(input.workspaceMode);
   const now = new Date().toISOString();
   const ratio = input.ratio === "16:9" ? "16:9" : "9:16";
+  const name = String(input.name || "未命名工程").trim().slice(0, 80) || "未命名工程";
   const project = {
     format: PROJECT_FORMAT,
     version: 1,
     id,
     workspaceMode,
-    name:
-      String(input.name || "未命名工程")
-        .trim()
-        .slice(0, 80) || "未命名工程",
+    name,
     createdAt: now,
     updatedAt: now,
     data: {
+      ...(input.data && typeof input.data === "object" ? input.data : {}),
       projectId: id,
-      projectName:
-        String(input.name || "未命名工程")
-          .trim()
-          .slice(0, 80) || "未命名工程",
+      projectName: name,
       ratio,
       width: ratio === "16:9" ? 1920 : 1080,
       height: ratio === "16:9" ? 1080 : 1920,

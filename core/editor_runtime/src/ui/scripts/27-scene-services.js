@@ -3,6 +3,27 @@
         const fps = timelineFrameRate();
         const video = normalizeExportFrameBoundaries(mainClips(), fps).clips.map(clip => ({...clip, trackId:state.mainVideoTrackMap?.[clip.id] || 'video', settings:{...mainVideoSettings(clip)}}));
         const audio = normalizeExportFrameBoundaries(mainAudioClips(), fps).clips.map(clip => ({...clip,...mainAudioSettings(clip),trackId:state.mainAudioTrackMap?.[clip.id] || 'audio',muted:!isTrackAudible(state.mainAudioTrackMap?.[clip.id] || 'audio') || !!mainAudioSettings(clip)?.muted}));
+        const denoisedSourcePath = state.denoiseEnabled && state.denoisedAudio?.path
+          ? state.denoisedAudio.sourcePath || state.video.path
+          : '';
+        const audioAssets = (state.audioAssets || []).map(item => {
+          const videoOwner = (state.videoLayers || []).find(video =>
+            (item.linkedVideoId && video.id === item.linkedVideoId) ||
+            (item.linkGroupId && video.linkGroupId === item.linkGroupId));
+          const linkedToDenoisedSource = !!denoisedSourcePath && (
+            item.path === denoisedSourcePath ||
+            item.sourceMediaId === denoisedSourcePath ||
+            (!!item.sourceMediaId && !!state.video?.sourceMediaId && item.sourceMediaId === state.video.sourceMediaId) ||
+            videoOwner?.path === denoisedSourcePath
+          );
+          const overlapsMainAudio = linkedToDenoisedSource && audio.some(clip =>
+            Number(item.start || 0) < Number(clip.end || 0) && Number(item.end || 0) > Number(clip.start || 0));
+          return {
+            ...item,
+            ...(linkedToDenoisedSource && !overlapsMainAudio ? {path:state.denoisedAudio.path} : {}),
+            ...(overlapsMainAudio ? {muted:true} : {}),
+          };
+        });
         return {
           inputPath:state.video.path, mainAudioPath:state.denoiseEnabled ? state.denoisedAudio?.path || '' : '',
           width:state.width,height:state.height,fps,outputDuration:state.duration,
@@ -14,7 +35,7 @@
           trackOrder:state.trackOrder,trackDefinitions:state.trackDefinitions,trackVisibility:effectiveTrackVisibility(),
           videoTransform:{x:0,y:0,scale:1,rotation:0,opacity:1,blendMode:'normal'},
           includeVideo:true,includeAudio:true,
-          images:state.images.map(item=>({...item})),videoLayers:state.videoLayers.map(item=>({...item})),audioAssets:state.audioAssets.map(item=>({...item})),
+          images:state.images.map(item=>({...item})),videoLayers:state.videoLayers.map(item=>({...item})),audioAssets,
           titles:state.titles.filter(item=>state.trackVisibility[item.trackId]!==false),
           captions:state.captions.filter(item=>state.trackVisibility[item.trackId || 'caption']!==false).map(item=>({...item,...state.captionTransform,style:{...state.captionStyle,captionLines:state.captionLines}})),
         };

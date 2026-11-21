@@ -880,7 +880,9 @@ function polishSectionHtml(title, rows, emptyText) {
         return true;
       }
       function dismissReviewHints(ids) {
-        const reviews = state.reviewCaptions.filter(r => ids.includes(r.id));
+        const requested = state.reviewCaptions.filter(r => ids.includes(r.id));
+        const reviews = state.reviewCaptions.filter(r => requested.some(target =>
+          r.id === target.id || (typeof sameCaptionMismatchOccurrence === 'function' && sameCaptionMismatchOccurrence(target,r))));
         if (!reviews.length || isTrackLocked('review')) return;
         snapshot();
         const issues = new Set(reviews.map(r => r.issueId || r.id));
@@ -1008,7 +1010,9 @@ function polishSectionHtml(title, rows, emptyText) {
         return true;
       }
       function batchReviewAction(ids, mode) {
-        const selected=[...new Set(ids)].map(id=>state.reviewCaptions.find(r=>r.id===id)).filter(Boolean);
+        const requested=[...new Set(ids)].map(id=>state.reviewCaptions.find(r=>r.id===id)).filter(Boolean);
+        const selected=state.reviewCaptions.filter(r=>requested.some(target=>
+          r.id===target.id || (typeof sameCaptionMismatchOccurrence === 'function' && sameCaptionMismatchOccurrence(target,r))));
         if(!selected.length)return;
         if(isTrackLocked('review'))return toast('待处理轨道已锁定');
         if(mode==='deleteCaptions'){
@@ -1593,7 +1597,17 @@ function polishSectionHtml(title, rows, emptyText) {
           return;
         }
         state.selected = anchor; state.selectedItems = targets();
-        deleteSelected(true, {record:false});
+        // Defer the generic deletion render: its review reconciliation would
+        // observe captions before this function restores their exact ripple
+        // mapping, and could recreate the same mismatch issue a second time.
+        let deleted = false;
+        deleteSelected.deferRender = true;
+        try { deleted = deleteSelected(true, {record:false}) === true; }
+        finally { deleteSelected.deferRender = false; }
+        if (!deleted) {
+          rollback('重复片段删除未完成，已恢复原工程');
+          return;
+        }
         // Rebuild visible captions from the pre-edit snapshot. Generic ripple
         // deletion can remap a whole source-backed caption group through an
         // owner clip that was just removed, dropping unrelated words as well.

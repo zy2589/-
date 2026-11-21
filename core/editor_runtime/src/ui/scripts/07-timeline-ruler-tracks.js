@@ -37,7 +37,7 @@ function rulerTickPlan(zoom) {
       function timelineGapItems(trackId) {
         if (trackId === "video") return trackItems(trackId);
         if (trackId === "audio")
-          return [...mainAudioClips().filter((clip) => !state.mainAudioTrackMap?.[clip.id]), ...state.audioAssets.filter(clip => clip.trackId === trackId)];
+          return [...mainAudioClips().filter((clip) => !state.mainAudioTrackMap?.[clip.id] || state.mainAudioTrackMap[clip.id] === "audio"), ...state.audioAssets.filter(clip => clip.trackId === trackId)];
         return trackItems(trackId);
       }
       let timelineGapSelection = null;
@@ -147,8 +147,8 @@ function rulerTickPlan(zoom) {
         let count = 0;
         if (key === "review") count = (state.reviewCaptions || []).length;
         else if (key === "caption") count = (state.captions || []).filter((item) => !item.trackId || item.trackId === "caption").length;
-        else if (key === "video") count = mainClips().filter(clip => !state.mainVideoTrackMap?.[clip.id]).length + state.videoLayers.filter(clip => clip.trackId === key).length + state.images.filter(clip => clip.trackId === key).length + state.titles.filter(clip => clip.trackId === key).length;
-        else if (key === "audio") count = mainAudioClips().filter(clip => !state.mainAudioTrackMap?.[clip.id]).length + state.audioAssets.filter(clip => clip.trackId === key).length;
+        else if (key === "video") count = mainClips().filter(clip => !state.mainVideoTrackMap?.[clip.id] || state.mainVideoTrackMap[clip.id] === key).length + state.videoLayers.filter(clip => clip.trackId === key).length + state.images.filter(clip => clip.trackId === key).length + state.titles.filter(clip => clip.trackId === key).length;
+        else if (key === "audio") count = mainAudioClips().filter(clip => !state.mainAudioTrackMap?.[clip.id] || state.mainAudioTrackMap[clip.id] === key).length + state.audioAssets.filter(clip => clip.trackId === key).length;
         else count = (trackItems(key) || []).length;
         return `${count} 个片段`;
       }
@@ -311,7 +311,7 @@ function rulerTickPlan(zoom) {
             `<div class="clip video ${isSelected("video", clip.id) ? "selected" : ""}" data-type="video" data-id="${escapeHtml(clip.id)}" data-track-id="${escapeHtml(trackId)}" style="${clipGeometryStyle(clip)}"><i class="trim-handle start" data-trim="start"></i><span class="clip-sticky">${escapeHtml(state.video?.name || "视频")}</span>${clipDurationMarkup(clip)}<i class="trim-handle end" data-trim="end"></i></div>`;
           if (key === "video")
             html = mainClips()
-              .filter((clip) => visible(clip) && !state.mainVideoTrackMap?.[clip.id])
+              .filter((clip) => visible(clip) && (!state.mainVideoTrackMap?.[clip.id] || state.mainVideoTrackMap[clip.id] === key))
               .map((clip) => videoClipMarkup(clip, "video"))
               .join("") + state.videoLayers.filter(clip => visible(clip) && clip.trackId === key).map(clip => clipHtml(clip,"videolayer")).join("") +
               state.images.filter(clip => visible(clip) && clip.trackId === key).map(clip => clipHtml(clip,"image")).join("") +
@@ -319,7 +319,7 @@ function rulerTickPlan(zoom) {
           else if (key === "audio")
             html =
               mainAudioClips()
-                .filter((clip) => visible(clip) && !state.mainAudioTrackMap?.[clip.id])
+                .filter((clip) => visible(clip) && (!state.mainAudioTrackMap?.[clip.id] || state.mainAudioTrackMap[clip.id] === key))
                 .map((clip) => audioClipHtml(clip, "audio", "audio"))
                 .join("") + state.audioAssets.filter(clip => visible(clip) && clip.trackId === key).map(clip => audioClipHtml(clip,"audioasset",key)).join("") +
               state.audioMutes

@@ -509,7 +509,11 @@ function addLibraryAsset(media, kind) {
             return asset;
           }
           snapshot();
-          if (state.video || placement === "timeline") {
+          // The first video in a project is its primary source, even when the
+          // user imports it directly onto the timeline. Overlay clips need an
+          // existing primary source so transport and caption analysis have a
+          // stable media clock.
+          if (state.video) {
             const start = clamp(Number(at) || 0, 0, visibleTimelineDuration());
             const sourceDuration = Math.max(0.04, Number(asset.duration || 3));
             const end = start + sourceDuration / Math.max(0.5, Number(state.audio.speed || 1));

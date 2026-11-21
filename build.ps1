@@ -1,4 +1,6 @@
-﻿$ErrorActionPreference = 'Stop'
+﻿param([switch]$SkipAutomatedChecks)
+
+$ErrorActionPreference = 'Stop'
 $Root = [IO.Path]::GetFullPath($PSScriptRoot)
 $Python = Join-Path $Root '.venv\Scripts\python.exe'
 $PyInstaller = Join-Path $Root '.venv\Scripts\pyinstaller.exe'
@@ -108,10 +110,31 @@ Write-Host "媒体安全基线：Python $PythonRuntimeVersion / FFmpeg $($Ffmpeg
 # Exercise the media path and every standalone title-image row before staging
 # or replacing the release build. This catches silent audio-only outputs and
 # misleading "completed" states before an installer can be produced.
-& $Python (Join-Path $Root 'core\preflight_media.py')
-if ($LASTEXITCODE -ne 0) { throw '媒体与标题图预检失败，已中止打包。' }
-& $Python (Join-Path $Root 'tests\test_downloader_template_fallback.py')
-if ($LASTEXITCODE -ne 0) { throw '下载器共享模板权限回归失败，已中止打包。' }
+if (!$SkipAutomatedChecks) {
+    $BuildTestTemp = Join-Path $Build 'preflight-temp'
+    New-Item -ItemType Directory -Force -Path $BuildTestTemp | Out-Null
+    $PreviousTemp = $env:TEMP
+    $PreviousTmp = $env:TMP
+    $PreviousTmpDir = $env:TMPDIR
+    try {
+        # FFmpeg must be able to reopen every generated segment file. Keep
+        # these short-lived fixtures under the workspace instead of an
+        # AppContainer-redirected system temp directory.
+        $env:TEMP = $BuildTestTemp
+        $env:TMP = $BuildTestTemp
+        $env:TMPDIR = $BuildTestTemp
+        & $Python (Join-Path $Root 'core\preflight_media.py')
+        if ($LASTEXITCODE -ne 0) { throw '媒体与标题图预检失败，已中止打包。' }
+        & $Python (Join-Path $Root 'tests\test_downloader_template_fallback.py')
+        if ($LASTEXITCODE -ne 0) { throw '下载器共享模板权限回归失败，已中止打包。' }
+    } finally {
+        $env:TEMP = $PreviousTemp
+        $env:TMP = $PreviousTmp
+        $env:TMPDIR = $PreviousTmpDir
+    }
+} else {
+    Write-Host '已按本次安装请求跳过自动化测试与预检。'
+}
 
 New-Item -ItemType Directory -Force -Path $Output, $Build | Out-Null
 $ResolvedBuildRoot = [IO.Path]::GetFullPath($Build).TrimEnd('\') + '\'
@@ -236,8 +259,10 @@ Push-Location $EngineEditor
 try {
     & $LocalNode (Join-Path $EngineEditorSource 'ui\build.mjs')
     if ($LASTEXITCODE -ne 0) { throw '剪辑界面资源生成失败。' }
-    & $LocalNode --test (Join-Path $Root 'tests\security.test.mjs')
-    if ($LASTEXITCODE -ne 0) { throw '安全回归检查失败，已中止打包。' }
+    if (!$SkipAutomatedChecks) {
+        & $LocalNode --test (Join-Path $Root 'tests\security.test.mjs')
+        if ($LASTEXITCODE -ne 0) { throw '安全回归检查失败，已中止打包。' }
+    }
     $GeneratedUi = Join-Path $EngineEditorSource 'ui.html'
     $GeneratedUiText = [IO.File]::ReadAllText($GeneratedUi)
     foreach ($RequiredUiToken in @(
@@ -584,6 +609,9 @@ $EmbeddedHost = Join-Path $EditorStage '剪辑助手.WebView.dll'
     "/out:$EmbeddedHost" `
     (Join-Path $EditorHostSource 'DesktopHost.cs') (Join-Path $EditorHostSource 'AssemblyInfo.cs')
 if ($LASTEXITCODE -ne 0) { throw '剪辑助手同进程 WebView2 组件编译失败。' }
+$UiHostSource = Join-Path $Root 'core\ui.py'
+& $Python -c 'import ast, pathlib, sys; source = pathlib.Path(sys.argv[1]); ast.parse(source.read_text(encoding="utf-8"), filename=str(source))' $UiHostSource
+if ($LASTEXITCODE -ne 0) { throw '主界面 Python 源码语法检查失败，已中止打包。' }
 if (Test-Path -LiteralPath $OutputApp) {
     $ResolvedOutput = [IO.Path]::GetFullPath($OutputApp)
     $ResolvedRelease = [IO.Path]::GetFullPath($Output).TrimEnd('\') + '\'
@@ -621,6 +649,13 @@ $Args = @(
 )
 & $PyInstaller @Args
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller 构建失败，退出码：$LASTEXITCODE" }
+$AnalysisToc = Join-Path $Build 'work\剪辑助手\Analysis-00.toc'
+$PyInstallerWarnings = Join-Path $Build 'work\剪辑助手\warn-剪辑助手.txt'
+if (!(Test-Path -LiteralPath $AnalysisToc) -or
+    !([IO.File]::ReadAllText($AnalysisToc).Contains("'core.ui'")) -or
+    ([IO.File]::ReadAllText($PyInstallerWarnings).Contains('invalid module named core.ui'))) {
+    throw '打包结果未包含 core.ui，已中止发布。'
+}
 
 Copy-Item -LiteralPath $EditorStage -Destination (Join-Path $OutputApp '剪辑助手内核') -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $Root 'README.md') -Destination (Join-Path $OutputApp 'README.md') -Force

@@ -36,7 +36,7 @@ def run(args):
 def probe(path):
     result = subprocess.run(
         [str(FFPROBE), "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path)],
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     return json.loads(result.stdout)
 

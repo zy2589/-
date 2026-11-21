@@ -4,6 +4,7 @@ function syncCaptionCorrectionReviews() {
   state.reviewCaptions ||= [];
   state.issues ||= [];
   normalizeCaptionPhraseReviews();
+  dedupeCaptionMismatchReviews();
   const resolved = new Set(correctExpandedCaptionWords(state.captions));
   const cosmetic = new Set();
   const repeatKey=text=>String(text||'').toLowerCase().replace(/[^\p{L}\p{N}]/gu,'');
@@ -104,6 +105,7 @@ function syncCaptionCorrectionReviews() {
     }
   }
   normalizeCaptionPhraseReviews();
+  dedupeCaptionMismatchReviews();
   for(const record of state.captionRecoveryArchive || [])for(const word of [...(record.caption?.words || []),...(record.word?[record.word]:[])])if(resolved.has(word.issueId)){word.issueId='';word.issueType='';word.action='';word.reviewDismissed=true;}
   if(reviewDetailsDialog?.open && !state.reviewCaptions.some(r=>r.id===reviewDetailsDialog.reviewId))reviewDetailsDialog.close();
 }
@@ -117,6 +119,85 @@ function normalizeCaptionPhraseReviews() {
       const review=merged.reviews.find(r=>(r.issueId || r.id)===issue.id);
       if(review) Object.assign(issue,{start:review.start,end:review.end,spokenText:review.spokenText,expectedText:review.expectedText});
     }
+  }
+}
+
+function sameCaptionMismatchOccurrence(left, right) {
+  if (!left || !right || left.type !== 'mismatch' || right.type !== 'mismatch') return false;
+  const key = value => captionCorrectionKey(value || '');
+  if (!key(left.spokenText) || key(left.spokenText) !== key(right.spokenText) ||
+      !key(left.expectedText) || key(left.expectedText) !== key(right.expectedText)) return false;
+  const leftIssueId = String(left.issueId || ''), rightIssueId = String(right.issueId || '');
+  const sameIssue = !!leftIssueId && leftIssueId === rightIssueId;
+  for (const field of ['captionTrackId','sourceMediaId','transcriptId'])
+    if (String(left[field] || '') !== String(right[field] || '')) return false;
+  if (!sameIssue && String(left.ownerClipId || '') !== String(right.ownerClipId || '')) return false;
+  const aStart = Number(left.start), aEnd = Number(left.end), bStart = Number(right.start), bEnd = Number(right.end);
+  if (![aStart,aEnd,bStart,bEnd].every(Number.isFinite) || aEnd <= aStart || bEnd <= bStart) return false;
+  const overlap = Math.min(aEnd,bEnd) - Math.max(aStart,bStart);
+  const shorter = Math.min(aEnd-aStart,bEnd-bStart);
+  return (overlap > .005 && overlap / shorter >= .75) ||
+    (Math.abs(aStart-bStart) <= .035 && Math.abs(aEnd-bEnd) <= .06);
+}
+
+function dedupeCaptionMismatchReviews() {
+  const kept = [], aliases = new Map(), droppedReviewIds = new Set();
+  for (const review of state.reviewCaptions || []) {
+    const existing = kept.find(item => sameCaptionMismatchOccurrence(item,review));
+    if (!existing) { kept.push(review); continue; }
+    const canonical = String(existing.issueId || existing.id || '');
+    for (const alias of [review.issueId || review.id, review.id])
+      if (alias && String(alias) !== canonical) aliases.set(String(alias),canonical);
+    if (review.id) droppedReviewIds.add(String(review.id));
+    // One caption mismatch can be linked to both the video and its paired
+    // audio clip. Keep one review marker, but retain the caption-owning record
+    // so replacement actions still resolve the right subtitle words.
+    if (review.captionCorrectionReview && !existing.captionCorrectionReview) {
+      Object.assign(existing, {
+        ownerClipId: review.ownerClipId,
+        ownerClipType: review.ownerClipType,
+        sourceMediaId: review.sourceMediaId || existing.sourceMediaId,
+        sourceStart: review.sourceStart ?? existing.sourceStart,
+        sourceEnd: review.sourceEnd ?? existing.sourceEnd,
+        captionTrackId: review.captionTrackId || existing.captionTrackId,
+        transcriptId: review.transcriptId || existing.transcriptId,
+        trackId: review.trackId || existing.trackId,
+        captionCorrectionReview: true,
+        needsAudioReview: review.needsAudioReview ?? existing.needsAudioReview,
+      });
+    }
+    const words = [...(existing.words || [])];
+    for (const word of review.words || []) {
+      const duplicate = words.some(item => Number(item.start) === Number(word.start) &&
+        Number(item.end) === Number(word.end) && String(item.display || '') === String(word.display || ''));
+      if (!duplicate) words.push(word);
+    }
+    if (words.length) existing.words = words;
+  }
+  state.reviewCaptions = kept;
+  if (aliases.size) {
+    for (const caption of state.captions || []) for (const word of caption.words || []) {
+      const alias = String(word.issueId || '');
+      if (aliases.has(alias)) word.issueId = aliases.get(alias);
+      const acronymAlias = String(word.acronymReviewId || '');
+      if (aliases.has(acronymAlias)) word.acronymReviewId = aliases.get(acronymAlias);
+    }
+    for (const review of state.reviewCaptions) {
+      const alias = String(review.issueId || '');
+      if (aliases.has(alias)) review.issueId = aliases.get(alias);
+    }
+  }
+  for (const field of ['issues','matchIssues']) {
+    const seen = [];
+    state[field] = (state[field] || []).filter(issue => {
+      const alias = String(issue.issueId || issue.id || '');
+      if (aliases.has(alias)) issue.issueId = aliases.get(alias);
+      const idAlias = String(issue.id || '');
+      if (aliases.has(idAlias)) issue.id = aliases.get(idAlias);
+      if (seen.some(item => sameCaptionMismatchOccurrence(item,issue))) return false;
+      seen.push(issue);
+      return !issue.id || !droppedReviewIds.has(String(issue.id));
+    });
   }
 }
 

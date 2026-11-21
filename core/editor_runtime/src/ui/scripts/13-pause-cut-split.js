@@ -883,8 +883,11 @@
           ? { type: "video", id: "main" }
           : { type: "", id: "" };
         seekTimeline(Math.min(state.currentTime, state.duration));
-        renderAll();
-        toast(`已删除 ${selected.length} 个所选片段${selected.length < requested.length ? "；锁定轨道已跳过" : ""}${ripple ? "，并前移启用联动的轨道" : ""}`);
+        if (!deleteSelected.deferRender) {
+          renderAll();
+          toast(`已删除 ${selected.length} 个所选片段${selected.length < requested.length ? "；锁定轨道已跳过" : ""}${ripple ? "，并前移启用联动的轨道" : ""}`);
+        }
+        return true;
       }
       function shiftTracks(at, len) {
         rippleShiftAllTracks(state,at+len,-len);

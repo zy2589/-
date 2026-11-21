@@ -75,24 +75,35 @@ class ClipAssistant:
     def __init__(self) -> None:
         self._set_app_user_model_id()
         self.root = TkinterDnD.Tk() if TkinterDnD else tk.Tk()
+        # Tk creates the native top-level before the rest of the Python UI is
+        # built. Give that window its final client color and dark DWM chrome
+        # immediately so the first Windows paint cannot use the system's white
+        # default background.
+        self.root.configure(bg=COLORS["bg"])
         # Keep the native window unmapped until the first page has finished
         # constructing its fixed task rows. Mapping an empty shell and then
         # filling it made startup look like a page refresh.
         self.root.withdraw()
+        startup_hwnd = self.root.winfo_id()
+        self._set_dark_dwm_border(startup_hwnd)
+        self._set_dwm_transitions(startup_hwnd, disabled=True)
         self._startup_window_revealed = False
         self._startup_alpha_mask = False
-        self._startup_alpha_paint_seen = False
-        self._startup_alpha_pending_since = None
+        self._startup_alpha_reveal_at = None
+        self._startup_last_expose_at = None
+        self._startup_expose_count = 0
+        self._startup_cover_removed_at = None
+        self._startup_page_ready_since = None
+        self._startup_window_started_at = time.monotonic()
         if os.name == "nt":
-            # Windows can expose the client area before Tk has completed the
-            # first mapped paint, even though the dark palette is configured
-            # before the window is shown. Keep that first native paint hidden.
             try:
+                # Map and paint the completed Tk tree behind a fully transparent
+                # DWM surface, then reveal the whole window in one composition.
                 self.root.attributes("-alpha", 0.0)
                 self._startup_alpha_mask = True
             except tk.TclError:
-                pass
-        self._startup_window_started_at = time.monotonic()
+                self._startup_alpha_mask = False
+        self.root.bind_all("<Expose>", self._note_startup_expose, add="+")
         self.root.title("剪辑助手")
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
@@ -109,9 +120,7 @@ class ClipAssistant:
         # the full monitor work area and leaves visible strips around the app.
         # The page layouts are responsive, so let the window manager own the
         # maximized bounds.
-        self.root.configure(bg=COLORS["bg"])
         self.root.option_add("*Font", ("Microsoft YaHei UI", 10))
-        self._set_dark_dwm_border(self.root.winfo_id())
 
         self.bundle_dir = bundle_root()
         self.resource_dir = resource_root()
@@ -150,8 +159,8 @@ class ClipAssistant:
             # `<repository>\剪辑助手内核` directory.
             local_app_data = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
             candidates = (
-                self.application_dir / "release" / "剪辑助手" / "剪辑助手内核",
                 self.application_dir / ".build" / "剪辑助手内核",
+                self.application_dir / "release" / "剪辑助手" / "剪辑助手内核",
                 local_app_data / "Programs" / "剪辑助手" / "剪辑助手内核",
             )
             required = (
@@ -165,6 +174,7 @@ class ClipAssistant:
                     break
         self.embedded_editor: EmbeddedEditor | None = None
         self.embedded_editor_frame = None
+        self._download_project_callbacks = {}
         self.editor_embed_error = None
         self.editor_open_pending = False
         self._editor_open_generation = 0
@@ -217,6 +227,8 @@ class ClipAssistant:
         self._build_shell()
         self._watch_page_widget(self.root, "root")
         self.root.protocol("WM_DELETE_WINDOW", self.close)
+        self.root.bind_all("<Control-Alt-Key-1>", self._hotkey_show_download, add="+")
+        self.root.bind_all("<Control-Alt-Key-2>", self._hotkey_show_projects, add="+")
         self.root.after(100, self._poll_events)
 
     def _configure_styles(self) -> None:
@@ -315,10 +327,10 @@ class ClipAssistant:
             self._native_icon_handle = None
 
     @staticmethod
-    def _set_dark_dwm_border(hwnd) -> None:
-        """Keep the Windows 11 non-client outline dark when the window is maximized."""
+    def _set_dark_dwm_border(hwnd):
+        """Keep the Windows caption and outline dark before the first window paint."""
         if os.name != "nt":
-            return
+            return ()
         try:
             import ctypes
             from ctypes import wintypes
@@ -329,10 +341,40 @@ class ClipAssistant:
             dwmapi.DwmSetWindowAttribute.restype = ctypes.c_long
             # DWMWA_BORDER_COLOR uses COLORREF (0x00BBGGRR).
             dark = ctypes.c_uint(0x00131211)
-            dwmapi.DwmSetWindowAttribute(wintypes.HWND(hwnd), 34,
-                                          ctypes.byref(dark), ctypes.sizeof(dark))
+            results = []
+            results.append(int(dwmapi.DwmSetWindowAttribute(
+                wintypes.HWND(hwnd), 34, ctypes.byref(dark), ctypes.sizeof(dark),
+            )))
+            results.append(int(dwmapi.DwmSetWindowAttribute(
+                wintypes.HWND(hwnd), 35, ctypes.byref(dark), ctypes.sizeof(dark),
+            )))
+            dark_mode = ctypes.c_int(1)
+            results.append(int(dwmapi.DwmSetWindowAttribute(
+                wintypes.HWND(hwnd), 20, ctypes.byref(dark_mode), ctypes.sizeof(dark_mode),
+            )))
+            return tuple(results)
         except (AttributeError, OSError, TypeError, ValueError):
-            pass
+            return ()
+
+    @staticmethod
+    def _set_dwm_transitions(hwnd, *, disabled: bool) -> int | None:
+        """Suppress the shell's first show animation, then restore normal transitions."""
+        if os.name != "nt":
+            return None
+        try:
+            import ctypes
+            from ctypes import wintypes
+            dwmapi = ctypes.WinDLL("dwmapi", use_last_error=True)
+            dwmapi.DwmSetWindowAttribute.argtypes = (
+                wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD,
+            )
+            dwmapi.DwmSetWindowAttribute.restype = ctypes.c_long
+            value = ctypes.c_int(1 if disabled else 0)
+            return int(dwmapi.DwmSetWindowAttribute(
+                wintypes.HWND(hwnd), 3, ctypes.byref(value), ctypes.sizeof(value),
+            ))
+        except (AttributeError, OSError, TypeError, ValueError):
+            return None
 
     @staticmethod
     def _set_app_user_model_id() -> None:
@@ -445,9 +487,31 @@ class ClipAssistant:
             self._watch_page_widget(frame, "page-" + page_name)
         self.page_body = self.page_frames["download"]
         self.page_body.tkraise()
+        # Keep one opaque, color-matched surface above the completed window
+        # until Windows and Tk have finished their first paint. Alpha masking
+        # alone still exposed a row-by-row reveal on some systems.
+        self._startup_cover = tk.Frame(
+            self.root, bg=COLORS["bg"], bd=0, highlightthickness=0,
+        )
+        self._startup_cover.place(x=0, y=0, relwidth=1, relheight=1)
+        self._startup_cover.lift()
         self.root.update_idletasks()
         self.show_download()
         self.root.after_idle(self._reveal_startup_window_when_ready)
+
+    def _note_startup_expose(self, _event=None):
+        if self._startup_window_revealed:
+            self._startup_last_expose_at = time.monotonic()
+            self._startup_expose_count += 1
+
+    def _remove_startup_cover(self):
+        cover = getattr(self, "_startup_cover", None)
+        self._startup_cover = None
+        if cover is not None:
+            try:
+                cover.destroy()
+            except tk.TclError:
+                pass
 
     def _nav_button(self, parent, text, command):
         return ttk.Button(parent, text=text, command=command, style="Nav.TButton", cursor="hand2")
@@ -619,61 +683,142 @@ class ClipAssistant:
                 return
             self._begin_page_diagnostics("hidden", "startup-download")
             self._startup_window_revealed = True
+            self._startup_alpha_reveal_at = time.monotonic()
+            self._startup_page_ready_since = None
+            self._startup_last_expose_at = None
+            self._startup_expose_count = 0
+            self._startup_cover_removed_at = None
             self.root.deiconify()
-            if self._startup_alpha_mask:
-                self._startup_alpha_pending_since = time.monotonic()
-                self.root.after(20, self._finish_startup_window_reveal)
+            hwnd = self.root.winfo_id()
+            border_results = self._set_dark_dwm_border(hwnd)
+            transition_result = self._set_dwm_transitions(hwnd, disabled=True)
+            self._write_ui_log(
+                "STARTUP_DWM_BORDER_REAPPLIED results=" +
+                (",".join(str(code) for code in border_results) or "unavailable")
+                + f" transition_disabled={transition_result}"
+            )
+            # Windows can re-evaluate its frame theme as the hidden top-level
+            # first maps. Reapply once idle so the dark outline survives that
+            # transition as well as the first paint.
+            def reapply_startup_chrome(handle=hwnd):
+                self._set_dark_dwm_border(handle)
+                self._set_dwm_transitions(handle, disabled=True)
+            self.root.after_idle(reapply_startup_chrome)
+            self._write_ui_log(
+                f"STARTUP_WINDOW_MAPPED alpha_mask={int(self._startup_alpha_mask)} "
+                f"geometry={self.root.geometry()}"
+            )
+            self.root.after(100, self._release_startup_window_when_ready)
         except tk.TclError:
             return
 
-    def _finish_startup_window_reveal(self):
-        """Unhide the native window only after its dark page has mapped and painted."""
-        if not self._startup_alpha_mask:
-            return
+    def _release_startup_window_when_ready(self):
+        """Paint behind the startup cover, then reveal the complete page at once."""
         try:
             if not self.root.winfo_exists():
                 return
-            page = self.page_frames.get(self.current_page)
-            app = self.downloader_app if self.current_page == "download" else None
-            controls_mapped = True
-            if app is not None:
-                controls = [
-                    self.download_host,
-                    getattr(app, "bulk_text", None),
-                    *getattr(app, "input_entries", ()),
-                    *getattr(app, "title_layout_picks", ()),
-                    *getattr(app, "denoise_picks", ()),
-                ]
-                try:
-                    controls_mapped = bool(app.rows_ready) and all(
-                        widget is not None
-                        and widget.winfo_exists()
-                        and widget.winfo_ismapped()
-                        for widget in controls
-                    )
-                except tk.TclError:
-                    controls_mapped = False
+            now = time.monotonic()
+            app = self.downloader_app
+            loading = bool(self.download_loading or self.downloader_importing)
+            rows_ready = bool(app and app.rows_ready and len(app.rows) >= 12)
+            error_ready = app is None and not loading
+            page = self.page_frames.get("download")
+            host_ready = bool(
+                app is None or (
+                    self.download_host is not None
+                    and self.download_host.winfo_exists()
+                    and self.download_host.winfo_ismapped()
+                    and self.download_host.winfo_width() > 100
+                    and self.download_host.winfo_height() > 100
+                )
+            )
             mapped = bool(
                 self.root.winfo_ismapped()
-                and self.main.winfo_ismapped()
                 and page is not None
                 and page.winfo_ismapped()
-                and controls_mapped
-                and self.root.winfo_width() > 1
-                and self.root.winfo_height() > 1
+                and page.winfo_width() > 100
+                and page.winfo_height() > 100
             )
-            waited = time.monotonic() - (self._startup_alpha_pending_since or time.monotonic())
-            if not mapped and waited < 5.0:
-                self.root.after(20, self._finish_startup_window_reveal)
+            ready = not loading and (rows_ready or error_ready) and mapped and host_ready
+            if ready:
+                if self._startup_page_ready_since is None:
+                    self._startup_page_ready_since = now
+            else:
+                self._startup_page_ready_since = None
+
+            shown_for = now - (self._startup_alpha_reveal_at or now)
+            stable_for = (
+                now - self._startup_page_ready_since
+                if self._startup_page_ready_since is not None else 0.0
+            )
+            last_expose = self._startup_last_expose_at or self._startup_alpha_reveal_at or now
+            expose_quiet_for = now - last_expose
+            if ready and stable_for >= 0.5 and shown_for >= 1.5:
+                if self._startup_cover_removed_at is None:
+                    paints_settled = self._startup_expose_count > 0 and expose_quiet_for >= 0.4
+                    if paints_settled:
+                        # Destroying a sibling cover invalidates the controls below it.
+                        # Keep the top-level transparent until that redraw has settled,
+                        # or Windows reveals the child controls progressively.
+                        self._remove_startup_cover()
+                        self._startup_cover_removed_at = now
+                        self._startup_last_expose_at = now
+                        self._startup_expose_count = 0
+                        self._write_ui_log("STARTUP_COVER_REMOVED alpha_mask="
+                                           f"{int(self._startup_alpha_mask)}")
+                    self.root.after(100, self._release_startup_window_when_ready)
+                    return
+
+                cover_expose_quiet_for = now - (self._startup_last_expose_at or now)
+                cover_paints_settled = (
+                    self._startup_expose_count > 0
+                    and now - self._startup_cover_removed_at >= 0.5
+                    and cover_expose_quiet_for >= 0.4
+                )
+                if cover_paints_settled:
+                    self._write_ui_log(
+                        f"STARTUP_PAGE_READY rows={len(app.rows) if app else 0} "
+                        f"stable_ms={stable_for * 1000:.0f} shown_ms={shown_for * 1000:.0f} "
+                        f"post_cover_exposes={self._startup_expose_count} "
+                        f"quiet_ms={cover_expose_quiet_for * 1000:.0f}"
+                    )
+                    if self._startup_alpha_mask:
+                        self.root.attributes("-alpha", 1.0)
+                        self._startup_alpha_mask = False
+                    transition_result = self._set_dwm_transitions(
+                        self.root.winfo_id(), disabled=False,
+                    )
+                    self._write_ui_log(
+                        f"STARTUP_DWM_TRANSITIONS_RESTORED result={transition_result}"
+                    )
+                    self._write_ui_log("STARTUP_WINDOW_REVEALED fully_painted=1")
+                    return
+            if shown_for >= 20.0:
+                self._write_ui_log(
+                    f"STARTUP_PAINT_TIMEOUT rows_ready={int(rows_ready)} "
+                    f"mapped={int(mapped)} host_ready={int(host_ready)} "
+                    f"exposes={self._startup_expose_count}"
+                )
+                if self._startup_alpha_mask:
+                    self.root.attributes("-alpha", 1.0)
+                    self._startup_alpha_mask = False
+                transition_result = self._set_dwm_transitions(
+                    self.root.winfo_id(), disabled=False,
+                )
+                self._write_ui_log(
+                    f"STARTUP_DWM_TRANSITIONS_RESTORED result={transition_result} fallback=1"
+                )
+                self._remove_startup_cover()
                 return
-            if mapped and not self._startup_alpha_paint_seen:
-                self._startup_alpha_paint_seen = True
-                self.root.after(100, self._finish_startup_window_reveal)
-                return
-            self.root.attributes("-alpha", 1.0)
+            self.root.after(100, self._release_startup_window_when_ready)
+        except tk.TclError as exc:
+            self._write_ui_log(f"STARTUP_ALPHA_RELEASE_FAILED error={exc}")
             self._startup_alpha_mask = False
-        except tk.TclError:
-            return
+            try:
+                self._set_dwm_transitions(self.root.winfo_id(), disabled=False)
+            except tk.TclError:
+                pass
+            self._remove_startup_cover()
 
     def _card(self, parent, **kwargs):
         return tk.Frame(
@@ -687,6 +832,103 @@ class ClipAssistant:
             return
         self._show_original_downloader()
         return
+
+    def _hotkey_show_download(self, _event=None):
+        self.show_download()
+        return "break"
+
+    def _hotkey_show_projects(self, _event=None):
+        self.show_projects()
+        return "break"
+
+    def _handle_editor_main_area_request(self, area: str) -> None:
+        if area == "download":
+            self.show_download()
+        elif area == "projects":
+            self.show_projects()
+
+    def _ensure_embedded_editor_host(self):
+        if self.embedded_editor is not None:
+            return
+        project_page = self.page_frames["projects"]
+        project_page.grid_rowconfigure(0, weight=1)
+        project_page.grid_columnconfigure(0, weight=1)
+        for child in project_page.winfo_children():
+            child.destroy()
+        host = tk.Frame(project_page, bg=COLORS["bg"], bd=0, highlightthickness=0)
+        host.grid(row=0, column=0, sticky="nsew")
+        self.embedded_editor_frame = host
+        self.embedded_editor = EmbeddedEditor(
+            self.root, host, self.editor_engine_dir, data_root(),
+            self.editor_engine_dir / "runtime" / "node" / "node.exe", self._editor_embed_failed,
+            native_parent=host,
+            on_main_area_requested=self._handle_editor_main_area_request,
+            on_download_project_completed=self._handle_download_project_completed,
+        )
+
+    def _request_download_project(self, request_id, name, script, completed):
+        request_id = str(request_id)
+        self._download_project_callbacks[request_id] = completed
+        self._ensure_embedded_editor_host()
+        editor = self.embedded_editor
+        self._write_ui_log(
+            f"DOWNLOAD_PROJECT_REQUEST id={request_id} page={self.current_page} "
+            f"editor_running={int(editor.is_running())}"
+        )
+        if not editor.is_running():
+            if not editor.show(activate=False):
+                error = (self.editor_embed_error.cget("text")
+                         if self.editor_embed_error and self.editor_embed_error.winfo_exists()
+                         else "剪辑工作区启动失败。")
+                self._finish_download_project_request(request_id, False, error, "")
+                return
+            editor.hide()
+        deadline = time.monotonic() + 45.0
+        self.root.after(50, lambda rid=request_id, pname=str(name), text=str(script), due=deadline:
+                        self._poll_download_project_start(rid, pname, text, due))
+
+    def _poll_download_project_start(self, request_id, name, script, deadline):
+        if request_id not in self._download_project_callbacks:
+            return
+        editor = self.embedded_editor
+        if editor is None:
+            self._finish_download_project_request(request_id, False, "剪辑工作区未创建。", "")
+            return
+        if editor.is_ready():
+            try:
+                self._write_ui_log(f"DOWNLOAD_PROJECT_READY id={request_id}")
+                editor.create_download_project(request_id, name, script)
+                self._write_ui_log(f"DOWNLOAD_PROJECT_POSTED id={request_id}")
+                self.root.after(60_000, lambda rid=request_id:
+                                self._timeout_download_project_request(rid))
+            except Exception as exc:
+                self._finish_download_project_request(request_id, False, str(exc), "")
+            return
+        if editor.has_failed():
+            self._finish_download_project_request(
+                request_id, False, editor.host.LastError or "剪辑工作区启动失败。", "")
+            return
+        if time.monotonic() >= deadline:
+            self._finish_download_project_request(request_id, False, "剪辑工作区启动超时。", "")
+            return
+        self.root.after(100, lambda rid=request_id, pname=name, text=script, due=deadline:
+                        self._poll_download_project_start(rid, pname, text, due))
+
+    def _timeout_download_project_request(self, request_id):
+        if request_id in self._download_project_callbacks:
+            self._finish_download_project_request(request_id, False, "创建剪辑工程超时。", "")
+
+    def _handle_download_project_completed(self, request_id, succeeded, detail, project_id):
+        self._finish_download_project_request(request_id, succeeded, detail, project_id)
+
+    def _finish_download_project_request(self, request_id, succeeded, detail, project_id):
+        callback = self._download_project_callbacks.pop(str(request_id), None)
+        self._write_ui_log(
+            f"DOWNLOAD_PROJECT_RESULT id={request_id} success={int(bool(succeeded))} "
+            f"has_project_id={int(bool(project_id))}"
+        )
+        if callback:
+            callback(bool(succeeded), str(detail or ""), str(project_id or ""))
 
     def _show_original_downloader(self):
         self._show_page("download", self.nav_download)
@@ -796,12 +1038,14 @@ class ClipAssistant:
             host = tk.Frame(page, bg=COLORS["bg"], bd=0, highlightthickness=0)
             host.pack(fill="both", expand=True)
             self.download_host = host
+            self._watch_page_widget(host, "download-host")
             self.downloader_app = self.downloader_module.App(
                 self.root,
                 host=host,
                 resource_dir=self.resource_dir,
                 editor_callback=self.show_projects,
                 cutout_callback=self.open_cutout,
+                project_callback=self._request_download_project,
             )
             self.download_mount_count += 1
             self._write_ui_log(
@@ -1015,25 +1259,14 @@ class ClipAssistant:
         self._open_editor_workspace(self.nav_projects, "edit")
 
     def _open_editor_workspace(self, nav_button, mode="edit"):
-        project_page = self.page_frames["projects"]
-        project_page.grid_rowconfigure(0, weight=1)
-        project_page.grid_columnconfigure(0, weight=1)
-        if self.embedded_editor is None:
-            for child in project_page.winfo_children():
-                child.destroy()
-            host = tk.Frame(project_page, bg=COLORS["bg"], bd=0, highlightthickness=0)
-            host.grid(row=0, column=0, sticky="nsew")
-            self.embedded_editor_frame = host
-            self.embedded_editor = EmbeddedEditor(
-                self.root, host, self.editor_engine_dir, data_root(),
-                self.editor_engine_dir / "runtime" / "node" / "node.exe", self._editor_embed_failed,
-                native_parent=host,
-            )
+        self._ensure_embedded_editor_host()
         self.embedded_editor.set_workspace_mode(mode)
         if self.embedded_editor.is_ready():
             self.editor_open_pending = False
             self._show_page("projects", nav_button)
-            self.embedded_editor.resize()
+            if not self.embedded_editor.show():
+                return
+            self._write_ui_log("EDITOR_HOST_SHOWN reuse=1")
             return
 
         # Keep the current page visible while the local WebView2 first loads.
@@ -1433,18 +1666,21 @@ class ClipAssistant:
         return [window for window in self.matting_windows if getattr(window, "is_exporting", False)]
 
     def close(self):
+        download_active = bool(self.downloader_app and self.downloader_app.active)
+        self._write_ui_log(
+            f"APP_CLOSE_REQUEST download_active={int(download_active)} "
+            f"editor_running={int(bool(self.embedded_editor and self.embedded_editor.is_running()))}"
+        )
+        if download_active:
+            self._write_ui_log("APP_CLOSE_BLOCKED reason=download_active")
+            self.status_var.set("视频下载仍在进行，软件保持打开；下载完成后再关闭。")
+            return
         active_cutouts = self._active_cutout_windows()
         if active_cutouts:
             if not messagebox.askyesno("取消抠图", "抠图仍在进行。停止任务并退出吗？", parent=self.root):
                 return
             for window in active_cutouts:
                 window.cancel_all_exports()
-            self.root.after(250, self._close_when_idle)
-            return
-        if self.downloader_app and self.downloader_app.active:
-            if not messagebox.askyesno("取消下载", "下载或降噪仍在进行。停止任务并退出吗？", parent=self.root):
-                return
-            self.downloader_app.cancel()
             self.root.after(250, self._close_when_idle)
             return
         if self.processing:
@@ -1457,6 +1693,10 @@ class ClipAssistant:
         self._request_editor_close()
 
     def _request_editor_close(self):
+        if self.downloader_app and self.downloader_app.active:
+            self._write_ui_log("APP_CLOSE_BLOCKED reason=editor_close_during_download")
+            self.status_var.set("视频下载仍在进行，剪辑区域不能关闭软件。")
+            return
         if self.embedded_editor and self.embedded_editor.is_running():
             if getattr(self, "shutdown_waiting", False):
                 return
@@ -1477,6 +1717,11 @@ class ClipAssistant:
             )
 
     def _finish_shutdown(self):
+        if self.downloader_app and self.downloader_app.active:
+            self._write_ui_log("APP_SHUTDOWN_BLOCKED reason=download_active")
+            self.status_var.set("视频下载仍在进行，软件保持打开。")
+            return
+        self._write_ui_log("APP_SHUTDOWN_BEGIN")
         for editor in tuple(self.matting_windows):
             editor.shutdown_background_work()
         self._close_downloader_view()

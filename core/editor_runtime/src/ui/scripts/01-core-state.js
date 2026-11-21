@@ -404,6 +404,7 @@
         filterLook: { id: "none", intensity: 1, baseColor: null },
         lut: null,
         exportJobId: "",
+        exportProjectId: "",
         layout: defaultStartupLayout(),
       };
       const captionStyleDefaults = Object.freeze({ ...state.captionStyle });
@@ -731,14 +732,14 @@
           );
         if (trackId === "video")
           return [
-            ...mainClips().filter((item) => !state.mainVideoTrackMap?.[item.id]),
+            ...mainClips().filter((item) => !state.mainVideoTrackMap?.[item.id] || state.mainVideoTrackMap[item.id] === "video"),
             ...state.videoLayers.filter((item) => item.trackId === trackId),
             ...state.images.filter((item) => item.trackId === trackId),
             ...state.titles.filter((item) => item.trackId === trackId),
           ];
         if (trackId === "audio")
           return [
-            ...mainAudioClips().filter((item) => !state.mainAudioTrackMap?.[item.id]),
+            ...mainAudioClips().filter((item) => !state.mainAudioTrackMap?.[item.id] || state.mainAudioTrackMap[item.id] === "audio"),
             ...state.audioAssets.filter((item) => item.trackId === trackId),
           ];
         const mappedMain = kind === "video"
@@ -1285,7 +1286,7 @@
         for (const [day, projects] of groups.entries()) {
           template.innerHTML = `<section class="projectday"><div class="projectdayhead"><span>📁 ${escapeHtml(day)}</span><span class="small">${projects.length} 个工程</span></div><div class="projectdaygrid">${projects.map(
             (item) =>
-              `<div class="projectcard" data-project-id="${item.id}" tabindex="0">${homeSelectionMode ? `<input type="checkbox" data-select-project="${item.id}" aria-label="选择 ${escapeHtml(item.name)}" style="position:absolute;top:10px;left:10px;z-index:3;width:18px;height:18px;accent-color:#df6666">` : `<button type="button" class="projectrename" data-rename-project="${item.id}" title="修改工程名称">✎</button><button type="button" class="projectdelete" data-delete-project="${item.id}" title="删除工程">×</button>`}<div class="projectthumb">${item.thumbnailUrl ? `<img loading="lazy" decoding="async" src="${escapeHtml(item.thumbnailUrl)}" alt="工程预览" data-hide-on-error>` : escapeHtml(item.ratio || "9:16")}</div><b class="ellipsis" title="${escapeHtml(item.name || "未命名工程")}">${escapeHtml(item.name || "未命名工程")}</b><div class="projectmeta ellipsis">${escapeHtml(item.videoName || "尚未导入视频")}</div><div class="projectmeta">更新于 ${projectDate(item.updatedAt)}</div></div>`,
+            `<div class="projectcard" data-project-id="${item.id}" tabindex="0">${homeSelectionMode ? `<input type="checkbox" data-select-project="${item.id}" aria-label="选择 ${escapeHtml(item.name)}" style="position:absolute;top:10px;left:10px;z-index:3;width:18px;height:18px;accent-color:#df6666">` : `<button type="button" class="projectrename" data-rename-project="${item.id}" title="重命名工程" aria-label="重命名工程">✎</button><button type="button" class="projectdelete" data-delete-project="${item.id}" title="删除工程" aria-label="删除工程">×</button>`}<div class="projectthumb">${item.thumbnailUrl ? `<img loading="lazy" decoding="async" src="${escapeHtml(item.thumbnailUrl)}" alt="工程预览" data-hide-on-error>` : escapeHtml(item.ratio || "9:16")}</div><b class="ellipsis" title="${escapeHtml(item.name || "未命名工程")}">${escapeHtml(item.name || "未命名工程")}</b><div class="projectmeta ellipsis">${escapeHtml(item.videoName || "尚未导入视频")}</div><div class="projectmeta">更新于 ${projectDate(item.updatedAt)}</div></div>`,
           ).join("")}</div></section>`;
           fragment.appendChild(template.content.firstElementChild);
         }
@@ -1492,7 +1493,8 @@
           beautyBypass: true,
           filterLook: { id: "none", intensity: 1, baseColor: null },
           lut: null,
-          exportJobId: "",
+          exportJobId: state.exportJobId || "",
+          exportProjectId: state.exportProjectId || "",
           layout: defaultStartupLayout(),
         });
         $("video").removeAttribute("src");
@@ -1509,6 +1511,90 @@
         }
       }
       function currentProjectSessionRevision() { return projectSessionRevision; }
+      function promoteSoloTimelineVideoToMainSource() {
+        if (state.video?.path) return false;
+        const clips = (state.videoLayers || []).filter(item => item?.path && !item.missing);
+        if (clips.length !== 1) return false;
+        const clip = clips[0];
+        const sourceDuration = Number(clip.sourceDuration || clip.duration || 0);
+        const speed = Math.max(0.05, Number(state.audio?.speed || 1));
+        const tolerance = Math.max(0.08, 2 / Math.max(1, Number(state.timelineFrameRate || state.fps || 30)));
+        if (!Number.isFinite(sourceDuration) || sourceDuration <= 0 ||
+            Math.abs(Number(clip.start || 0)) > tolerance ||
+            Math.abs(Number(clip.sourceStart || 0)) > tolerance ||
+            Math.abs(Number(clip.sourceEnd ?? sourceDuration) - sourceDuration) > tolerance ||
+            Math.abs(Number(clip.end || 0) - sourceDuration / speed) > tolerance / speed ||
+            clip.spliceRegionId || (state.removals || []).length || (state.manualCuts || []).length ||
+            (state.mainAudioRemovals || []).length || (state.mainAudioManualCuts || []).length ||
+            (state.audioCuts || []).length) return false;
+
+        const pairedAudioAssets = (state.audioAssets || []).filter(item =>
+          item.path === clip.path && (item.id === clip.linkedAudioId || item.linkedVideoId === clip.id ||
+            (clip.linkGroupId && item.linkGroupId === clip.linkGroupId)));
+        if (pairedAudioAssets.length > 1) return false;
+        const pairedAudio = pairedAudioAssets[0] || null;
+        if (pairedAudio && (
+            Math.abs(Number(pairedAudio.start || 0) - Number(clip.start || 0)) > tolerance ||
+            Math.abs(Number(pairedAudio.end || 0) - Number(clip.end || 0)) > tolerance ||
+            Math.abs(Number(pairedAudio.sourceStart || 0) - Number(clip.sourceStart || 0)) > tolerance ||
+            Math.abs(Number(pairedAudio.sourceEnd ?? sourceDuration) - sourceDuration) > tolerance ||
+            pairedAudio.missing)) return false;
+
+        const previousVideoTrack = clip.trackId || "video";
+        const previousAudioTrack = pairedAudio?.trackId || "audio";
+        state.video = { ...clip, kind: "video" };
+        state.sourceDuration = sourceDuration;
+        state.duration = sourceDuration / speed;
+        state.timelineDuration = Math.max(Number(state.timelineDuration || 0), state.duration + 10);
+        state.waveform = pairedAudio?.waveform?.length ? pairedAudio.waveform : (clip.waveform || state.waveform || []);
+        state.videoTransform = {
+          ...(state.videoTransform || {}),
+          x: Number(clip.x || 0), y: Number(clip.y || 0),
+          scale: Number(clip.scale || 1), rotation: Number(clip.rotation || 0),
+          opacity: Number(clip.opacity ?? 1), blendMode: clip.blendMode || "normal",
+        };
+        state.videoLayers = (state.videoLayers || []).filter(item => item.id !== clip.id);
+        if (pairedAudio) state.audioAssets = (state.audioAssets || []).filter(item => item.id !== pairedAudio.id);
+
+        const mainVideoClip = (mainClips() || []).find(item =>
+          Number(item.sourceStart || 0) <= Number(clip.sourceStart || 0) + tolerance &&
+          Number(item.sourceEnd || 0) >= Number(clip.sourceEnd ?? sourceDuration) - tolerance) || mainClips()[0];
+        if (!mainVideoClip) return false;
+        state.mainVideoTrackMap = { ...(state.mainVideoTrackMap || {}), [mainVideoClip.id]: previousVideoTrack };
+        if (pairedAudio) {
+          const mainAudioClip = (mainAudioClips() || []).find(item =>
+            Number(item.sourceStart || 0) <= Number(pairedAudio.sourceStart || 0) + tolerance &&
+            Number(item.sourceEnd || 0) >= Number(pairedAudio.sourceEnd ?? sourceDuration) - tolerance) || mainAudioClips()[0];
+          if (mainAudioClip) {
+            state.mainAudioTrackMap = { ...(state.mainAudioTrackMap || {}), [mainAudioClip.id]: previousAudioTrack };
+            state.mainAudioClipSettings = {
+              ...(state.mainAudioClipSettings || {}),
+              [mainAudioClip.id]: {
+                volume: Number(pairedAudio.volume ?? 1), pan: Number(pairedAudio.pan || 0),
+                fadeIn: Number(pairedAudio.fadeIn || 0), fadeOut: Number(pairedAudio.fadeOut || 0),
+                muted: !!pairedAudio.muted,
+                ...(pairedAudio.fxRack ? { fxRack: pairedAudio.fxRack } : {}),
+                ...(pairedAudio.fxBypass != null ? { fxBypass: !!pairedAudio.fxBypass } : {}),
+              },
+            };
+          }
+        }
+
+        const ownerMappings = new Map([[clip.id, { id: mainVideoClip.id, type: "video" }]]);
+        if (pairedAudio) {
+          const mainAudioClip = (mainAudioClips() || []).find(item =>
+            Number(item.sourceStart || 0) <= Number(pairedAudio.sourceStart || 0) + tolerance &&
+            Number(item.sourceEnd || 0) >= Number(pairedAudio.sourceEnd ?? sourceDuration) - tolerance) || mainAudioClips()[0];
+          if (mainAudioClip) ownerMappings.set(pairedAudio.id, { id: mainAudioClip.id, type: "audio" });
+        }
+        for (const items of [state.captions, state.reviewCaptions, state.issues, state.matchIssues]) {
+          for (const item of items || []) {
+            const mapping = ownerMappings.get(item.ownerClipId);
+            if (mapping) { item.ownerClipId = mapping.id; item.ownerClipType = mapping.type; }
+          }
+        }
+        return true;
+      }
       async function enterProject(record) {
         state.initializing = true;
         resetEditorState();
@@ -1651,6 +1737,7 @@
           editorActive: true,
           initializing: true,
         });
+        const promotedTimelineVideo = promoteSoloTimelineVideoToMainSource();
         if ($("timelineEditMode")) $("timelineEditMode").value = state.timelineEditMode || "overwrite";
         // Waveforms are persisted once per source path. Reuse the same array
         // across timeline slices in memory instead of inflating project files.
@@ -1707,9 +1794,11 @@
         $("home").classList.add("hidden");
         $("app").classList.add("active");
         state.initializing = false;
+        if (promotedTimelineVideo) queueAutosave();
         await new Promise((resolve) => requestAnimationFrame(resolve));
         updateFrameSize(false);
         renderAll();
+        window.syncOpenProjectTab?.(state.projectId, state.projectName);
         setTimeout(() => {
           refreshSourceAvailability().catch((error) => console.warn(error));
           watchProjectMediaAnalysis();
@@ -1808,8 +1897,10 @@
       async function openProjectById(id) {
         try {
           await enterProject(await nativeCall("loadProject", id));
+          return true;
         } catch (error) {
           showFatal(error.message);
+          return false;
         }
       }
       async function createNewProject() {

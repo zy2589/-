@@ -7,6 +7,7 @@ bundled Node runtime remains a hidden local service used by the editor itself.
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 import sys
 import threading
@@ -105,7 +106,9 @@ class EmbeddedEditor:
     def __init__(self, root: tk.Misc, frame: tk.Widget, engine_dir: Path,
                  storage_root: Path, node_path: Path | None = None,
                  on_error: Callable[[str], None] | None = None,
-                 native_parent: tk.Widget | None = None):
+                 native_parent: tk.Widget | None = None,
+                 on_main_area_requested: Callable[[str], None] | None = None,
+                 on_download_project_completed: Callable[[str, bool, str, str], None] | None = None):
         self.root = root
         self.frame = frame
         # Parent the WinForms/WebView2 HWND directly to the Tk host that owns
@@ -116,6 +119,11 @@ class EmbeddedEditor:
         self.storage_root = Path(storage_root)
         self.node_path = Path(node_path) if node_path else self.engine_dir / "runtime" / "node" / "node.exe"
         self.on_error = on_error
+        self.on_main_area_requested = on_main_area_requested
+        self._main_area_requested_handler = None
+        self.on_download_project_completed = on_download_project_completed
+        self._download_project_pending: set[str] = set()
+        self._download_project_poll_id = None
         self.host = None
         self.starting = False
         self.closing = False
@@ -157,7 +165,7 @@ class EmbeddedEditor:
         except Exception:
             return False
 
-    def show(self) -> bool:
+    def show(self, *, activate: bool = True) -> bool:
         if self.closing:
             return False
         try:
@@ -171,6 +179,9 @@ class EmbeddedEditor:
                     self.engine_dir, self.storage_root, self.node_path,
                 )
                 self.host = DesktopHost()
+                if self.on_main_area_requested:
+                    self._main_area_requested_handler = self._dispatch_main_area_request
+                    self.host.MainAreaRequested += self._main_area_requested_handler
                 self.host.SetWorkspaceMode(self.workspace_mode)
                 x, y, width, height = self._bounds()
                 self.host.AttachAsChildWindow(
@@ -179,7 +190,10 @@ class EmbeddedEditor:
                 )
                 self.starting = True
 
-            self.host.ShowEmbedded()
+            if activate:
+                self.host.ShowEmbedded()
+            else:
+                self.host.StartEmbedded()
             if not self.resize(force=True):
                 raise RuntimeError("剪辑工作区无法填满当前主窗口。")
             return True
@@ -296,6 +310,13 @@ class EmbeddedEditor:
         self.closing = True
         self.close_in_progress = False
         self._close_callback = None
+        if self._download_project_poll_id is not None:
+            try:
+                self.root.after_cancel(self._download_project_poll_id)
+            except tk.TclError:
+                pass
+            self._download_project_poll_id = None
+        self._download_project_pending.clear()
         if self.host is not None and not bool(self.host.IsClosed):
             try:
                 self.host.StopWithoutSave()
@@ -307,4 +328,70 @@ class EmbeddedEditor:
     def _fail(self, message: str) -> None:
         if self.on_error:
             self.on_error(message)
+
+    def _dispatch_main_area_request(self, area: str) -> None:
+        callback = self.on_main_area_requested
+        if callback is None:
+            return
+        try:
+            self.root.after(0, lambda: callback(str(area)))
+        except tk.TclError:
+            pass
+
+    def create_download_project(self, request_id: str, name: str, script: str) -> None:
+        if not self.is_ready():
+            raise RuntimeError("剪辑工程服务尚未就绪。")
+        request_id = str(request_id)
+        self._download_project_pending.add(request_id)
+        try:
+            self.host.CreateDownloadProject(request_id, str(name), str(script))
+        except Exception:
+            self._download_project_pending.discard(request_id)
+            raise
+        self._schedule_download_project_poll()
+
+    def _schedule_download_project_poll(self) -> None:
+        if not self._download_project_pending or self._download_project_poll_id is not None:
+            return
+        try:
+            self._download_project_poll_id = self.root.after(100, self._poll_download_project_results)
+        except tk.TclError:
+            self._download_project_poll_id = None
+
+    def _poll_download_project_results(self) -> None:
+        self._download_project_poll_id = None
+        if not self._download_project_pending:
+            return
+        if not self.is_running():
+            results = [(request_id, False, "剪辑工程服务已退出。", "")
+                       for request_id in self._download_project_pending]
+            self._download_project_pending.clear()
+        else:
+            try:
+                results = json.loads(str(self.host.TakeDownloadProjectResults() or "[]"))
+                if not isinstance(results, list):
+                    raise ValueError("剪辑工程服务返回了无效结果。")
+            except Exception as exc:
+                self._fail(f"读取后台建工程结果失败：{exc}")
+                self._schedule_download_project_poll()
+                return
+        callback = self.on_download_project_completed
+        for result in results:
+            if isinstance(result, dict):
+                request_id = str(result.get("requestId", ""))
+                succeeded = bool(result.get("succeeded"))
+                detail = str(result.get("detail", "") or "")
+                project_id = str(result.get("projectId", "") or "")
+            else:
+                request_id, succeeded, detail, project_id = result
+                request_id = str(request_id)
+            if request_id not in self._download_project_pending:
+                continue
+            self._download_project_pending.discard(request_id)
+            if callback:
+                try:
+                    callback(request_id, succeeded, detail, project_id)
+                except Exception as exc:
+                    self._fail(f"处理后台建工程结果失败：{exc}")
+        self._schedule_download_project_poll()
 
