@@ -518,12 +518,12 @@ const bridgeScript = `<script>window.ClipAssistantPresetSafety = {sanitizePreset
     return data;
   };
   window.__desktopRequests = new Map();
-  window.__desktopCall = (type) => new Promise((resolve, reject) => {
+  window.__desktopCall = (type, payload = null, timeoutMs = 15000) => new Promise((resolve, reject) => {
     if (!window.chrome?.webview) { reject(new Error('需要桌面窗口支持')); return; }
     const id = crypto.randomUUID();
-    const timer = setTimeout(() => { window.__desktopRequests.delete(id); reject(new Error('桌面请求超时')); }, 15000);
+    const timer = setTimeout(() => { window.__desktopRequests.delete(id); reject(new Error('桌面请求超时')); }, Math.max(1000, Number(timeoutMs) || 15000));
     window.__desktopRequests.set(id, {resolve, reject, timer});
-    window.chrome.webview.postMessage({type, id});
+    window.chrome.webview.postMessage({type, id, payload});
   });
   window.chrome?.webview?.addEventListener('message', async event => {
     const message = event.data;
@@ -546,6 +546,25 @@ const bridgeScript = `<script>window.ClipAssistantPresetSafety = {sanitizePreset
     get(_target, prop) {
       if (prop === 'then') return undefined;
       if (prop === 'resolveDroppedFilePaths') return async () => { try { return {ok:true,value:await window.__desktopCall('droppedFiles')}; } catch(error) { return {ok:false,error:{message:error.message}}; } };
+      if (["startExport", "exportStatus", "cancelExport"].includes(String(prop)) && window.chrome?.webview && window.ClipAssistantMlt) {
+        return async (...args) => {
+          if (prop === "startExport") {
+            const compiled = window.ClipAssistantMlt.compile(args[0] || {});
+            if (!compiled.supported) {
+              if (compiled.fatal) return { ok: false, error: { message: compiled.reason } };
+              return rpc(prop, args);
+            }
+            try { return await window.__desktopCall("mltStartExport", compiled); }
+            catch (error) {
+              console.warn("本地 MLT 核心暂不可用，回退现有导出流程", error);
+              return rpc(prop, args);
+            }
+          }
+          if (!String(args[0] || "").startsWith("mlt_")) return rpc(prop, args);
+          const payload = { jobId: args[0] };
+          return window.__desktopCall(prop === "exportStatus" ? "mltExportStatus" : "mltCancelExport", payload);
+        };
+      }
       return (...args) => rpc(prop, args);
     }
   });

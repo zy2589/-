@@ -890,7 +890,10 @@ export function slipClipSource(clip = {}, deltaSource = 0, minSource = 0, maxSou
 
 export function rippleShiftAllTracks(collections = {}, fromTimelineTime = 0, deltaTimeline = 0) {
   if (Math.abs(deltaTimeline) <= 0.001) return collections;
+  const shiftedLists = new Set();
   const shiftList = (list) => {
+    if (!list || shiftedLists.has(list)) return;
+    shiftedLists.add(list);
     for (const item of list || []) {
       if (Number(item.start || 0) >= fromTimelineTime - 0.002) {
         item.start = Math.max(0, Number(item.start || 0) + deltaTimeline);
@@ -912,6 +915,7 @@ export function rippleShiftAllTracks(collections = {}, fromTimelineTime = 0, del
   shiftList(collections.reviewCaptions);
   shiftList(collections.audioMutes);
   shiftList(collections.issues);
+  shiftList(collections.matchIssues);
   return collections;
 }
 

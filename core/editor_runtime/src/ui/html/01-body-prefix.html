@@ -1451,13 +1451,19 @@
         border-left: 3px solid #52c41a;
       }
       .polish-card.spoken-diff {
-        border-left: 3px solid #06b6d4;
+        border-left: 3px solid #ff4d4f;
+      }
+      .polish-card.spoken-diff.unverified-addition {
+        border-left-color: #f2c15c;
       }
       .polish-card.repeat-suggest {
-        border-left: 3px solid #f97316;
+        border-left: 3px solid #ff4d4f;
       }
       .polish-card.missing-suggest {
-        border-left: 3px solid #ec4899;
+        border-left: 3px solid #9f8ddd;
+      }
+      .polish-card.missing-suggest.audio-unverified {
+        border-left-color: #f2c15c;
       }
       .polish-card-header {
         display: flex;
@@ -1494,16 +1500,21 @@
         color: #73d13d;
       }
       .polish-badge.spoken-diff {
-        background: rgba(6, 182, 212, 0.2);
-        color: #67e8f9;
+        background: rgba(255, 77, 79, 0.2);
+        color: #ff7875;
+      }
+      .polish-badge.unverified-addition,
+      .polish-badge.missing.audio-unverified {
+        background: rgba(242, 193, 92, 0.2);
+        color: #f2c15c;
       }
       .polish-badge.repeat {
-        background: rgba(249, 115, 22, 0.2);
-        color: #fb923c;
+        background: rgba(255, 77, 79, 0.2);
+        color: #ff7875;
       }
       .polish-badge.missing {
-        background: rgba(236, 72, 153, 0.2);
-        color: #f472b6;
+        background: rgba(159, 141, 221, 0.2);
+        color: #cf9bff;
       }
       .polish-badge.notes {
         background: rgba(156, 163, 175, 0.2);
@@ -1607,20 +1618,22 @@
         font-weight: 500;
       }
       .diff-diagnosis.repeat {
-        border-left-color: #f97316;
-        background: rgba(249, 115, 22, 0.08);
-        color: #fdba74;
+        border-left-color: #ff4d4f;
+        background: rgba(255, 77, 79, 0.08);
+        color: #ff9292;
       }
       .diff-diagnosis.missing {
-        border-left-color: #ec4899;
-        background: rgba(236, 72, 153, 0.08);
-        color: #f472b6;
+        border-left-color: #9f8ddd;
+        background: rgba(159, 141, 221, 0.08);
+        color: #cf9bff;
       }
+      .diff-diagnosis.missing.audio-unverified { border-left-color:#f2c15c; background:rgba(242,193,92,.08); color:#f2c15c; }
       .diff-diagnosis.spoken-diff {
-        border-left-color: #06b6d4;
-        background: rgba(6, 182, 212, 0.08);
-        color: #67e8f9;
+        border-left-color: #ff4d4f;
+        background: rgba(255, 77, 79, 0.08);
+        color: #ff9292;
       }
+      .diff-diagnosis.spoken-diff.unverified-addition { border-left-color:#f2c15c; background:rgba(242,193,92,.08); color:#f2c15c; }
       .diff-diagnosis.pause {
         border-left-color: #3b82f6;
         background: rgba(59, 130, 246, 0.08);

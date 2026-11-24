@@ -22,18 +22,22 @@ $OutputApp = Join-Path $Output '剪辑助手'
 $PackageResources = Join-Path $Build 'package-resources'
 $PackageDownloader = Join-Path $Build 'package-downloader'
 $FfmpegDownloadRoot = Join-Path $Build 'downloads'
-$FfmpegArchive = Join-Path $FfmpegDownloadRoot 'ffmpeg-release-essentials-9.0.2.zip'
+$FfmpegArchive = Join-Path $FfmpegDownloadRoot 'ffmpeg-9.0.2-essentials_build.zip'
 $FfmpegArchiveSha256 = '60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba'
 $FfmpegStage = Join-Path $Build 'ffmpeg-9.0.2'
 $FfmpegExecutable = Join-Path $FfmpegStage 'ffmpeg-9.0.2-essentials_build\bin\ffmpeg.exe'
 $FfprobeExecutable = Join-Path $FfmpegStage 'ffmpeg-9.0.2-essentials_build\bin\ffprobe.exe'
+$MltArchive = Join-Path $FfmpegDownloadRoot 'shotcut-win64-26.11.15.zip'
+$MltArchiveSha256 = 'd704c12a8ce6d1fbe1a13155578ee5cf36b749a26503500cce38d8e68f900b0d'
+$MltRuntimeStage = Join-Path $Build 'mlt-runtime-7.42'
+$MltStager = Join-Path $Root 'scripts\stage_mlt_runtime.ps1'
 
 # Keep the very large media executables out of Git history. Fetch the pinned
 # Gyan essentials archive during a build and verify its publisher checksum.
 New-Item -ItemType Directory -Force -Path $FfmpegDownloadRoot | Out-Null
 if (!(Test-Path -LiteralPath $FfmpegArchive -PathType Leaf)) {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' -OutFile $FfmpegArchive
+    Invoke-WebRequest -Uri 'https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip' -OutFile $FfmpegArchive
 }
 $ActualFfmpegArchiveSha256 = (Get-FileHash -LiteralPath $FfmpegArchive -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($ActualFfmpegArchiveSha256 -ne $FfmpegArchiveSha256) {
@@ -47,6 +51,20 @@ if (!(Test-Path -LiteralPath $FfmpegExecutable -PathType Leaf) -or !(Test-Path -
     throw '校验后的 FFmpeg 9.0.2 构建包中缺少 ffmpeg.exe 或 ffprobe.exe。'
 }
 
+# MLT is loaded as a library inside the desktop host. Only its verified core,
+# XML/FFmpeg modules, dependencies, and MLT service data are staged; no editor
+# executable or UI from the source archive is included.
+if (!(Test-Path -LiteralPath $MltArchive -PathType Leaf)) {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri 'https://github.com/mltframework/shotcut/releases/download/v26.11.15/shotcut-win64-26.11.15.zip' -OutFile $MltArchive
+}
+$ActualMltArchiveSha256 = (Get-FileHash -LiteralPath $MltArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($ActualMltArchiveSha256 -ne $MltArchiveSha256) {
+    throw "MLT archive SHA-256 mismatch; expected $MltArchiveSha256, received $ActualMltArchiveSha256."
+}
+if (!(Test-Path -LiteralPath $MltStager -PathType Leaf)) { throw 'MLT runtime staging script is missing.' }
+& $MltStager -Archive $MltArchive -Destination $MltRuntimeStage
+
 foreach ($RequiredFile in @($Python, $PyInstaller, $Entry,
         (Join-Path $Assets '剪辑助手.ico'),
         (Join-Path $Assets '剪辑助手图标-128.png'),
@@ -57,8 +75,10 @@ foreach ($RequiredFile in @($Python, $PyInstaller, $Entry,
         (Join-Path $EditorRuntimeCodeSource 'ui\build.mjs'),
         (Join-Path $Root 'core\preflight_media.py'),
         (Join-Path $EditorHostSource 'DesktopHost.cs'),
+        (Join-Path $EditorHostSource 'MltRuntime.cs'),
         (Join-Path $EditorHostSource 'AssemblyInfo.cs'),
         (Join-Path $EditorHostSource 'app.manifest'),
+        $MltStager,
         (Join-Path $EditorRuntimeCodeSource 'bootstrap.mjs'),
         $LocalNode,
         (Join-Path $EditorRuntimeAssets 'english-chinese.json.gz'),
@@ -176,7 +196,7 @@ foreach ($PrivateSeedPath in @(
         Remove-Item -LiteralPath $PrivateSeedPath -Recurse -Force
     }
 }
-foreach ($Directory in @('ffmpeg','matting_models')) {
+foreach ($Directory in @('ffmpeg','matting_models','mlt')) {
     New-Item -ItemType Directory -Force -Path (Join-Path $PackageResources $Directory) | Out-Null
 }
 foreach ($RelativeFile in @(
@@ -202,6 +222,9 @@ if (Test-Path -LiteralPath $EditorStage) {
     Remove-Item -LiteralPath $ResolvedStage -Recurse -Force
 }
 New-Item -ItemType Directory -Force -Path $EditorStage | Out-Null
+$MltRuntimeInstall = Join-Path $EditorStage 'resources\mlt'
+New-Item -ItemType Directory -Force -Path $MltRuntimeInstall | Out-Null
+Copy-Item -Path (Join-Path $MltRuntimeStage '*') -Destination $MltRuntimeInstall -Recurse -Force
 $NodeRuntimeDir = Join-Path $EditorStage 'runtime\node'
 $NodeRuntimeExecutable = Join-Path $NodeRuntimeDir 'node.exe'
 New-Item -ItemType Directory -Force -Path $NodeRuntimeDir | Out-Null
@@ -607,10 +630,10 @@ $EmbeddedHost = Join-Path $EditorStage '剪辑助手.WebView.dll'
 & $Csc /nologo /target:library /platform:x64 /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Net.Http.dll /r:System.Web.Extensions.dll `
     "/r:$(Join-Path $EditorStage 'Microsoft.Web.WebView2.Core.dll')" "/r:$(Join-Path $EditorStage 'Microsoft.Web.WebView2.WinForms.dll')" `
     "/out:$EmbeddedHost" `
-    (Join-Path $EditorHostSource 'DesktopHost.cs') (Join-Path $EditorHostSource 'AssemblyInfo.cs')
+    (Join-Path $EditorHostSource 'DesktopHost.cs') (Join-Path $EditorHostSource 'MltRuntime.cs') (Join-Path $EditorHostSource 'AssemblyInfo.cs')
 if ($LASTEXITCODE -ne 0) { throw '剪辑助手同进程 WebView2 组件编译失败。' }
 $UiHostSource = Join-Path $Root 'core\ui.py'
-& $Python -c 'import ast, pathlib, sys; source = pathlib.Path(sys.argv[1]); ast.parse(source.read_text(encoding="utf-8"), filename=str(source))' $UiHostSource
+& $Python -c 'import ast, pathlib, sys; source = pathlib.Path(sys.argv[1]); ast.parse(source.read_bytes().decode(), filename=str(source))' $UiHostSource
 if ($LASTEXITCODE -ne 0) { throw '主界面 Python 源码语法检查失败，已中止打包。' }
 if (Test-Path -LiteralPath $OutputApp) {
     $ResolvedOutput = [IO.Path]::GetFullPath($OutputApp)

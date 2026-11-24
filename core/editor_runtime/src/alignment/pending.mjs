@@ -28,7 +28,6 @@ export function pendingCaptionPlan(aligned = {}, {reviewUnmatched = true} = {}) 
   const candidates=[...(aligned.issues||[]).map(normalizeRepeat).filter(issue=>issue.type!=='repeat' || !detected.some(r=>
     issue.start<r.end && issue.end>r.start || Number.isFinite(r.retainedStart) && issue.start<r.retainedEnd && issue.end>r.retainedStart)),...detected];
   const issues=candidates.filter(issue=>['repeat','missing','mismatch','semantic','spokenDiff','addition','extra'].includes(issue.type))
-    .filter(issue=>!(['addition','extra'].includes(issue.type)&&issue.confirmedCut))
     .filter(issue=>{
       if(!['mismatch','semantic','spokenDiff'].includes(issue.type))return true;
       const linked=operations.filter(operation=>operation.issueId===issue.id&&operation.spoken);
@@ -81,7 +80,7 @@ export function pendingCaptionPlan(aligned = {}, {reviewUnmatched = true} = {}) 
   };
   if(reviewUnmatched)for(const operation of operations){
     const candidate=operation?.spoken&&!operation.expected&&!operation.spoken.recoveredFromManuscript&&
-      operation.action!=='cut'&&!operation.issueId&&
+      (operation.action!=='cut'||operation.type==='extra'||['addition','semantic'].includes(operation.issueType))&&!operation.issueId&&
       (['extra','filler'].includes(operation.type)||operation.issueType==='addition'||operation.issueType==='semantic'||operation.action==='insert')&&
       !['mismatch','repeat','spokenDiff'].includes(operation.issueType);
     if(!candidate){flushGroup();continue;}

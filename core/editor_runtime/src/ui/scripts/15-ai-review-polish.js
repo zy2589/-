@@ -317,14 +317,15 @@ function polishSectionHtml(title, rows, emptyText) {
 
             const isAiHandled = item.suppressReview === true || item.action === "keep";
             const aiLabel = isAiHandled ? `<span class="polish-badge ai-handled" style="background:#555;color:#ccc;margin-left:6px;font-size:10px">🤖 AI 已保留</span>` : "";
+            const unverifiedSpeech = item.type === "unverifiedAddition" || item.unverifiedAddition || ["addition", "extra"].includes(item.type);
 
             cardsHtml.push(`
-              <div class="polish-card spoken-diff${isAiHandled ? " ai-handled" : ""}" data-polish-card-type="spoken-diff" data-issue-id="${escapeHtml(item.issueId || item.id || "")}" data-start="${Number(item.start || 0)}" data-ai-handled="${isAiHandled ? "1" : ""}" style="${isAiHandled ? "opacity:0.6;" : ""}">
+              <div class="polish-card spoken-diff${unverifiedSpeech ? " unverified-addition" : " mismatch"}${isAiHandled ? " ai-handled" : ""}" data-polish-card-type="spoken-diff" data-issue-id="${escapeHtml(item.issueId || item.id || "")}" data-start="${Number(item.start || 0)}" data-ai-handled="${isAiHandled ? "1" : ""}" style="${isAiHandled ? "opacity:0.6;" : ""}">
                 <div class="polish-card-header">
-                  <div class="polish-card-title"><span class="polish-badge spoken-diff">读法差异</span>${aiLabel}</div>
+                  <div class="polish-card-title"><span class="polish-badge ${unverifiedSpeech ? "unverified-addition" : "spoken-diff"}">${unverifiedSpeech ? "文案外口播待确认" : "错读差异"}</span>${aiLabel}</div>
                   <span class="small" style="font-family:monospace; color:var(--muted);">${formatTime(Number(item.start || 0))}</span>
                 </div>
-                <div class="diff-diagnosis spoken-diff">${escapeHtml(diagnosis)}</div>
+                <div class="diff-diagnosis spoken-diff${unverifiedSpeech ? " unverified-addition" : ""}">${escapeHtml(diagnosis)}</div>
                 <div class="polish-diff-box">
                   <div class="polish-diff-line">
                     <span class="polish-diff-label spoken">🎙️ 口播</span>
@@ -399,14 +400,15 @@ function polishSectionHtml(title, rows, emptyText) {
             const spoken = item.spoken || item.spokenText || item.text || "";
             const expected = item.expected || item.expectedText || "";
             const { spokenHtml, expectedHtml, diagnosis } = computeTextDiffHtml(spoken, expected, item.isScripture || item.scripture, "missing");
+            const pendingAudioCheck = !item.confirmedMissing && item.needsAudioReview !== false;
 
             cardsHtml.push(`
-              <div class="polish-card missing-suggest" data-polish-card-type="missing-issue" data-issue-id="${escapeHtml(item.issueId || item.id || "")}" data-start="${Number(item.start || 0)}">
+              <div class="polish-card missing-suggest${pendingAudioCheck ? " audio-unverified" : ""}" data-polish-card-type="missing-issue" data-issue-id="${escapeHtml(item.issueId || item.id || "")}" data-start="${Number(item.start || 0)}">
                 <div class="polish-card-header">
-                  <div class="polish-card-title"><span class="polish-badge missing">缺读待补</span></div>
+                  <div class="polish-card-title"><span class="polish-badge missing${pendingAudioCheck ? " audio-unverified" : ""}">${pendingAudioCheck ? "文案词待核实" : "文案缺读"}</span></div>
                   <span class="small" style="font-family:monospace; color:var(--muted);">${formatTime(Number(item.start || 0))}</span>
                 </div>
-                <div class="diff-diagnosis missing">${escapeHtml(diagnosis)}</div>
+                <div class="diff-diagnosis missing${pendingAudioCheck ? " audio-unverified" : ""}">${escapeHtml(diagnosis)}</div>
                 <div class="polish-diff-box">
                   <div class="polish-diff-line">
                     <span class="polish-diff-label spoken">🎙️ 口播</span>
@@ -881,19 +883,21 @@ function polishSectionHtml(title, rows, emptyText) {
       }
       function dismissReviewHints(ids) {
         const requested = state.reviewCaptions.filter(r => ids.includes(r.id));
-        const reviews = state.reviewCaptions.filter(r => requested.some(target =>
+        const requestedIssues = new Set(requested.map(r=>String(r.issueId||r.id||'')));
+        const reviews = state.reviewCaptions.filter(r => requestedIssues.has(String(r.issueId||r.id||'')) || requested.some(target =>
           r.id === target.id || (typeof sameCaptionMismatchOccurrence === 'function' && sameCaptionMismatchOccurrence(target,r))));
         if (!reviews.length || isTrackLocked('review')) return;
         snapshot();
-        const issues = new Set(reviews.map(r => r.issueId || r.id));
+        const issues = new Set(reviews.map(r => String(r.issueId || r.id)));
+        const reviewIds = new Set(reviews.map(r => String(r.id)));
         for (const caption of state.captions || []) for (const word of caption.words || []) {
-          if (issues.has(word.issueId)) {
+          if (issues.has(String(word.issueId||''))) {
             word.reviewDismissed = true;
             word.issueId = ''; word.issueType = ''; word.action = '';
           }
         }
-        state.reviewCaptions = state.reviewCaptions.filter(r => !ids.includes(r.id));
-        const remaining = new Set(state.reviewCaptions.map(r => r.issueId || r.id));
+        state.reviewCaptions = state.reviewCaptions.filter(r => !reviewIds.has(String(r.id)) && !issues.has(String(r.issueId||r.id||'')));
+        const remaining = new Set(state.reviewCaptions.map(r => String(r.issueId || r.id)));
         state.issues = state.issues.filter(r => !issues.has(r.id) || remaining.has(r.id));
         state.matchIssues = (state.matchIssues || []).filter(r => !issues.has(r.id) || remaining.has(r.id));
         state.selected = null; state.selectedItems = [];
@@ -954,11 +958,14 @@ function polishSectionHtml(title, rows, emptyText) {
               sourceEnd:first.sourceStart+(last.sourceEnd-first.sourceStart)*(i+1)/tokens.length,
             } : {}),
           };
+          const expectedForToken = anchor.word.referenceExpected || anchor.word.expectedDisplay || editableCaptionTokens(review.expectedText || '')[i] || '';
+          const confirmedSpokenDifference = useExpected === false && expectedForToken && captionCorrectionDiffers(display, expectedForToken);
           return {caption:anchor.caption,word:{...timing,display,expectedDisplay:display,
-            referenceExpected:useExpected ? display : anchor.word.expectedDisplay || '',
+            referenceExpected:useExpected ? display : expectedForToken,
             recognizedDisplay:anchor.word.originalDisplay || anchor.word.display,
             originalDisplay:anchor.word.originalDisplay || anchor.word.display,
-            matchType:'edited',userKept:true,issueType:'',issueId:'',action:''}};
+            matchType:confirmedSpokenDifference ? 'spoken_addition' : 'edited',userKept:true,
+            issueType:confirmedSpokenDifference ? 'addition' : '',issueId:'',action:''}};
         });
         const removed = new Set(selected.map(e => e.word));
         return [...new Set(selected.map(e => e.caption))].map(caption => ({caption,
@@ -1678,6 +1685,7 @@ function polishSectionHtml(title, rows, emptyText) {
             state.avLinked && ['video','audio'].includes(anchor.type) && (isTrackLocked('video') || isTrackLocked('audio'))) return toast('相关轨道已锁定，请先解锁');
         const historyBefore = JSON.stringify(projectData(true));
         snapshot();
+        const dismissedRepeatIssueIds = new Set();
         state.timelineRange = null;
         state.selected = anchor; state.selectedItems = [anchor];
         if (['video','audio'].includes(anchor.type)) {
@@ -1697,6 +1705,9 @@ function polishSectionHtml(title, rows, emptyText) {
           applyHistoryState(JSON.parse(historyBefore));
           renderAll();
           toast(message);
+        };
+        const collectDismissedIssues = ids => {
+          for (const issueId of ids || []) dismissedRepeatIssueIds.add(String(issueId));
         };
         const tolerance = Math.max(.002,frame*.51);
         splitClipsAt(start, targets(), {record:false,quiet:true});
@@ -1720,8 +1731,14 @@ function polishSectionHtml(title, rows, emptyText) {
         // mapping, and could recreate the same mismatch issue a second time.
         let deleted = false;
         deleteSelected.deferRender = true;
-        try { deleted = deleteSelected(true, {record:false}) === true; }
-        finally { deleteSelected.deferRender = false; }
+        deleteSelected.onDismissIssues = collectDismissedIssues;
+        try {
+          deleted = deleteSelected(true, {record:false}) === true;
+        }
+        finally {
+          deleteSelected.deferRender = false;
+          deleteSelected.onDismissIssues = null;
+        }
         if (!deleted) {
           rollback('重复片段删除未完成，已恢复原工程');
           return;
@@ -1731,6 +1748,23 @@ function polishSectionHtml(title, rows, emptyText) {
         // owner clip that was just removed, dropping unrelated words as well.
         state.captions=captionsAfterRepeatCut(originalCaptions,start,end);
         state.captionRecoveryArchive=captionArchiveAfterRepeatCut(originalCaptionArchive,start,end);
+        // The snapshot restores caption text and timing, but it also restores
+        // review flags that deleteSelected already dismissed. Clear those flags
+        // from both visible captions and recovery records before remapping can
+        // restore them and before renderTimeline recreates review cards.
+        const clearDismissedIssueFlags = word => {
+          if (!word || !dismissedRepeatIssueIds.has(String(word.issueId || ''))) return;
+          word.issueId = '';
+          word.issueType = '';
+          word.action = '';
+          word.reviewDismissed = true;
+          if (word.matchType === 'error') word.matchType = 'match';
+        };
+        for (const caption of state.captions) for (const word of caption.words || []) clearDismissedIssueFlags(word);
+        for (const record of state.captionRecoveryArchive || []) {
+          for (const word of record.caption?.words || []) clearDismissedIssueFlags(word);
+          clearDismissedIssueFlags(record.word);
+        }
         if (!captionWordsRemain(preservedCaptionWords)) {
           rollback('检测到非重复文案可能受影响，删除已撤销');
           return;
@@ -1847,11 +1881,11 @@ function polishSectionHtml(title, rows, emptyText) {
       }
       function rippleSubtitleTimeline(start, end) {
         const length = Math.max(0, end - start);
-        if (length <= 0.001) return;
+        if (length <= 0.001) return [];
         // A manual cut is the user's final decision. Drop every linked review
         // marker before shifting the surviving timeline so stale errors cannot
         // be reported again after an erroneous/repeated take was removed.
-        dismissTrimmedIssues(start, end);
+        const dismissed = dismissTrimmedIssues(start, end) || [];
         const shiftTimedItem = (item) => {
           if(state.trackLocks[item.trackId||"caption"] || state.trackSyncLocks[item.trackId||"caption"]===false)return item;
           const itemStart = Number(item.start || 0), itemEnd = Number(item.end || itemStart + .04);
@@ -1913,6 +1947,7 @@ function polishSectionHtml(title, rows, emptyText) {
         state.reviewCaptions = state.reviewCaptions.map(shiftTimedItem).filter(Boolean);
         state.issues = state.issues.map(shiftTimedItem).filter(Boolean);
         captionInspectorKey = "";
+        return dismissed;
       }
       function trimSubtitleTimeline(start, end) {
         const cutStart = Number(start || 0), cutEnd = Number(end || 0);
@@ -1977,7 +2012,8 @@ function polishSectionHtml(title, rows, emptyText) {
         return applied;
       }
       function cutScriptIssue(id, { record = true, quiet = false, scope = null } = {}) {
-        const issue = state.issues.find((item) => item.id === id);
+        const issue = state.issues.find((item) => item.id === id) ||
+          state.reviewCaptions.find((item) => item.id === id || item.issueId === id);
         if (!issue) return;
         if ((issue.type === 'unverifiedAddition' || issue.unverifiedAddition) && !scope) {
           const review = state.reviewCaptions.find(item => (item.issueId || item.id) === id);
@@ -2010,6 +2046,10 @@ function polishSectionHtml(title, rows, emptyText) {
           // Independent clips already own their source ranges. Cut the placed
           // timeline directly; mapping through removed main media is invalid.
           shiftTracks(start,end-start);
+          state.reviewCaptions = state.reviewCaptions.filter(item => scope
+            ? item.id !== scope.id : (item.issueId || item.id) !== id);
+          state.issues = state.issues.filter(item => item.id !== id);
+          state.matchIssues = (state.matchIssues || []).filter(item => (item.issueId || item.id) !== id);
           recomputeContentDuration();clampTracksToDuration();
           if (!quiet) {seekTimeline(start);renderAll();queueAutosave();toast('已同步删除所选词句及对应音视频');}
           return;

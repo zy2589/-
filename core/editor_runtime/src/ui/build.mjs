@@ -941,9 +941,11 @@ function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
   const restoredCaptionsAt = repeatDeleteBody.indexOf('state.captions=captionsAfterRepeatCut');
   const finalRepeatRenderAt = repeatDeleteBody.indexOf('renderAll();', deferredRenderAt);
   requireBuildCheck(deferredRenderAt >= 0 &&
-      repeatDeleteBody.includes('finally { deleteSelected.deferRender = false; }') &&
+      repeatDeleteBody.includes('deleteSelected.onDismissIssues = collectDismissedIssues') &&
+      repeatDeleteBody.includes('deleteSelected.deferRender = false') &&
+      repeatDeleteBody.includes('deleteSelected.onDismissIssues = null') &&
       restoredCaptionsAt > deferredRenderAt && finalRepeatRenderAt > restoredCaptionsAt,
-    '删除重复片段时必须先恢复字幕时间映射再运行字幕复核，不能在中间状态重复生成疑似错读标签。');
+    '删除重复片段时必须先恢复字幕时间映射、收集并清除已处理的问题标记，再运行字幕复核。');
 
   const issueHelpersStart = reviewScript.indexOf('      function planIssueWordsRemoval(');
   const issueHelpersEnd = reviewScript.indexOf('      function dismissTrimmedIssues(', issueHelpersStart);

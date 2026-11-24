@@ -846,10 +846,12 @@ function registerFontFace(font) {
       $("cancelExport").onclick = async () => {
         if (state.exportJobId) {
           const jobId = state.exportJobId;
+          const useMlt = state.exportBackend === "mlt";
           try {
-            await nativeCall("cancelExport", jobId);
+            await nativeCall(useMlt ? "mltCancelExport" : "cancelExport", useMlt ? { jobId } : jobId);
           } catch {}
           state.exportJobId = "";
+          state.exportBackend = "";
           state.exportProjectId = "";
           $("backgroundExport").hidden = true;
           $("exportStatus").textContent = "已取消导出";

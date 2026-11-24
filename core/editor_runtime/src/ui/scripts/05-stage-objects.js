@@ -736,6 +736,7 @@ async function placeLibraryAsset(
             if (spliceStyle?.clipPath) element.style.clipPath = spliceStyle.clipPath;
           }
           updatePreviewTransformOnly(false);
+          if (!state.playing) window.requestMltTimelinePreview?.(state.currentTime);
           return;
         }
         const retainedVideos = new Map(
@@ -987,6 +988,7 @@ async function placeLibraryAsset(
         reviewPreview.style.transform = reviewTransform(px, py);
         previewSceneKey = sceneKey;
         updateSelectionBox();
+        if (!state.playing) window.requestMltTimelinePreview?.(state.currentTime);
       }
       let captionPaintState = { key: "", layout: null, style: null, pad: 0, caption: null };
       

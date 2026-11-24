@@ -561,13 +561,12 @@ function parsedMediaInfo(inputPath, data) {
     data.streams?.find((stream) => stream.codec_type === "video") || {};
   const audio =
     data.streams?.find((stream) => stream.codec_type === "audio") || {};
-  const frameRateParts = String(video.r_frame_rate || "0/1")
+  const frameRateParts = String(video.r_frame_rate || video.avg_frame_rate || "0/1")
     .split("/")
     .map(Number);
-  const frameRate =
-    frameRateParts.length === 2 && frameRateParts[1]
-      ? frameRateParts[0] / frameRateParts[1]
-      : Number(frameRateParts[0] || 0);
+  const frameRateNumerator = Math.max(0, Math.trunc(Number(frameRateParts[0] || 0)));
+  const frameRateDenominator = Math.max(1, Math.trunc(Number(frameRateParts[1] || 1)));
+  const frameRate = frameRateNumerator / frameRateDenominator;
   const rawRotation = Number(
       video.side_data_list?.find((item) => Number.isFinite(Number(item.rotation)))?.rotation ??
       video.tags?.rotate ?? 0,
@@ -600,6 +599,8 @@ function parsedMediaInfo(inputPath, data) {
     sampleRate: Number(audio.sample_rate || 0),
     channels: Number(audio.channels || 0),
     frameRate: Number.isFinite(frameRate) ? frameRate : 0,
+    frameRateNumerator,
+    frameRateDenominator,
   };
 }
 

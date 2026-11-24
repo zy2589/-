@@ -7,7 +7,8 @@ function renderIssues() {
   box.replaceChildren();
   for(const review of pending){
     const row=document.createElement('div');row.className='caption-review-entry';
-    const button=document.createElement('button');button.className='btn caption-review-row '+review.type;button.textContent=formatTime(review.start,false)+' · '+reviewClipTitle(review);button.onclick=()=>{seekTimeline(review.start);showReviewDetails(review.id);};
+    const pendingAudioCheck=(review.type==='missing'||review.action==='missing')&&!review.confirmedMissing&&review.needsAudioReview!==false;
+    const button=document.createElement('button');button.className='btn caption-review-row '+review.type+(pendingAudioCheck?' audio-unverified':'');button.textContent=formatTime(review.start,false)+' · '+reviewClipTitle(review);button.onclick=()=>{seekTimeline(review.start);showReviewDetails(review.id);};
     const audition=document.createElement('button');audition.className='btn caption-review-audition';audition.textContent='试听';audition.title='试听这处问题对应的原始音频';audition.onclick=()=>auditionReviewSegment(review.id);
     row.append(button,audition);box.append(row);
   }

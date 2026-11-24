@@ -1,9 +1,49 @@
 const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
+function gcd(left, right) {
+  let a = Math.abs(Math.trunc(left));
+  let b = Math.abs(Math.trunc(right));
+  while (b) [a, b] = [b, a % b];
+  return Math.max(1, a);
+}
+
+function frameRate(value, numerator, denominator, fallback = 30) {
+  const explicitNumerator = Math.trunc(finite(numerator, 0));
+  const explicitDenominator = Math.trunc(finite(denominator, 0));
+  if (explicitNumerator > 0 && explicitDenominator > 0) {
+    const divisor = gcd(explicitNumerator, explicitDenominator);
+    return { numerator: explicitNumerator / divisor, denominator: explicitDenominator / divisor };
+  }
+
+  const rate = Math.max(1, Math.min(240, finite(value, fallback)));
+  for (const [commonNumerator, commonDenominator] of [
+    [24000, 1001], [30000, 1001], [60000, 1001], [120000, 1001],
+  ]) {
+    if (Math.abs(rate - commonNumerator / commonDenominator) < 0.001) {
+      return { numerator: commonNumerator, denominator: commonDenominator };
+    }
+  }
+
+  const scale = 1_000_000;
+  const rawNumerator = Math.round(rate * scale);
+  const divisor = gcd(rawNumerator, scale);
+  return { numerator: rawNumerator / divisor, denominator: scale / divisor };
+}
+
 export function compileTimelineManifest(config = {}, info = {}) {
-  const fps = Math.max(1, Math.min(240, finite(config.fps, 30)));
-  const frameDuration = 1 / fps;
-  const sourceFps=Math.max(1,Number(info.frameRate||fps));
+  const outputRate = frameRate(config.fps, config.frameRateNumerator, config.frameRateDenominator, 30);
+  const fpsNumerator = outputRate.numerator;
+  const fpsDenominator = outputRate.denominator;
+  const fps = fpsNumerator / fpsDenominator;
+  const frameDuration = fpsDenominator / fpsNumerator;
+  const sourceRate = frameRate(
+    info.frameRate || fps,
+    info.frameRateNumerator,
+    info.frameRateDenominator,
+    fps,
+  );
+  const sourceFpsNumerator = sourceRate.numerator;
+  const sourceFpsDenominator = sourceRate.denominator;
   const speed = Math.max(0.05, finite(config.audio?.speed, 1));
   const issues = [];
 
@@ -23,9 +63,9 @@ export function compileTimelineManifest(config = {}, info = {}) {
         issues.push({ severity: "error", code: "INVALID_RANGE", kind, index });
         return compiled;
       }
-      let startFrame = Math.round(rawStart * fps);
+      let startFrame = Math.round(rawStart * fpsNumerator / fpsDenominator);
       const originalStartFrame = startFrame;
-      const endFrame = Math.max(startFrame + 1, Math.round(rawEnd * fps));
+      const endFrame = Math.max(startFrame + 1, Math.round(rawEnd * fpsNumerator / fpsDenominator));
       const previous = compiled.findLast(clip => (clip.trackId || kind) === (item.trackId || kind));
       if (previous) {
         const boundaryDelta = startFrame - previous.endFrame;
@@ -34,10 +74,11 @@ export function compileTimelineManifest(config = {}, info = {}) {
       }
       const durationFrames = Math.max(1, endFrame - originalStartFrame);
       const normalizedEndFrame = startFrame + durationFrames;
-      const sourceStartFrame = Math.max(0, Math.round(rawSourceStart * sourceFps));
-      const sourceEndFrame = Math.max(sourceStartFrame + 1, Math.round(rawSourceEnd * sourceFps));
+      const sourceStartFrame = Math.max(0, Math.round(rawSourceStart * sourceFpsNumerator / sourceFpsDenominator));
+      const sourceEndFrame = Math.max(sourceStartFrame + 1, Math.round(rawSourceEnd * sourceFpsNumerator / sourceFpsDenominator));
       const playbackRate = Math.max(.05, finite(item.playbackRate, speed));
-      const requiredSourceFrames = durationFrames / fps * sourceFps * playbackRate;
+      const requiredSourceFrames = durationFrames * sourceFpsNumerator * fpsDenominator /
+        (fpsNumerator * sourceFpsDenominator) * playbackRate;
       const sourceShortageFrames = requiredSourceFrames - (sourceEndFrame - sourceStartFrame);
       if (sourceShortageFrames > 1.01) {
         issues.push({ severity: "error", code: "SOURCE_TOO_SHORT", kind, index, frames: sourceShortageFrames });
@@ -50,8 +91,8 @@ export function compileTimelineManifest(config = {}, info = {}) {
         durationFrames,
         sourceStartFrame,
         sourceEndFrame,
-        start: startFrame / fps,
-        end: normalizedEndFrame / fps,
+        start: startFrame * frameDuration,
+        end: normalizedEndFrame * frameDuration,
         sourceStart: rawSourceStart,
         sourceEnd: rawSourceEnd,
       });
@@ -60,7 +101,7 @@ export function compileTimelineManifest(config = {}, info = {}) {
 
   const video = compileTrack(config.mainVideoClips || [], "video");
   const audio = compileTrack(config.mainAudioClips || config.mainVideoClips || [], "audio");
-  const requestedFrames = Math.max(1, Math.round(finite(config.outputDuration, finite(info.duration, frameDuration)) * fps));
+  const requestedFrames = Math.max(1, Math.round(finite(config.outputDuration, finite(info.duration, frameDuration)) / frameDuration));
   const videoEndFrame = Math.max(0,...video.map(clip=>clip.endFrame));
   const audioEndFrame = Math.max(0,...audio.map(clip=>clip.endFrame));
   let targetFrameCount = requestedFrames;
@@ -77,7 +118,11 @@ export function compileTimelineManifest(config = {}, info = {}) {
     video,
     audio,
     targetFrameCount,
-    duration: targetFrameCount / fps,
+    duration: targetFrameCount * frameDuration,
+    fpsNumerator,
+    fpsDenominator,
+    sourceFpsNumerator,
+    sourceFpsDenominator,
     videoEndFrame,
     audioEndFrame,
     issues,

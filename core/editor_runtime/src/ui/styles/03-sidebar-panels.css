@@ -255,11 +255,16 @@
         border-left-color: var(--red);
       }
       .issue.mismatch {
-        border-left-color: var(--amber);
+        border-left-color: var(--red);
       }
+      .issue.repeat { border-left-color: var(--red); }
+      .issue.unverifiedAddition,
+      .issue.addition,
+      .issue.extra { border-left-color: #f2c15c; }
       .issue.missing {
         border-left-color: var(--violet);
       }
+      .issue.missing.audio-unverified { border-left-color: #f2c15c; }
       .issue b {
         display: flex;
         justify-content: space-between;

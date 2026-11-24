@@ -14,8 +14,16 @@
 .review-filter { gap:6px; align-items:center; margin-bottom:7px; flex-wrap:wrap; }
 .caption-review-row { width:100%; text-align:left; white-space:normal; display:block; margin:5px 0; padding:8px; }
 .caption-review-row.missing { color:#cf9bff; }
+.caption-review-row.missing.audio-unverified { color:#f2c15c; }
 .caption-review-row.unverifiedAddition { color:#f2c15c; }
 .caption-review-row.mismatch,.caption-review-row.repeat { color:#ff9292; }
+.review-color-legend { display:grid; gap:4px; margin:0 0 8px; padding:7px 8px; border:1px solid #34373c; border-radius:6px; background:#191b1e; color:#c2c7ce; font-size:10px; line-height:1.35; }
+.review-color-legend>div { display:grid; grid-template-columns:9px minmax(0,1fr); align-items:center; gap:6px; }
+.review-color-legend i { width:8px; height:8px; display:block; border-radius:2px; background:#9f8ddd; }
+.review-color-legend i.error,.review-color-legend i.repeat { background:#ff686b; }
+.review-color-legend i.uncertain { background:#f2c15c; }
+.review-color-legend i.kept { background:#4ade80; }
+.review-color-legend b { color:#f1f1f2; font-weight:650; }
 .caption-review-entry { display:flex; align-items:stretch; gap:6px; margin:5px 0; }
 .caption-review-entry .caption-review-row { flex:1; min-width:0; margin:0; }
 .caption-review-audition { flex:0 0 auto; white-space:nowrap; }

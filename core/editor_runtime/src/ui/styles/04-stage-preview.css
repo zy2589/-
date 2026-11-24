@@ -139,6 +139,24 @@
         transform-origin: center;
         z-index: 1;
       }
+      .mlt-timeline-frame {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        z-index: 0;
+        pointer-events: none;
+      }
+      #previewClipLayer.mlt-rendered-preview > #video,
+      #previewClipLayer.mlt-rendered-preview > #videoAlt,
+      #previewClipLayer.mlt-rendered-preview .layer-video-decoder,
+      #previewClipLayer.mlt-rendered-preview > .splice-freeze-frame,
+      #previewClipLayer.mlt-rendered-preview > .beauty-preview,
+      #previewClipLayer.mlt-rendered-preview > .blemish-preview,
+      #previewClipLayer.mlt-rendered-preview > .lutpreview {
+        visibility: hidden !important;
+      }
       .beauty-preview {
         position: absolute;
         inset: 0;

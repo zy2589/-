@@ -535,11 +535,16 @@
         border-left-color: var(--red);
       }
       .issue.mismatch {
-        border-left-color: var(--amber);
+        border-left-color: var(--red);
       }
+      .issue.repeat { border-left-color: var(--red); }
+      .issue.unverifiedAddition,
+      .issue.addition,
+      .issue.extra { border-left-color: #f2c15c; }
       .issue.missing {
         border-left-color: var(--violet);
       }
+      .issue.missing.audio-unverified { border-left-color: #f2c15c; }
       .issue b {
         display: flex;
         justify-content: space-between;
@@ -928,6 +933,24 @@
         object-fit: contain;
         transform-origin: center;
         z-index: 1;
+      }
+      .mlt-timeline-frame {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        z-index: 0;
+        pointer-events: none;
+      }
+      #previewClipLayer.mlt-rendered-preview > #video,
+      #previewClipLayer.mlt-rendered-preview > #videoAlt,
+      #previewClipLayer.mlt-rendered-preview .layer-video-decoder,
+      #previewClipLayer.mlt-rendered-preview > .splice-freeze-frame,
+      #previewClipLayer.mlt-rendered-preview > .beauty-preview,
+      #previewClipLayer.mlt-rendered-preview > .blemish-preview,
+      #previewClipLayer.mlt-rendered-preview > .lutpreview {
+        visibility: hidden !important;
       }
       .beauty-preview {
         position: absolute;
@@ -1826,6 +1849,13 @@ om: 1px solid var(--line);
       .clip.text {
         background: #9a651d;
       }
+      .clip.review.missing { background: #68539a; }
+      .clip.review.missing.audio-unverified,
+      .clip.review.unverifiedAddition,
+      .clip.review.addition,
+      .clip.review.extra { background: #8a6b22; }
+      .clip.review.mismatch,
+      .clip.review.repeat { background: #963b42; }
       .clip.caption {
         background: rgba(12, 83, 59, 0.78);
         color: #fff;
@@ -1879,9 +1909,14 @@ om: 1px solid var(--line);
       .marker.repeat {
         background: var(--red);
       }
+      .marker.mismatch { background: var(--red); }
       .marker.missing {
         background: var(--violet);
       }
+      .marker.missing.audio-unverified,
+      .marker.unverifiedAddition,
+      .marker.addition,
+      .marker.extra { background: #f2c15c; }
       .marker.timeline-marker {
         background: #5aaddc;
         width: 2px;
@@ -2238,8 +2273,16 @@ om: 1px solid var(--line);
 .review-filter { gap:6px; align-items:center; margin-bottom:7px; flex-wrap:wrap; }
 .caption-review-row { width:100%; text-align:left; white-space:normal; display:block; margin:5px 0; padding:8px; }
 .caption-review-row.missing { color:#cf9bff; }
+.caption-review-row.missing.audio-unverified { color:#f2c15c; }
 .caption-review-row.unverifiedAddition { color:#f2c15c; }
 .caption-review-row.mismatch,.caption-review-row.repeat { color:#ff9292; }
+.review-color-legend { display:grid; gap:4px; margin:0 0 8px; padding:7px 8px; border:1px solid #34373c; border-radius:6px; background:#191b1e; color:#c2c7ce; font-size:10px; line-height:1.35; }
+.review-color-legend>div { display:grid; grid-template-columns:9px minmax(0,1fr); align-items:center; gap:6px; }
+.review-color-legend i { width:8px; height:8px; display:block; border-radius:2px; background:#9f8ddd; }
+.review-color-legend i.error,.review-color-legend i.repeat { background:#ff686b; }
+.review-color-legend i.uncertain { background:#f2c15c; }
+.review-color-legend i.kept { background:#4ade80; }
+.review-color-legend b { color:#f1f1f2; font-weight:650; }
 .caption-review-entry { display:flex; align-items:stretch; gap:6px; margin:5px 0; }
 .caption-review-entry .caption-review-row { flex:1; min-width:0; margin:0; }
 .caption-review-audition { flex:0 0 auto; white-space:nowrap; }
@@ -4075,13 +4118,19 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
         border-left: 3px solid #52c41a;
       }
       .polish-card.spoken-diff {
-        border-left: 3px solid #06b6d4;
+        border-left: 3px solid #ff4d4f;
+      }
+      .polish-card.spoken-diff.unverified-addition {
+        border-left-color: #f2c15c;
       }
       .polish-card.repeat-suggest {
-        border-left: 3px solid #f97316;
+        border-left: 3px solid #ff4d4f;
       }
       .polish-card.missing-suggest {
-        border-left: 3px solid #ec4899;
+        border-left: 3px solid #9f8ddd;
+      }
+      .polish-card.missing-suggest.audio-unverified {
+        border-left-color: #f2c15c;
       }
       .polish-card-header {
         display: flex;
@@ -4118,16 +4167,21 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
         color: #73d13d;
       }
       .polish-badge.spoken-diff {
-        background: rgba(6, 182, 212, 0.2);
-        color: #67e8f9;
+        background: rgba(255, 77, 79, 0.2);
+        color: #ff7875;
+      }
+      .polish-badge.unverified-addition,
+      .polish-badge.missing.audio-unverified {
+        background: rgba(242, 193, 92, 0.2);
+        color: #f2c15c;
       }
       .polish-badge.repeat {
-        background: rgba(249, 115, 22, 0.2);
-        color: #fb923c;
+        background: rgba(255, 77, 79, 0.2);
+        color: #ff7875;
       }
       .polish-badge.missing {
-        background: rgba(236, 72, 153, 0.2);
-        color: #f472b6;
+        background: rgba(159, 141, 221, 0.2);
+        color: #cf9bff;
       }
       .polish-badge.notes {
         background: rgba(156, 163, 175, 0.2);
@@ -4231,20 +4285,22 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
         font-weight: 500;
       }
       .diff-diagnosis.repeat {
-        border-left-color: #f97316;
-        background: rgba(249, 115, 22, 0.08);
-        color: #fdba74;
+        border-left-color: #ff4d4f;
+        background: rgba(255, 77, 79, 0.08);
+        color: #ff9292;
       }
       .diff-diagnosis.missing {
-        border-left-color: #ec4899;
-        background: rgba(236, 72, 153, 0.08);
-        color: #f472b6;
+        border-left-color: #9f8ddd;
+        background: rgba(159, 141, 221, 0.08);
+        color: #cf9bff;
       }
+      .diff-diagnosis.missing.audio-unverified { border-left-color:#f2c15c; background:rgba(242,193,92,.08); color:#f2c15c; }
       .diff-diagnosis.spoken-diff {
-        border-left-color: #06b6d4;
-        background: rgba(6, 182, 212, 0.08);
-        color: #67e8f9;
+        border-left-color: #ff4d4f;
+        background: rgba(255, 77, 79, 0.08);
+        color: #ff9292;
       }
+      .diff-diagnosis.spoken-diff.unverified-addition { border-left-color:#f2c15c; background:rgba(242,193,92,.08); color:#f2c15c; }
       .diff-diagnosis.pause {
         border-left-color: #3b82f6;
         background: rgba(59, 130, 246, 0.08);
@@ -4845,6 +4901,13 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
               </details>
               <div class="divider"></div>
               <div class="sectiontitle">口播问题</div>
+              <div class="review-color-legend" aria-label="口播问题颜色规则">
+                <div><i class="missing"></i><span><b>紫色</b>：文案确实缺读（已确认录音没有读出）</span></div>
+                <div><i class="error"></i><span><b>红色</b>：明确错读（口播与正确文案不一致）</span></div>
+                <div><i class="repeat"></i><span><b>红色</b>：重复口播或重读</span></div>
+                <div><i class="uncertain"></i><span><b>黄色</b>：识别待核实，或口播有但文案没有</span></div>
+                <div><i class="kept"></i><span><b>绿色</b>：确认保留的实际口播字幕</span></div>
+              </div>
               <div class="row review-filter"><button class="btn small active" id="reviewPendingOnly">待确认</button><button class="btn small" id="reviewAll">全部记录</button><span class="small" id="reviewPendingCount"></span></div>
               <div id="issueList">
                 <div class="small">匹配文案后显示待确认口语、重复、错读和漏读。</div>
@@ -4980,6 +5043,7 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
             <div class="frame" id="frame">
               <div class="preview-clipping-layer" id="previewClipLayer">
                 <div class="center-guide" id="centerGuide"></div>
+                <img class="mlt-timeline-frame" id="mltTimelineFrame" alt="" aria-hidden="true" hidden />
                 <video
                   class="videoobject"
                   id="video"
@@ -7952,6 +8016,7 @@ function captionMeaningContext(captions, review) {
         filterLook: { id: "none", intensity: 1, baseColor: null },
         lut: null,
         exportJobId: "",
+        exportBackend: "",
         exportProjectId: "",
         layout: defaultStartupLayout(),
       };
@@ -9042,6 +9107,7 @@ function captionMeaningContext(captions, review) {
           filterLook: { id: "none", intensity: 1, baseColor: null },
           lut: null,
           exportJobId: state.exportJobId || "",
+          exportBackend: state.exportBackend || "",
           exportProjectId: state.exportProjectId || "",
           layout: defaultStartupLayout(),
         });
@@ -9368,7 +9434,7 @@ function captionMeaningContext(captions, review) {
         const spoken = short(item.spokenText || item.spoken || item.text);
         const expected = short(item.expectedText);
         const kind = item.type === 'unverifiedAddition' ? '文案外口语待确认' : item.type === 'repeat' ? '疑似重复' : item.type === 'missing' || item.action === 'missing'
-          ? '文案词待确认' : ['addition','extra'].includes(item.type) ? '疑似多读' : '疑似读错';
+          ? item.confirmedMissing ? '文案缺读（已确认）' : '文案词待核实' : ['addition','extra'].includes(item.type) ? '疑似多读' : '疑似读错';
         if (item.type !== 'mismatch') return `${kind}\n${item.type === 'missing' || item.action === 'missing' ? expected || '需试听核对' : spoken || '需试听核对'}`;
         const left = String(item.spokenText || item.spoken || '').trim().split(/\s+/).filter(Boolean);
         const right = String(item.expectedText || '').trim().split(/\s+/).filter(Boolean);
@@ -9393,14 +9459,14 @@ function captionMeaningContext(captions, review) {
             : item.type === "repeat"
               ? "重复阅读"
               : item.type === "missing" || item.action === "missing"
-                ? item.needsAudioReview ? "未识别到，需试听核对" : "疑似漏读，需试听核对"
+                ? item.confirmedMissing ? "已确认录音未读出" : "未识别到，待试听确认是否漏读"
                 : ['addition','extra'].includes(item.type)
                   ? "识别多出，文案无对应内容"
                   : "用词不一致，需试听核对";
         const reason = item.type === 'unverifiedAddition'
           ? '识别到文案外口语；试听后可选择剪掉，或保留声音并加字幕。'
           : item.type === 'missing' || item.action === 'missing'
-          ? '文案有这段内容，但识别结果没有找到对应口播。试听判断录音里是否有词；有词可手动补字幕，确实没读可确认漏读。'
+          ? item.confirmedMissing ? '已确认录音没有读出这段文案；紫色表示确实缺读。' : '文案有这段内容，但识别结果没有找到对应口播；黄色表示需要试听确认是识别遗漏还是真正缺读。'
           : item.type === 'mismatch'
             ? '识别内容与此位置的文案不一致，可能读法、识别或对齐有误；核对后再修改。'
             : ['addition','extra'].includes(item.type)
@@ -9419,7 +9485,7 @@ function captionMeaningContext(captions, review) {
           .map((item) => ({
             ...item,
             text: reviewClipText(item),
-            action: item.type === "missing" ? "missing" : item.type === "repeat" ? "review" : "replace",
+            action: item.type === "missing" ? "missing" : item.type === "repeat" ? "review" : item.type === "unverifiedAddition" || item.unverifiedAddition ? "insert" : "replace",
           }));
         for (const caption of state.captions || [])
           for (const word of caption.words || []) {
@@ -9554,7 +9620,9 @@ function captionMeaningContext(captions, review) {
         if (window.mediaOperationBusy) return {ok:false,error:"素材正在生成，请完成后再退出。"};
         if ($("exportModal")?.classList.contains("on") && $("cancelExport")?.textContent !== "关闭") return {ok:false,error:"请先完成或取消导出，再退出剪辑助手。"};
         if (state.exportJobId) {
-          const job = await nativeCall("exportStatus", state.exportJobId);
+          const job = state.exportBackend === "mlt"
+            ? await nativeCall("mltExportStatus", { jobId: state.exportJobId })
+            : await nativeCall("exportStatus", state.exportJobId);
           if (!["done","completed","cancelled","error","failed"].includes(job.state))
             return {ok:false,error:"导出仍在运行，请先完成或取消导出。"};
         }
@@ -10897,8 +10965,9 @@ function captionMeaningContext(captions, review) {
         };
       }
       function rippleShiftAllTracks(collections = {}, fromTimelineTime = 0, deltaTimeline = 0) {
-        for(const [key,track] of [['videoLayers','video'],['audioAssets','audio'],['images','image'],['titles','text'],['captions','caption'],['reviewCaptions','review'],['audioMutes','audio'],['issues','review']]){
-          const list=collections[key];if(!list)continue;
+        const shiftedLists=new Set();
+        for(const [key,track] of [['videoLayers','video'],['audioAssets','audio'],['images','image'],['titles','text'],['captions','caption'],['reviewCaptions','review'],['audioMutes','audio'],['issues','review'],['matchIssues','review']]){
+          const list=collections[key];if(!list||shiftedLists.has(list))continue;shiftedLists.add(list);
           const result=editRipple(list,fromTimelineTime,deltaTimeline,{id:uid,rate:Number(collections.audio?.speed||1),enabled:item=>editTrackEnabled(item.trackId||track,collections.trackLocks,collections.trackSyncLocks,true)});
           list.splice(0,list.length,...result);
         }
@@ -13926,6 +13995,7 @@ async function placeLibraryAsset(
             if (spliceStyle?.clipPath) element.style.clipPath = spliceStyle.clipPath;
           }
           updatePreviewTransformOnly(false);
+          if (!state.playing) window.requestMltTimelinePreview?.(state.currentTime);
           return;
         }
         const retainedVideos = new Map(
@@ -14177,6 +14247,7 @@ async function placeLibraryAsset(
         reviewPreview.style.transform = reviewTransform(px, py);
         previewSceneKey = sceneKey;
         updateSelectionBox();
+        if (!state.playing) window.requestMltTimelinePreview?.(state.currentTime);
       }
       let captionPaintState = { key: "", layout: null, style: null, pad: 0, caption: null };
       
@@ -15081,7 +15152,9 @@ function rulerTickPlan(zoom) {
         for (const issue of (state.issues || []).filter(issue => Number(issue?.start) >= fromTick * rulerStep && Number(issue?.start) <= lastTick * rulerStep)) {
           const issueStart = Number(issue.start);
           if (!Number.isFinite(issueStart) || issueStart < 0) continue;
-          html += `<span class="marker ${escapeHtml(issue.type)}" data-issue="${escapeHtml(issue.id)}" title="${escapeHtml(issue.label)}" style="left:${issueStart * state.zoom}px"></span>`;
+          const pendingAudioCheck = (issue.type === 'missing' || issue.action === 'missing') && !issue.confirmedMissing && issue.needsAudioReview !== false;
+          const markerClasses = [issue.type, pendingAudioCheck ? 'audio-unverified' : ''].filter(Boolean).join(' ');
+          html += `<span class="marker ${escapeHtml(markerClasses)}" data-issue="${escapeHtml(issue.id)}" title="${escapeHtml(issue.label)}" style="left:${issueStart * state.zoom}px"></span>`;
         }
         for (const marker of state.timelineMarkers || [])
           html += `<span class="marker timeline-marker" data-timeline-marker="${escapeHtml(marker.id)}" title="${escapeHtml(marker.label || '时间线标记')} ${formatTimecode(Number(marker.time || 0))}" style="left:${Number(marker.time) * state.zoom}px"></span>`;
@@ -15153,7 +15226,7 @@ function rulerTickPlan(zoom) {
               ? `${meta.kind === "video" ? "视频" : "音频"} ${badge.slice(1)}`
               : meta.label;
             const labelTitle = key === "review"
-              ? "待处理片段：点击试听，Alt+点击替换为识别口播，Ctrl+点击保留，Shift+点击删除"
+              ? "待处理片段：点击查看详情；试听后可选择保留或剪掉"
               : trackName;
             return `<div class="tracklabel ${escapeHtml(meta.className)}${familyStart ? " track-family-start" : ""}${reviewCaptionGroupStart ? " track-section-start" : ""}${reviewCaptionGroupEnd ? " track-section-end" : ""}" draggable="true" data-track-key="${escapeHtml(key)}" data-track-kind="${escapeHtml(meta.kind)}"><div class="track-header-bar"><span class="trackhandle" title="拖动调整轨道顺序">⠿</span><span class="track-badge" title="${escapeHtml(labelTitle)}">${escapeHtml(badge)}</span><div class="track-controls"><button class="tracklock ${locked ? "on" : ""}" data-lock-track="${escapeHtml(key)}" title="${locked ? "解锁轨道" : "锁定轨道"}">${locked ? "■" : "□"}</button><button class="tracksync ${isTrackSyncLocked(key) ? "on" : ""}" data-sync-track="${escapeHtml(key)}" aria-pressed="${isTrackSyncLocked(key)}" title="同步锁：决定其他轨道波纹剪辑时此轨是否同步调整">↔</button><button class="trackauto ${autoSelected ? "on" : ""}" data-auto-track="${escapeHtml(key)}" title="自动轨道选择器：决定选择后方、全选等命令是否作用于此轨">⇥</button>${audioTrack ? `<button class="tracksolo ${soloed ? "on" : ""}" data-solo-track="${escapeHtml(key)}" title="独听此轨">S</button><button class="trackmute ${muted ? "on" : ""}" data-mute-track="${escapeHtml(key)}" title="静音此轨">M</button><span class="audio-channel-tag">2.0</span>` : ""}<button class="visibility ${visible ? "" : "off"}" data-toggle-track="${escapeHtml(key)}" title="${visible ? "关闭轨道" : "显示轨道"}">${symbol}</button>${remove}</div></div><div class="track-info-body"><span class="track-title" title="${escapeHtml(labelTitle)}">${escapeHtml(trackName)}</span><span class="track-clip-count">${clipCount}</span></div><span class="track-resize-grip" data-resize-track="${escapeHtml(key)}" title="按住拖动自由调节轨道高度；双击恢复默认高度"></span></div>`;
           })
@@ -16132,8 +16205,9 @@ function assignOverlapLanes(items = []) {
       }
       function clipHtml(c, type, lane = 0, laneCount = 1) {
         const visualType = type === "audioasset" ? "audio" : type;
+        const pendingAudioCheck = (c.type === "missing" || c.action === "missing") && !c.confirmedMissing && c.needsAudioReview !== false;
         const issueClass = type === "review"
-          ? ` ${escapeHtml(c.type || "mismatch")}${c.scripture ? " scripture" : ""}`
+          ? ` ${escapeHtml(c.type || "mismatch")}${pendingAudioCheck ? " audio-unverified" : ""}${c.scripture ? " scripture" : ""}`
           : "";
         const displayText = type === "review"
           ? reviewClipText(c)
@@ -16169,7 +16243,7 @@ function assignOverlapLanes(items = []) {
                 return `<span class="caption-token ${status}${actionClass}"${word.meaningReview ? ` data-meaning-word="${wordIndex}"` : ''}${actionAttribute}${tokenTitle ? ` title="${escapeHtml(tokenTitle)}"` : ""}>${escapeHtml(word.display)}</span>`;
               })
               .join("")
-          : `<span class="clipname ellipsis"${type === "review" ? reviewAction === "missing" ? ` data-focus-issue="${escapeHtml(c.issueId || c.id)}"` : reviewAction === "insert" ? ` data-insert-review="${escapeHtml(c.id)}" title="试听确认后点击插入正确字幕轨道"` : ` data-cut-review="${escapeHtml(c.id)}"` : ""}>${escapeHtml(displayText)}</span>`;
+          : `<span class="clipname ellipsis"${type === "review" ? reviewAction === "missing" ? ` data-focus-issue="${escapeHtml(c.issueId || c.id)}"` : reviewAction === "insert" ? ` data-insert-review="${escapeHtml(c.id)}" title="点击查看并确认这段文案外口播"` : ` data-cut-review="${escapeHtml(c.id)}"` : ""}>${escapeHtml(displayText)}</span>`;
         const actionClass = type === "review" ? ` ${reviewAction}` : "";
         const reviewHit = type==='caption' ? ' data-caption-details="'+escapeHtml(c.id)+'"' : '';
         const inner = type === "caption" || type === "review"
@@ -16378,7 +16452,8 @@ function renderIssues() {
   box.replaceChildren();
   for(const review of pending){
     const row=document.createElement('div');row.className='caption-review-entry';
-    const button=document.createElement('button');button.className='btn caption-review-row '+review.type;button.textContent=formatTime(review.start,false)+' · '+reviewClipTitle(review);button.onclick=()=>{seekTimeline(review.start);showReviewDetails(review.id);};
+    const pendingAudioCheck=(review.type==='missing'||review.action==='missing')&&!review.confirmedMissing&&review.needsAudioReview!==false;
+    const button=document.createElement('button');button.className='btn caption-review-row '+review.type+(pendingAudioCheck?' audio-unverified':'');button.textContent=formatTime(review.start,false)+' · '+reviewClipTitle(review);button.onclick=()=>{seekTimeline(review.start);showReviewDetails(review.id);};
     const audition=document.createElement('button');audition.className='btn caption-review-audition';audition.textContent='试听';audition.title='试听这处问题对应的原始音频';audition.onclick=()=>auditionReviewSegment(review.id);
     row.append(button,audition);box.append(row);
   }
@@ -17022,9 +17097,71 @@ function renderIssues() {
       
 // Keep every unresolved lexical difference visible on the review track,
 // including older projects whose CC words did not have review clips.
+function restoreUnverifiedAdditionReviews() {
+  state.reviewCaptions ||= [];
+  const existing = new Set(state.reviewCaptions.map(item => String(item.issueId || item.id || '')));
+  const duration = Number(state.duration);
+  const candidates = new Map();
+  for (const issue of [...(state.issues || []), ...(state.matchIssues || [])]) {
+    const type = String(issue?.type || issue?.issueType || '');
+    if (!['unverifiedAddition', 'addition', 'extra'].includes(type) && issue?.unverifiedAddition !== true) continue;
+    const id = String(issue.issueId || issue.id || '');
+    if (!id || candidates.has(id)) continue;
+    if (issue.suppressReview || issue.reviewDismissed || issue.action === 'keep') continue;
+    if (issue.alreadyDisplayed && !issue.needsAudioReview && !issue.unverifiedAddition && type !== 'unverifiedAddition') continue;
+    candidates.set(id, issue);
+  }
+  for (const [id, issue] of candidates) {
+    if (existing.has(id)) continue;
+    const sourceWords = Array.isArray(issue.words) ? issue.words : [];
+    const startFromWords = sourceWords.reduce((min, word) => Math.min(min, Number(word?.start)), Infinity);
+    const endFromWords = sourceWords.reduce((max, word) => Math.max(max, Number(word?.end)), -Infinity);
+    const rawStart = Number.isFinite(Number(issue.start)) ? Number(issue.start) : startFromWords;
+    const rawEnd = Number.isFinite(Number(issue.end)) ? Number(issue.end) : endFromWords;
+    if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd) || rawEnd <= rawStart ||
+        (Number.isFinite(duration) && duration >= 0 && rawStart >= duration)) continue;
+    const start = Math.max(0, rawStart);
+    const end = Number.isFinite(duration) && duration >= 0 ? Math.min(rawEnd, duration) : rawEnd;
+    if (end <= start) continue;
+    const spokenText = String(issue.spokenText || issue.text || sourceWords.map(word => word?.display || word?.text || '').filter(Boolean).join(' ')).trim();
+    let words = sourceWords.map(word => ({...word}));
+    if (!words.length) {
+      const operationWords = (state.alignmentOperations || [])
+        .filter(operation => String(operation.issueId || operation.captionDecisionIssueId || '') === id)
+        .flatMap(operation => Array.isArray(operation.spoken) ? operation.spoken : operation.spoken ? [operation.spoken] : [])
+        .map(word => typeof word === 'string' ? {display: word} : {...word, display: word.display || word.text || ''})
+        .filter(word => word.display);
+      words = operationWords;
+    }
+    if (!words.length && spokenText) words = spokenText.split(/\s+/).filter(Boolean).map(display => ({display}));
+    words = words.map((word, index) => {
+      const wordStart = Number(word.start), wordEnd = Number(word.end);
+      const inferredStart = start + (end - start) * index / Math.max(1, words.length);
+      const inferredEnd = start + (end - start) * (index + 1) / Math.max(1, words.length);
+      return {...word,
+        display: String(word.display || word.text || ''),
+        start: Math.max(start, Math.min(end, Number.isFinite(wordStart) ? wordStart : inferredStart)),
+        end: Math.max(start, Math.min(end, Number.isFinite(wordEnd) ? wordEnd : inferredEnd)),
+        matchType: 'spoken_addition', issueType: 'addition', issueId: id, action: 'insert'};
+    }).filter(word => word.display && word.end > word.start);
+    const text = spokenText || words.map(word => word.display).join(' ');
+    if (!text) continue;
+    state.reviewCaptions.push({
+      ...issue, id: uid(), issueId: id, start, end, spokenText: text, text,
+      expectedText: '', words, type: 'unverifiedAddition', unverifiedAddition: true,
+      pendingCaption: false, alreadyDisplayed: false, needsAudioReview: true,
+      action: 'insert', trackId: 'review',
+      captionTrackId: issue.captionTrackId || state.autoTranscript?.trackId || 'caption',
+      reason: issue.reason || '文案外口语待确认；试听后可选择剪掉或保留并加字幕',
+    });
+    existing.add(id);
+  }
+}
+
 function syncCaptionCorrectionReviews() {
   state.reviewCaptions ||= [];
   state.issues ||= [];
+  restoreUnverifiedAdditionReviews();
   normalizeCaptionPhraseReviews();
   dedupeCaptionMismatchReviews();
   const resolved = new Set(correctExpandedCaptionWords(state.captions));
@@ -17538,6 +17675,75 @@ function buildMissingCaptionControls(review) {
   validate();
   return panel;
 }
+function insertMissingReviewCaption(review) {
+  const text = String(review.expectedText || review.expected || '').trim();
+  const tokens = editableCaptionTokens(text);
+  if (!tokens.length) return toast('没有可补入的正确文案');
+  const duration = Math.max(0, Number(state.duration || review.end || 0));
+  const start = Math.min(duration, Math.max(0, Number(review.start || 0)));
+  let end = Math.min(duration, Math.max(start, Number(review.end || start)));
+  if (end <= start + .02) end = Math.min(duration, start + Math.max(.12, tokens.length * .18));
+  if (end <= start + .02) return toast('识别位置无效，无法补入字幕');
+  if (isTrackLocked(review.captionTrackId || 'caption') || isTrackLocked('review'))
+    return toast('字幕或待处理轨道已锁定');
+
+  snapshot();
+  const span = end - start;
+  const words = tokens.map((display, index) => ({
+    display,
+    norm: String(display).toLowerCase().replace(/[^\p{L}\p{N}]/gu, ''),
+    originalDisplay: display,
+    expectedDisplay: display,
+    recognizedDisplay: display,
+    start: start + span * index / tokens.length,
+    end: start + span * (index + 1) / tokens.length,
+    matchType: 'edited', issueType: '', issueId: '', action: '',
+    userKept: true, userInserted: true, manuallyConfirmedSpoken: true,
+  }));
+  state.captions ||= [];
+  const trackId = review.captionTrackId || 'caption';
+  const target = state.captions.find(caption =>
+    (caption.trackId || 'caption') === trackId &&
+    (!review.ownerClipId || !caption.ownerClipId || caption.ownerClipId === review.ownerClipId) &&
+    Number(caption.start) < end && Number(caption.end) > start);
+  let caption;
+  if (target) {
+    if (!target.words?.length) {
+      const targetStart = Number(target.start || 0);
+      const targetEnd = Math.max(targetStart + .04, Number(target.end || targetStart + .04));
+      target.words = editableCaptionTokens(target.text || '').map((display, index, all) => ({
+        display,
+        start: targetStart + (targetEnd - targetStart) * index / Math.max(1, all.length),
+        end: targetStart + (targetEnd - targetStart) * (index + 1) / Math.max(1, all.length),
+      }));
+    }
+    target.words.push(...words);
+    target.words.sort((left, right) => Number(left.start) - Number(right.start) || Number(left.end) - Number(right.end));
+    target.start = Math.min(Number(target.start || start), start);
+    target.end = Math.max(Number(target.end || end), end);
+    target.text = joinCaptionWords(target.words);
+    caption = target;
+  } else {
+    caption = {
+      id: uid(), start, end, text: joinCaptionWords(words), words, trackId,
+      ownerClipId: review.ownerClipId, ownerClipType: review.ownerClipType,
+      sourceMediaId: review.sourceMediaId, transcriptId: review.transcriptId || '',
+    };
+    state.captions.push(caption);
+  }
+  state.captions.sort((left, right) => left.start - right.start);
+  const issueId = review.issueId || review.id;
+  state.reviewCaptions = state.reviewCaptions.filter(item => item.id !== review.id && (item.issueId || item.id) !== issueId);
+  state.issues = (state.issues || []).filter(item => item.id !== issueId);
+  state.matchIssues = (state.matchIssues || []).filter(item => item.id !== issueId);
+  state.selected = { type: 'caption', id: caption.id };
+  state.selectedItems = [state.selected];
+  reviewDetailsDialog.close();
+  seekTimeline(start);
+  renderAll();
+  queueAutosave();
+  toast('已按识别位置补入字幕；音频未改动');
+}
 function showReviewDetails(id) {
   const review = state.reviewCaptions.find(r => r.id === id || r.issueId === id);
   if (!review) return;
@@ -17573,10 +17779,10 @@ function showReviewDetails(id) {
   detail.textContent = reviewClipDetails(review);
   const actions = document.createElement('div');
   actions.className = 'review-details-actions';
-  const button = (label, action) => {
+  const button = (label, action, danger = false) => {
     const element = document.createElement('button');
-    element.className = 'btn small'; element.textContent = label;
-    element.onclick = action; actions.appendChild(element);
+    element.className = 'btn small' + (danger ? ' danger' : ''); element.textContent = label;
+    element.onclick = action; actions.appendChild(element); return element;
   };
   const ordered=state.reviewCaptions.filter(r=>['mismatch','repeat','missing','unverifiedAddition'].includes(r.type)).sort((a,b)=>a.start-b.start);
   const position=ordered.findIndex(r=>r.id===review.id);
@@ -17587,20 +17793,33 @@ function showReviewDetails(id) {
   const unverifiedAddition = review.type === 'unverifiedAddition' || review.unverifiedAddition;
   if (missingSpeech) {
     button('试听附近音频', () => { stopReviewCutPreview(); auditionReviewSegment(review.id); });
-    button('音频有词，补入字幕', () => {
-      const panel = reviewDetailsDialog.querySelector('.review-missing-caption-controls');
-      if (panel) { panel.hidden = false; panel.querySelector('input')?.focus(); }
-    });
-    button('确认音频未读', () => {
+    button('音频有词，补入字幕', () => insertMissingReviewCaption(review));
+    button(review.confirmedMissing ? '已确认录音缺读' : '确认录音确实未读', () => {
       if (isTrackLocked('review')) return toast('待确认轨道已锁定');
+      snapshot();
+      review.confirmedMissing = true;
+      review.needsAudioReview = false;
+      review.reason = '已确认录音未读出这段文案。';
+      const issueId = review.issueId || review.id;
+      for (const item of [...(state.issues || []), ...(state.matchIssues || [])]) {
+        if (item.id === issueId || item.issueId === issueId) {
+          item.confirmedMissing = true;
+          item.needsAudioReview = false;
+          item.reason = review.reason;
+        }
+      }
       reviewDetailsDialog.close();
-      dismissReviewHints([review.id]);
+      renderAll(); queueAutosave(); toast('已确认确实缺读，紫色标记保留；可随时删除提示');
     });
   } else if (unverifiedAddition) {
     button('试听原片', () => { stopReviewCutPreview(); auditionReviewSegment(review.id); });
-    button('剪掉这段', () => {
-      const panel = reviewDetailsDialog.querySelector('.review-extra-cut-controls');
-      if (panel) { panel.hidden = false; panel.querySelector('input')?.focus(); }
+    button('不保留，剪掉这段', () => {
+      if (isTrackLocked('review')) return toast('待处理轨道已锁定，无法剪除这段口语');
+      const conflict = reviewCutCaptionConflict(review, Number(review.start), Number(review.end));
+      if (conflict) return toast(`识别区间与正文字幕“${String(conflict.display || conflict.text || '').trim()}”重叠，为避免误删已取消剪切`);
+      stopReviewCutPreview();
+      reviewDetailsDialog.close();
+      cutScriptIssue(review.issueId || review.id, { scope: review });
     });
     button('保留并加字幕', () => { stopReviewCutPreview(); reviewDetailsDialog.close(); acceptReviewSegment(review.id); });
   } else {
@@ -17610,10 +17829,12 @@ function showReviewDetails(id) {
       button('使用识别文案', () => { if(replaceReviewCaption(review.id,'spoken')) reviewDetailsDialog.close(); });
     button('忽略提示', () => { reviewDetailsDialog.close(); snapshot(); dismissReviewHints([review.id]); });
   }
+  button('删除提示（保留字幕和音视频）', () => {
+    if (isTrackLocked('review')) return toast('待确认轨道已锁定');
+    reviewDetailsDialog.close(); dismissReviewHints([review.id]);
+  }, true);
   button('关闭', () => reviewDetailsDialog.close());
   reviewDetailsDialog.append(heading, detail, actions);
-  if (missingSpeech) reviewDetailsDialog.append(buildMissingCaptionControls(review));
-  if (unverifiedAddition) reviewDetailsDialog.append(buildUnverifiedCutControls(review));
   if (!reviewDetailsDialog.open) reviewDetailsDialog.showModal();
   if (review.type === 'mismatch') {
     Promise.resolve(loadCaptionMeaning(review)).then(() => {
@@ -18460,6 +18681,7 @@ function selectedVideoGrade(create = false) {
             primary.play().catch(() => {});
         }
         renderPreviewObjects(false);
+        if (!state.playing) window.requestMltTimelinePreview?.(state.currentTime);
         syncPreviewAudio();
         syncTimelineChrome();
         $("timecode").textContent =
@@ -18735,6 +18957,7 @@ function selectedVideoGrade(create = false) {
             shuttleSpeed *= 2;
           }
           if (!state.playing) {
+            window.clearMltTimelinePreview?.();
             state.playing = true;
             getActiveVideo().play().catch(() => {});
             startPlaybackAnimationLoop();
@@ -18800,6 +19023,7 @@ function selectedVideoGrade(create = false) {
           gapPlayback = null;
           syncPreviewAudio();
           renderPreviewObjects(false);
+          window.requestMltTimelinePreview?.(state.currentTime);
           $("play").textContent = "▶";
           return;
         }
@@ -18818,6 +19042,7 @@ function selectedVideoGrade(create = false) {
             startTimeline: state.currentTime,
           };
         }
+        window.clearMltTimelinePreview?.();
         state.playing = true;
         applyMediaPlaybackRate($("video"));
         applyMediaPlaybackRate($("videoAlt"));
@@ -18832,6 +19057,7 @@ function selectedVideoGrade(create = false) {
           video.pause();
           syncPreviewAudio();
           $("play").textContent = "▶";
+          window.requestMltTimelinePreview?.(state.currentTime);
           if (message) toast(message);
         };
         try {
@@ -19972,7 +20198,8 @@ function selectedVideoGrade(create = false) {
           .filter((hole) => hole && hole.end > hole.start + 0.001)
           .sort((a, b) => b.start - a.start);
         for (const clip of selectedMainClips) {
-          dismissTrimmedIssues(clip.start, clip.end);
+          const dismissed = dismissTrimmedIssues(clip.start, clip.end) || [];
+          if (dismissed.length && typeof deleteSelected.onDismissIssues === "function") deleteSelected.onDismissIssues(dismissed);
           state.removals.push({
             start: clip.sourceStart,
             end: clip.sourceEnd,
@@ -19987,7 +20214,10 @@ function selectedVideoGrade(create = false) {
         );
         for (const clip of audioOnly) {
           state.audioMutes.push({ start: clip.start, end: clip.end });
-          if (ripple) rippleSubtitleTimeline(clip.start, clip.end);
+          if (ripple) {
+            const dismissed = rippleSubtitleTimeline(clip.start, clip.end) || [];
+            if (dismissed.length && typeof deleteSelected.onDismissIssues === "function") deleteSelected.onDismissIssues(dismissed);
+          }
         }
         const layerIds = ids("videolayer");
         const audioAssetIds = ids("audioasset");
@@ -20051,7 +20281,10 @@ function selectedVideoGrade(create = false) {
         const keptArchiveIndexes=new Set(archiveDeletion.captions.map(entry=>Number(entry.id)));
         state.captionRecoveryArchive=archiveRecords.filter((record,index)=>
           keptArchiveIndexes.has(index)&&!selectedCaptionIds.has(record?.caption?.id));
-        for (const clip of removedMedia) dismissTrimmedIssues(clip.start, clip.end, removedOwners);
+        for (const clip of removedMedia) {
+          const dismissed = dismissTrimmedIssues(clip.start, clip.end, removedOwners) || [];
+          if (dismissed.length && typeof deleteSelected.onDismissIssues === "function") deleteSelected.onDismissIssues(dismissed);
+        }
         const keep = (type) => (item) => !ids(type).has(item.id);
         state.videoLayers = state.videoLayers.filter((item) => !layerIds.has(item.id));
         state.audioAssets = state.audioAssets.filter((item) => !audioAssetIds.has(item.id));
@@ -20916,14 +21149,15 @@ function polishSectionHtml(title, rows, emptyText) {
 
             const isAiHandled = item.suppressReview === true || item.action === "keep";
             const aiLabel = isAiHandled ? `<span class="polish-badge ai-handled" style="background:#555;color:#ccc;margin-left:6px;font-size:10px">🤖 AI 已保留</span>` : "";
+            const unverifiedSpeech = item.type === "unverifiedAddition" || item.unverifiedAddition || ["addition", "extra"].includes(item.type);
 
             cardsHtml.push(`
-              <div class="polish-card spoken-diff${isAiHandled ? " ai-handled" : ""}" data-polish-card-type="spoken-diff" data-issue-id="${escapeHtml(item.issueId || item.id || "")}" data-start="${Number(item.start || 0)}" data-ai-handled="${isAiHandled ? "1" : ""}" style="${isAiHandled ? "opacity:0.6;" : ""}">
+              <div class="polish-card spoken-diff${unverifiedSpeech ? " unverified-addition" : " mismatch"}${isAiHandled ? " ai-handled" : ""}" data-polish-card-type="spoken-diff" data-issue-id="${escapeHtml(item.issueId || item.id || "")}" data-start="${Number(item.start || 0)}" data-ai-handled="${isAiHandled ? "1" : ""}" style="${isAiHandled ? "opacity:0.6;" : ""}">
                 <div class="polish-card-header">
-                  <div class="polish-card-title"><span class="polish-badge spoken-diff">读法差异</span>${aiLabel}</div>
+                  <div class="polish-card-title"><span class="polish-badge ${unverifiedSpeech ? "unverified-addition" : "spoken-diff"}">${unverifiedSpeech ? "文案外口播待确认" : "错读差异"}</span>${aiLabel}</div>
                   <span class="small" style="font-family:monospace; color:var(--muted);">${formatTime(Number(item.start || 0))}</span>
                 </div>
-                <div class="diff-diagnosis spoken-diff">${escapeHtml(diagnosis)}</div>
+                <div class="diff-diagnosis spoken-diff${unverifiedSpeech ? " unverified-addition" : ""}">${escapeHtml(diagnosis)}</div>
                 <div class="polish-diff-box">
                   <div class="polish-diff-line">
                     <span class="polish-diff-label spoken">🎙️ 口播</span>
@@ -20998,14 +21232,15 @@ function polishSectionHtml(title, rows, emptyText) {
             const spoken = item.spoken || item.spokenText || item.text || "";
             const expected = item.expected || item.expectedText || "";
             const { spokenHtml, expectedHtml, diagnosis } = computeTextDiffHtml(spoken, expected, item.isScripture || item.scripture, "missing");
+            const pendingAudioCheck = !item.confirmedMissing && item.needsAudioReview !== false;
 
             cardsHtml.push(`
-              <div class="polish-card missing-suggest" data-polish-card-type="missing-issue" data-issue-id="${escapeHtml(item.issueId || item.id || "")}" data-start="${Number(item.start || 0)}">
+              <div class="polish-card missing-suggest${pendingAudioCheck ? " audio-unverified" : ""}" data-polish-card-type="missing-issue" data-issue-id="${escapeHtml(item.issueId || item.id || "")}" data-start="${Number(item.start || 0)}">
                 <div class="polish-card-header">
-                  <div class="polish-card-title"><span class="polish-badge missing">缺读待补</span></div>
+                  <div class="polish-card-title"><span class="polish-badge missing${pendingAudioCheck ? " audio-unverified" : ""}">${pendingAudioCheck ? "文案词待核实" : "文案缺读"}</span></div>
                   <span class="small" style="font-family:monospace; color:var(--muted);">${formatTime(Number(item.start || 0))}</span>
                 </div>
-                <div class="diff-diagnosis missing">${escapeHtml(diagnosis)}</div>
+                <div class="diff-diagnosis missing${pendingAudioCheck ? " audio-unverified" : ""}">${escapeHtml(diagnosis)}</div>
                 <div class="polish-diff-box">
                   <div class="polish-diff-line">
                     <span class="polish-diff-label spoken">🎙️ 口播</span>
@@ -21553,11 +21788,14 @@ function polishSectionHtml(title, rows, emptyText) {
               sourceEnd:first.sourceStart+(last.sourceEnd-first.sourceStart)*(i+1)/tokens.length,
             } : {}),
           };
+          const expectedForToken = anchor.word.referenceExpected || anchor.word.expectedDisplay || editableCaptionTokens(review.expectedText || '')[i] || '';
+          const confirmedSpokenDifference = useExpected === false && expectedForToken && captionCorrectionDiffers(display, expectedForToken);
           return {caption:anchor.caption,word:{...timing,display,expectedDisplay:display,
-            referenceExpected:useExpected ? display : anchor.word.expectedDisplay || '',
+            referenceExpected:useExpected ? display : expectedForToken,
             recognizedDisplay:anchor.word.originalDisplay || anchor.word.display,
             originalDisplay:anchor.word.originalDisplay || anchor.word.display,
-            matchType:'edited',userKept:true,issueType:'',issueId:'',action:''}};
+            matchType:confirmedSpokenDifference ? 'spoken_addition' : 'edited',userKept:true,
+            issueType:confirmedSpokenDifference ? 'addition' : '',issueId:'',action:''}};
         });
         const removed = new Set(selected.map(e => e.word));
         return [...new Set(selected.map(e => e.caption))].map(caption => ({caption,
@@ -22277,6 +22515,7 @@ function polishSectionHtml(title, rows, emptyText) {
             state.avLinked && ['video','audio'].includes(anchor.type) && (isTrackLocked('video') || isTrackLocked('audio'))) return toast('相关轨道已锁定，请先解锁');
         const historyBefore = JSON.stringify(projectData(true));
         snapshot();
+        const dismissedRepeatIssueIds = new Set();
         state.timelineRange = null;
         state.selected = anchor; state.selectedItems = [anchor];
         if (['video','audio'].includes(anchor.type)) {
@@ -22296,6 +22535,9 @@ function polishSectionHtml(title, rows, emptyText) {
           applyHistoryState(JSON.parse(historyBefore));
           renderAll();
           toast(message);
+        };
+        const collectDismissedIssues = ids => {
+          for (const issueId of ids || []) dismissedRepeatIssueIds.add(String(issueId));
         };
         const tolerance = Math.max(.002,frame*.51);
         splitClipsAt(start, targets(), {record:false,quiet:true});
@@ -22319,8 +22561,14 @@ function polishSectionHtml(title, rows, emptyText) {
         // mapping, and could recreate the same mismatch issue a second time.
         let deleted = false;
         deleteSelected.deferRender = true;
-        try { deleted = deleteSelected(true, {record:false}) === true; }
-        finally { deleteSelected.deferRender = false; }
+        deleteSelected.onDismissIssues = collectDismissedIssues;
+        try {
+          deleted = deleteSelected(true, {record:false}) === true;
+        }
+        finally {
+          deleteSelected.deferRender = false;
+          deleteSelected.onDismissIssues = null;
+        }
         if (!deleted) {
           rollback('重复片段删除未完成，已恢复原工程');
           return;
@@ -22330,6 +22578,23 @@ function polishSectionHtml(title, rows, emptyText) {
         // owner clip that was just removed, dropping unrelated words as well.
         state.captions=captionsAfterRepeatCut(originalCaptions,start,end);
         state.captionRecoveryArchive=captionArchiveAfterRepeatCut(originalCaptionArchive,start,end);
+        // The snapshot restores caption text and timing, but it also restores
+        // review flags that deleteSelected already dismissed. Clear those flags
+        // from both visible captions and recovery records before remapping can
+        // restore them and before renderTimeline recreates review cards.
+        const clearDismissedIssueFlags = word => {
+          if (!word || !dismissedRepeatIssueIds.has(String(word.issueId || ''))) return;
+          word.issueId = '';
+          word.issueType = '';
+          word.action = '';
+          word.reviewDismissed = true;
+          if (word.matchType === 'error') word.matchType = 'match';
+        };
+        for (const caption of state.captions) for (const word of caption.words || []) clearDismissedIssueFlags(word);
+        for (const record of state.captionRecoveryArchive || []) {
+          for (const word of record.caption?.words || []) clearDismissedIssueFlags(word);
+          clearDismissedIssueFlags(record.word);
+        }
         if (!captionWordsRemain(preservedCaptionWords)) {
           rollback('检测到非重复文案可能受影响，删除已撤销');
           return;
@@ -22446,11 +22711,11 @@ function polishSectionHtml(title, rows, emptyText) {
       }
       function rippleSubtitleTimeline(start, end) {
         const length = Math.max(0, end - start);
-        if (length <= 0.001) return;
+        if (length <= 0.001) return [];
         // A manual cut is the user's final decision. Drop every linked review
         // marker before shifting the surviving timeline so stale errors cannot
         // be reported again after an erroneous/repeated take was removed.
-        dismissTrimmedIssues(start, end);
+        const dismissed = dismissTrimmedIssues(start, end) || [];
         const shiftTimedItem = (item) => {
           if(state.trackLocks[item.trackId||"caption"] || state.trackSyncLocks[item.trackId||"caption"]===false)return item;
           const itemStart = Number(item.start || 0), itemEnd = Number(item.end || itemStart + .04);
@@ -22512,6 +22777,7 @@ function polishSectionHtml(title, rows, emptyText) {
         state.reviewCaptions = state.reviewCaptions.map(shiftTimedItem).filter(Boolean);
         state.issues = state.issues.map(shiftTimedItem).filter(Boolean);
         captionInspectorKey = "";
+        return dismissed;
       }
       function trimSubtitleTimeline(start, end) {
         const cutStart = Number(start || 0), cutEnd = Number(end || 0);
@@ -22576,7 +22842,8 @@ function polishSectionHtml(title, rows, emptyText) {
         return applied;
       }
       function cutScriptIssue(id, { record = true, quiet = false, scope = null } = {}) {
-        const issue = state.issues.find((item) => item.id === id);
+        const issue = state.issues.find((item) => item.id === id) ||
+          state.reviewCaptions.find((item) => item.id === id || item.issueId === id);
         if (!issue) return;
         if ((issue.type === 'unverifiedAddition' || issue.unverifiedAddition) && !scope) {
           const review = state.reviewCaptions.find(item => (item.issueId || item.id) === id);
@@ -22609,6 +22876,10 @@ function polishSectionHtml(title, rows, emptyText) {
           // Independent clips already own their source ranges. Cut the placed
           // timeline directly; mapping through removed main media is invalid.
           shiftTracks(start,end-start);
+          state.reviewCaptions = state.reviewCaptions.filter(item => scope
+            ? item.id !== scope.id : (item.issueId || item.id) !== id);
+          state.issues = state.issues.filter(item => item.id !== id);
+          state.matchIssues = (state.matchIssues || []).filter(item => (item.issueId || item.id) !== id);
           recomputeContentDuration();clampTracksToDuration();
           if (!quiet) {seekTimeline(start);renderAll();queueAutosave();toast('已同步删除所选词句及对应音视频');}
           return;
@@ -23999,6 +24270,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
             height,
             fps,
             codec: $("exportCodec").value,
+            sourceCodec: state.video?.videoCodec || "",
             bitrate,
             colorSpace: $("exportColorSpace").value,
             qualityMode: $("exportQuality").value,
@@ -24168,8 +24440,21 @@ function persistedMediaItem(item, preserveWaveform = false) {
             ),
             quality: "high",
           };
-          const { jobId } = await nativeCall("startExport", config);
+          const mltCompiled = window.ClipAssistantMlt?.compile(config) || null;
+          if (mltCompiled?.fatal) throw new Error(mltCompiled.reason || "MLT 时间线不能安全导出。");
+          const useMlt = !!mltCompiled?.supported;
+          const compatibilityReason = useMlt ? "" : (mltCompiled?.reason || "MLT 时间线编译器未加载");
+          if (useMlt) {
+            $("exportStatus").textContent = "正在启动 MLT 本地时间线核心…";
+          } else {
+            $("exportStatus").textContent = `该工程尚有功能未迁移到 MLT：${compatibilityReason}；本次使用兼容渲染器。`;
+          }
+          const started = useMlt
+            ? await nativeCall("mltStartExport", mltCompiled)
+            : await nativeCall("startExport", config);
+          const { jobId } = started;
           state.exportJobId = jobId;
+          state.exportBackend = useMlt ? "mlt" : "legacy";
           state.exportProjectId = state.projectId || "";
           $("exportModal").classList.add("background-mode");
           $("backgroundExport").hidden = false;
@@ -24181,7 +24466,10 @@ function persistedMediaItem(item, preserveWaveform = false) {
           $("exportBar").parentElement?.classList.add("waiting");
           while (true) {
             await new Promise((r) => setTimeout(r, 200));
-            const s = await nativeCall("exportStatus", jobId);
+            const s = await nativeCall(
+              useMlt ? "mltExportStatus" : "exportStatus",
+              useMlt ? { jobId } : jobId,
+            );
             const elapsed = Math.max(0, Number(s.elapsed || 0));
             const clock = `${Math.floor(elapsed / 60)}:${String(Math.floor(elapsed % 60)).padStart(2, "0")}`;
             $("exportBar").style.width = `${Math.max(2, (s.progress || 0) * 100)}%`;
@@ -24194,6 +24482,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
               let text =
                 s.message ||
                 `正在导出 ${Math.round((s.progress || 0) * 100)}%${s.encoderLabel ? ` · ${s.encoderLabel}` : ""}`;
+              if (!useMlt) text = `兼容渲染器 · ${compatibilityReason} · ${text}`;
               text = /已用 \d+:\d+/.test(text)
                 ? text.replace(/已用 \d+:\d+/, `已用 ${clock}`)
                 : `${text} · 已用 ${clock}`;
@@ -24211,6 +24500,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
               $("revealExport").onclick = () =>
                 window.native.revealFile(s.outputPath);
               state.exportJobId = "";
+              state.exportBackend = "";
               state.exportProjectId = "";
               updateExportProgressIndicator("导出完成");
               resetExportSpeed();
@@ -24221,6 +24511,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
               $("cancelExport").textContent = "关闭";
               $("backgroundExport").hidden = true;
               state.exportJobId = "";
+              state.exportBackend = "";
               state.exportProjectId = "";
               updateExportProgressIndicator("导出已取消");
               resetExportSpeed();
@@ -24232,6 +24523,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
           chooseButton.disabled = false;
           chooseButton.textContent = originalChooseText;
           state.exportJobId = "";
+          state.exportBackend = "";
           state.exportProjectId = "";
           resetExportSpeed();
           $("cancelExport").textContent = "关闭";
@@ -25728,11 +26020,8 @@ function scaleTimelineClipGeometry(ratio) {
         }
         const insertReview = e.target.closest("[data-insert-review]");
         if (insertReview) {
-          if (isTrackLocked("review")) {
-            toast("待处理片段轨道已锁定");
-            return;
-          }
-          insertReviewSegment(insertReview.dataset.insertReview);
+          seekTimeline(state.reviewCaptions.find(item => item.id === insertReview.dataset.insertReview)?.start || state.currentTime || 0);
+          showReviewDetails(insertReview.dataset.insertReview);
           e.preventDefault();
           e.stopPropagation();
           return;
@@ -25771,10 +26060,10 @@ function scaleTimelineClipGeometry(ratio) {
         const clip = e.target.closest(".clip");
         if (clip) {
           timelineGapSelection = null;
-          if (clip.dataset.type === 'review' && editTool !== 'blade' && !e.target.closest('[data-trim]') &&
-              !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          if (clip.dataset.type === 'review') {
             showReviewDetails(clip.dataset.id);
             e.preventDefault();
+            e.stopPropagation();
             return;
           }
           if (editTool === "blade") {
@@ -26461,6 +26750,16 @@ function scaleTimelineClipGeometry(ratio) {
       document.addEventListener('pointerup',()=>flushTimelinePointerMove(false),true);
       document.addEventListener("pointerup", (e) => {
         if (timelineDrag?.pointer === e.pointerId) {
+          const drag = timelineDrag;
+          let captionReviewToOpen = null;
+          if (drag.element?.dataset.type === "caption" && !drag.trim && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey &&
+              Math.hypot(e.clientX - Number(drag.startX || e.clientX), e.clientY - Number(drag.startY || e.clientY)) <= 3) {
+            const caption = state.captions.find(item => item.id === drag.element.dataset.id);
+            if (caption) captionReviewToOpen = state.reviewCaptions.find(item =>
+              (!item.captionTrackId || item.captionTrackId === (caption.trackId || "caption")) &&
+              (!item.ownerClipId || !caption.ownerClipId || item.ownerClipId === caption.ownerClipId) &&
+              Number(item.start) < Number(caption.end) && Number(item.end) > Number(caption.start)) || null;
+          }
           const collapseSelectedCaption = shouldCollapseSelectedCaptionOnClick(timelineDrag, e);
           hideTrimAudioDetail();
           hideSnapGuide();
@@ -26722,6 +27021,10 @@ function scaleTimelineClipGeometry(ratio) {
           updateInspector();
           timelineDrag = null;
           queueAutosave();
+          if (captionReviewToOpen) {
+            seekTimeline(captionReviewToOpen.start);
+            showReviewDetails(captionReviewToOpen.id);
+          }
         }
         if (objectDrag?.pointer === e.pointerId) {
           if (objectDrag.framePending) cancelAnimationFrame(objectDrag.framePending);
@@ -28586,10 +28889,12 @@ function registerFontFace(font) {
       $("cancelExport").onclick = async () => {
         if (state.exportJobId) {
           const jobId = state.exportJobId;
+          const useMlt = state.exportBackend === "mlt";
           try {
-            await nativeCall("cancelExport", jobId);
+            await nativeCall(useMlt ? "mltCancelExport" : "cancelExport", useMlt ? { jobId } : jobId);
           } catch {}
           state.exportJobId = "";
+          state.exportBackend = "";
           state.exportProjectId = "";
           $("backgroundExport").hidden = true;
           $("exportStatus").textContent = "已取消导出";
@@ -33146,6 +33451,470 @@ generateAutoCaptions=(...args)=>runExclusiveCaptionAnalysis(()=>originalGenerate
   };
   installSpliceEvents();
   syncSplicePanel();
+})();
+(() => {
+  const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+  const escapeXml = value => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
+  const gcd = (left, right) => {
+    let a = Math.abs(Math.trunc(left)), b = Math.abs(Math.trunc(right));
+    while (b) [a, b] = [b, a % b];
+    return Math.max(1, a);
+  };
+
+  function frameRate(config) {
+    let numerator = Math.trunc(finite(config.fpsNumerator, 0));
+    let denominator = Math.trunc(finite(config.fpsDenominator, 0));
+    if (numerator > 0 && denominator > 0) {
+      const divisor = gcd(numerator, denominator);
+      return { numerator: numerator / divisor, denominator: denominator / divisor };
+    }
+    const rate = Math.max(1, Math.min(240, finite(config.fps, 30)));
+    for (const [n, d] of [[24000, 1001], [30000, 1001], [60000, 1001], [120000, 1001]]) {
+      if (Math.abs(rate - n / d) < 0.001) return { numerator: n, denominator: d };
+    }
+    numerator = Math.round(rate * 1000000);
+    denominator = 1000000;
+    const divisor = gcd(numerator, denominator);
+    return { numerator: numerator / divisor, denominator: denominator / divisor };
+  }
+
+  function hasActiveNumbers(value) {
+    if (Array.isArray(value)) return value.some(hasActiveNumbers);
+    if (!value || typeof value !== "object") return typeof value === "number" && Math.abs(value) > 0.000001;
+    return Object.values(value).some(hasActiveNumbers);
+  }
+
+  function unsupported(config) {
+    if (Math.abs(finite(config.exportSpeed, 1) - 1) > .0001 || Math.abs(finite(config.audio?.speed, 1) - 1) > .0001)
+      return "变速时间线还没有迁移到 MLT。";
+    if (String(config.colorSpace || "bt709") !== "bt709") return "BT.2020、HLG 和 P3 色彩输出尚未迁移到 MLT。";
+    if (Math.abs(finite(config.mainTimelineOffset, 0)) > .0001)
+      return "嵌套时间线偏移还没有迁移到 MLT。";
+    for (const group of config.compoundClips || []) {
+      const transform = group.transform || {};
+      if (Math.abs(finite(transform.x, 0)) > .001 || Math.abs(finite(transform.y, 0)) > .001 ||
+          Math.abs(finite(transform.scale, 1) - 1) > .001 || Math.abs(finite(transform.rotation, 0)) > .001 ||
+          Math.abs(finite(transform.opacity, 1) - 1) > .001 ||
+          [transform.cropTop, transform.cropBottom, transform.cropLeft, transform.cropRight].some(value => Math.abs(finite(value, 0)) > .001))
+        return "复合片段外层变换还没有迁移到 MLT。";
+    }
+    if ((config.removals || []).length || (config.audioMutes || []).length || config.audioProcessingEnabled)
+      return "自动删词、静音区间或音频总线处理还没有迁移到 MLT。";
+    if (config.encoderDevice && !["cpu", "software"].includes(String(config.encoderDevice).toLowerCase()))
+      return "MLT 目前使用 CPU 编码；所选硬件编码器尚未迁移。";
+    if (["rf", "lossless"].includes(String(config.qualityMode || "balanced")))
+      return "固定画质和无损编码参数还没有迁移到 MLT。";
+    if ((config.titles || []).length) return "标题图层还没有迁移到 MLT。";
+    if ((config.captions || []).length && !config.captionRasterized) return "字幕图层尚未生成 MLT 可用的图像素材。";
+    if (hasActiveNumbers(config.beauty) || (config.blemishMarks || []).length) return "美容和瑕疵修复效果还没有迁移到 MLT。";
+    if (finite(config.denoise?.strength, 0) > 0) return "降噪效果还没有迁移到 MLT。";
+    if ((config.audioFxRack || []).some(effect => effect.enabled !== false) || (config.mainAudioFxPreRendered || []).length)
+      return "音频效果链还没有迁移到 MLT。";
+    if ((config.spliceRegions || []).length || config.spliceLayout && config.spliceLayout !== "free")
+      return "拼接蒙版和分屏布局还没有迁移到 MLT。";
+
+    const clips = [
+      ...(config.mainVideoClips || []).map(clip => ({ ...clip, _kind: "main" })),
+      ...(config.videoLayers || []).map(clip => ({ ...clip, _kind: "layer" })),
+      ...(config.images || []).map(clip => ({ ...clip, _kind: "image" })),
+    ];
+    const captionImages = (config.images || []).filter(image => image._clipAssistantCaptionRaster);
+    if ((config.images || []).some(image => !image._clipAssistantCaptionRaster))
+      return "普通图片素材的持续显示和变换还没有迁移到 MLT。";
+    if (captionImages.some(image => !image.fullFrame || !image.pixelExact ||
+        Math.abs(finite(image.x, 0)) > .001 || Math.abs(finite(image.y, 0)) > .001))
+      return "字幕图像不是逐帧对齐的全画布素材，暂不能交给 MLT。";
+    for (const clip of clips) {
+      if (clip.spliceRegion || clip.splicePlaybackMode && !["normal-audio", "normal-muted"].includes(clip.splicePlaybackMode))
+        return "特殊拼接片段还没有迁移到 MLT。";
+      if (hasActiveNumbers(clip.settings?.color || clip.color)) return "片段调色效果还没有迁移到 MLT。";
+      if (Math.abs(finite(clip.playbackRate, 1) - 1) > .0001 || Math.abs(finite(clip.volume, 1) - 1) > .0001 ||
+          Math.abs(finite(clip.pan, 0)) > .0001 || Math.abs(finite(clip.fadeIn, 0)) > .0001 || Math.abs(finite(clip.fadeOut, 0)) > .0001)
+        return "片段变速、音量、声像或淡化效果还没有迁移到 MLT。";
+      if (clip._kind !== "main" && (
+        Math.abs(finite(clip.x, 0)) > .001 || Math.abs(finite(clip.y, 0)) > .001 ||
+        Math.abs(finite(clip.scale, 1) - 1) > .001 || Math.abs(finite(clip.rotation, 0)) > .001 ||
+        Math.abs(finite(clip.opacity, 1) - 1) > .001 ||
+        [clip.cropTop, clip.cropBottom, clip.cropLeft, clip.cropRight].some(value => Math.abs(finite(value, 0)) > .001)
+      )) return "叠加素材的位置、缩放或裁切还没有迁移到 MLT。";
+    }
+    for (const clip of [...(config.mainAudioClips || []), ...(config.audioAssets || [])]) {
+      if (Math.abs(finite(clip.playbackRate, 1) - 1) > .0001 || Math.abs(finite(clip.volume, 1) - 1) > .0001 ||
+          Math.abs(finite(clip.pan, 0)) > .0001 || Math.abs(finite(clip.fadeIn, 0)) > .0001 || Math.abs(finite(clip.fadeOut, 0)) > .0001 ||
+          Math.abs(finite(clip.spliceMuteStart, 0)) > .0001 || Math.abs(finite(clip.spliceMuteUntil, 0)) > .0001 ||
+          (clip.fxRack || []).some(effect => effect.enabled !== false))
+        return "音轨变速、音量、声像、淡化或剪辑静音还没有迁移到 MLT。";
+    }
+    if (hasActiveNumbers(config.color)) return "全局调色效果还没有迁移到 MLT。";
+    return "";
+  }
+
+  function packTracks(items, prefix, fps, fpsDenominator) {
+    const byTrack = new Map();
+    for (const item of items) {
+      const trackId = String(item.trackId || prefix);
+      if (!byTrack.has(trackId)) byTrack.set(trackId, []);
+      byTrack.get(trackId).push(item);
+    }
+    const packed = [];
+    for (const [trackId, group] of byTrack) {
+      const lanes = [];
+      group.sort((left, right) => finite(left.start) - finite(right.start) ||
+        finite(left.compoundStackOrder, 0) - finite(right.compoundStackOrder, 0));
+      for (const item of group) {
+        const startFrame = Math.max(0, Math.round(finite(item.start) * fps / fpsDenominator));
+        const endFrame = Math.max(startFrame + 1, Math.round(finite(item.end) * fps / fpsDenominator));
+        const lane = lanes.find(candidate => candidate.endFrame <= startFrame) || { items: [], endFrame: 0 };
+        lane.items.push({ ...item, startFrame, endFrame, durationFrames: endFrame - startFrame });
+        lane.endFrame = endFrame;
+        if (!packed.includes(lane)) packed.push(Object.assign(lane, { trackId, laneIndex: lanes.length }));
+        if (!lanes.includes(lane)) lanes.push(lane);
+      }
+    }
+    return packed;
+  }
+
+  function colorFilterXml(chainId, item, fps) {
+    const color = item.settings?.color || item.color || {};
+    const filters = [];
+    const brightness = finite(color.exposure, 0) + finite(color.lift, 0) * .24 + finite(color.gain, 0) * .3 +
+      finite(color.gamma, 0) * .35 + finite(color.shadows, 0) * .13 + finite(color.highlights, 0) * .11 +
+      finite(color.blacks, 0) * .08 + finite(color.whites, 0) * .1 + finite(color.pivot, 0) * -.08;
+    if (Math.abs(brightness) > .001) filters.push(`<filter id="${chainId}_brightness"><property name="mlt_service">brightness</property><property name="level">${(1 + brightness / 78).toFixed(5)}</property></filter>`);
+    const gamma = finite(color.gamma, 0);
+    if (Math.abs(gamma) > .001) filters.push(`<filter id="${chainId}_gamma"><property name="mlt_service">gamma</property><property name="gamma">${Math.max(.1, Math.min(4, 1 - gamma / 100)).toFixed(5)}</property></filter>`);
+    if (Math.abs(finite(color.saturation, 0)) > .001) {
+      filters.push(`<filter id="${chainId}_saturation"><property name="mlt_service">avfilter.eq</property><property name="av.saturation">${Math.max(0, 1 + finite(color.saturation, 0) / 70).toFixed(5)}</property><property name="position">frame</property></filter>`);
+    }
+    return filters.join("");
+  }
+
+  function compile(config = {}) {
+    const normalizedPath = value => String(value || "").replaceAll("/", "\\").replace(/\\+$/, "").toLowerCase();
+    const outputPath = normalizedPath(config.outputPath);
+    const sourcePaths = [
+      config.inputPath,
+      ...(config.mainVideoClips || []).map(item => item.path || item.sourcePath),
+      ...(config.mainAudioClips || []).map(item => item.path || item.sourcePath),
+      ...(config.videoLayers || []).map(item => item.path || item.sourcePath),
+      ...(config.audioAssets || []).map(item => item.path || item.sourcePath),
+      ...(config.images || []).map(item => item.path || item.sourcePath),
+    ].map(normalizedPath).filter(Boolean);
+    if (outputPath && sourcePaths.includes(outputPath))
+      return { supported: false, fatal: true, reason: "导出路径与时间线中的源素材相同。请另选文件名，避免覆盖原素材。" };
+    const unsupportedReason = unsupported(config);
+    if (unsupportedReason) return { supported: false, reason: unsupportedReason };
+
+    const rate = frameRate(config);
+    const fps = rate.numerator / rate.denominator;
+    const width = Math.max(16, Math.round(finite(config.width, 1920)));
+    const height = Math.max(16, Math.round(finite(config.height, 1080)));
+    const durationFrames = Math.max(1, Math.round(finite(config.outputDuration, .04) * rate.numerator / rate.denominator));
+    const media = [];
+    const usedSourcePaths = new Set();
+    let mediaIndex = 0;
+    let invalidSourceDuration = false;
+    const makeMedia = (item, kind, defaultPath) => {
+      const sourcePath = String(item.path || item.sourcePath || defaultPath || "");
+      if (!sourcePath) return null;
+      usedSourcePaths.add(sourcePath);
+      const startFrame = Math.max(0, Math.round(finite(item.start, 0) * rate.numerator / rate.denominator));
+      const endFrame = Math.max(startFrame + 1, Math.round(finite(item.end, finite(config.outputDuration, .04)) * rate.numerator / rate.denominator));
+      const sourceStartFrame = kind === "image" ? 0 : Math.max(0, Math.round(finite(item.sourceStart, 0) * rate.numerator / rate.denominator));
+      const requestedSourceFrames = kind === "image" ? endFrame - startFrame : Math.max(1, Math.round(
+        (finite(item.sourceEnd, finite(item.sourceStart, 0) + (endFrame - startFrame) * rate.denominator / rate.numerator) -
+          finite(item.sourceStart, 0)) * rate.numerator / rate.denominator,
+      ));
+      if (kind !== "image" && Math.abs(requestedSourceFrames - (endFrame - startFrame)) > 1)
+        invalidSourceDuration = true;
+      const sourceFrames = endFrame - startFrame;
+      const id = `media${mediaIndex++}`;
+      const stillLoop = kind === "image" ? "<property name=\"eof\">loop</property>" : "";
+      const chain = `<chain id="${id}"><property name="resource">${escapeXml(sourcePath)}</property><property name="mlt_service">avformat</property>${stillLoop}${colorFilterXml(id, item, fps)}</chain>`;
+      media.push(chain);
+      return { ...item, _producer: id, startFrame, endFrame, durationFrames: endFrame - startFrame, sourceStartFrame, sourceFrames, kind };
+    };
+
+    const visible = (item, fallbackTrack) => config.trackVisibility?.[item.trackId || fallbackTrack] !== false;
+    const mainVideo = (config.includeVideo === false ? [] : (config.mainVideoClips || []).filter(item => visible(item, "video")))
+      .map(item => makeMedia(item, "video", config.inputPath)).filter(Boolean);
+    const videoLayers = (config.includeVideo === false ? [] : (config.videoLayers || []).filter(item => visible(item, "video")))
+      .map(item => makeMedia(item, "video", config.inputPath)).filter(Boolean);
+    const images = (config.images || []).map(item => makeMedia(item, "image", "")).filter(Boolean);
+    const mainAudio = (config.includeAudio === false ? [] : (config.mainAudioClips || []).filter(item => !item.muted && visible(item, "audio")))
+      .map(item => makeMedia(item, "audio", config.mainAudioPath || config.inputPath)).filter(Boolean);
+    const extraAudio = (config.includeAudio === false ? [] : (config.audioAssets || []).filter(item => !item.muted && visible(item, "audio")))
+      .map(item => makeMedia(item, "audio", "")).filter(Boolean);
+
+    if (invalidSourceDuration) return { supported: false, reason: "片段的源范围和时间线长度不一致，MLT 变速映射尚未迁移。" };
+
+    if (!mainVideo.length && !videoLayers.length && !images.length && config.includeVideo !== false)
+      return { supported: false, reason: "时间线没有可供 MLT 渲染的视频素材。" };
+    const videoItems = [...mainVideo, ...videoLayers, ...images];
+    const audioItems = [...mainAudio, ...extraAudio];
+    const videoTracks = packTracks(videoItems, "video", rate.numerator, rate.denominator);
+    const audioTracks = packTracks(audioItems, "audio", rate.numerator, rate.denominator);
+    if (!videoTracks.length && !audioTracks.length)
+      return { supported: false, reason: "时间线没有可供 MLT 渲染的视频或音频素材。" };
+    if (["mp3", "wav"].includes(String(config.format || "").toLowerCase()) && !audioTracks.length)
+      return { supported: false, reason: "音频导出没有可供 MLT 渲染的音轨。" };
+    const trackRank = new Map((config.trackOrder || []).map((id, index) => [String(id), index]));
+    const sortTracks = tracks => tracks.sort((left, right) =>
+      (trackRank.get(right.trackId) ?? 10000) - (trackRank.get(left.trackId) ?? 10000) || left.laneIndex - right.laneIndex);
+    sortTracks(videoTracks); sortTracks(audioTracks);
+
+    let playlistIndex = 0;
+    const playlistXml = (track, type) => {
+      const playlistId = `playlist${playlistIndex++}`;
+      track.playlistId = playlistId;
+      let cursor = 0;
+      const entries = [];
+      for (const item of track.items) {
+        if (item.startFrame > cursor) entries.push(`<blank length="${item.startFrame - cursor}"/>`);
+        const sourceFrames = item.sourceFrames;
+        const out = item.sourceStartFrame + Math.max(1, sourceFrames) - 1;
+        entries.push(`<entry producer="${item._producer}" in="${item.sourceStartFrame}" out="${out}"/>`);
+        cursor = item.endFrame;
+      }
+      if (cursor < durationFrames) entries.push(`<blank length="${durationFrames - cursor}"/>`);
+      return `<playlist id="${playlistId}"><property name="clipassistant:track">${escapeXml(track.trackId)}</property>${entries.join("")}</playlist>`;
+    };
+
+    const playlists = [];
+    for (const track of videoTracks) playlists.push(playlistXml(track, "video"));
+    for (const track of audioTracks) playlists.push(playlistXml(track, "audio"));
+    const backgroundId = "background";
+    const background = `<producer id="${backgroundId}" in="0" out="${durationFrames - 1}"><property name="resource">0xff000000</property><property name="mlt_service">color</property><property name="eof">pause</property></producer>`;
+    const trackRefs = [`<track producer="${backgroundId}" hide="audio"/>`];
+    for (const track of videoTracks) trackRefs.push(`<track producer="${track.playlistId}" hide="audio"/>`);
+    for (const track of audioTracks) trackRefs.push(`<track producer="${track.playlistId}" hide="video"/>`);
+
+    let transitionIndex = 0;
+    const transitions = [];
+    if (config.includeVideo !== false) {
+      videoTracks.forEach((track, index) => {
+        const bTrack = index + 1;
+        transitions.push(`<transition id="video_mix${transitionIndex++}" in="0" out="${durationFrames - 1}"><property name="a_track">0</property><property name="b_track">${bTrack}</property><property name="mlt_service">affine</property><property name="transition.rect">0%/0%:100%x100%:100%</property><property name="transition.distort">0</property></transition>`);
+      });
+    }
+    const audioOffset = 1 + videoTracks.length;
+    if (audioTracks.length > 1) {
+      for (let index = 1; index < audioTracks.length; index++) {
+        transitions.push(`<transition id="audio_mix${transitionIndex++}" in="0" out="${durationFrames - 1}"><property name="a_track">${audioOffset}</property><property name="b_track">${audioOffset + index}</property><property name="mlt_service">mix</property><property name="always_active">1</property><property name="sum">1</property><property name="start">1.0</property><property name="end">1.0</property></transition>`);
+      }
+    }
+
+    const profile = `<profile description="ClipAssistant" width="${width}" height="${height}" frame_rate_num="${rate.numerator}" frame_rate_den="${rate.denominator}" progressive="1" sample_aspect_num="1" sample_aspect_den="1" display_aspect_num="${width / gcd(width, height)}" display_aspect_den="${height / gcd(width, height)}" colorspace="709"/>`;
+    const tractor = `<tractor id="tractor0" in="0" out="${durationFrames - 1}"><multitrack>${trackRefs.join("")}</multitrack>${transitions.join("")}</tractor>`;
+    const projectXml = `<?xml version="1.0" encoding="UTF-8"?><mlt LC_NUMERIC="C" version="7.42.0" producer="tractor0">${profile}${background}${media.join("")}${playlists.join("")}${tractor}</mlt>`;
+    return {
+      supported: true,
+      projectXml,
+      sourcePaths: [...usedSourcePaths],
+      outputPath: config.outputPath,
+      format: config.format,
+      codec: config.codec,
+      sourceCodec: config.sourceCodec || "",
+      bitrate: config.bitrate,
+      audioBitrate: config.audioBitrate || "192k",
+      qualityMode: config.qualityMode || "balanced",
+      width,
+      height,
+      fpsNumerator: rate.numerator,
+      fpsDenominator: rate.denominator,
+      totalFrames: durationFrames,
+      includeVideo: config.includeVideo !== false,
+      includeAudio: config.includeAudio !== false,
+    };
+  }
+
+  window.ClipAssistantMlt = Object.freeze({ compile });
+})();
+(() => {
+  let generation = 0;
+  let pendingTimer = 0;
+  let inFlight = false;
+  let pendingTime = null;
+
+  const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+  const hasActiveNumbers = value => {
+    if (Array.isArray(value)) return value.some(hasActiveNumbers);
+    if (!value || typeof value !== "object") return typeof value === "number" && Math.abs(value) > 0.000001;
+    return Object.values(value).some(hasActiveNumbers);
+  };
+  const identityTransform = value => {
+    const item = value || {};
+    return Math.abs(number(item.x)) < .001 && Math.abs(number(item.y)) < .001 &&
+      Math.abs(number(item.scale, 1) - 1) < .001 && Math.abs(number(item.rotation)) < .001 &&
+      Math.abs(number(item.opacity, 1) - 1) < .001 &&
+      [item.cropTop, item.cropBottom, item.cropLeft, item.cropRight].every(value => Math.abs(number(value)) < .001);
+  };
+
+  function clear() {
+    generation++;
+    if (pendingTimer) clearTimeout(pendingTimer);
+    pendingTimer = 0;
+    pendingTime = null;
+    const image = document.getElementById("mltTimelineFrame");
+    const layer = document.getElementById("previewClipLayer");
+    if (image) image.hidden = true;
+    layer?.classList.remove("mlt-rendered-preview");
+  }
+
+  function compilePreview(time) {
+    if (!state.video?.path || state.video.missing || !window.ClipAssistantMlt ||
+        !window.chrome?.webview || !state.trackOrder?.length) return null;
+    if ((state.images || []).length || (state.titles || []).length ||
+        (state.spliceRegions || []).length || (state.spliceLayout && state.spliceLayout !== "free") ||
+        hasActiveNumbers(state.color) || hasActiveNumbers(state.beauty) ||
+        Math.abs(number(state.audio?.speed, 1) - 1) > .0001) return null;
+    const compounds = state.compoundClips || [];
+    if (compounds.some(group => !identityTransform(group.transform))) return null;
+    const compoundIds = new Set(compounds.map(group => String(group.id)));
+
+    const fps = Math.max(1, number(timelineFrameRate(), 30));
+    const mainClipsForPreview = mainClips();
+    if (mainClipsForPreview.some(clip => {
+      const settings = mainVideoSettings(clip, false) || {};
+      return !identityTransform(settings) || (settings.animation && settings.animation !== "none") ||
+        (Array.isArray(settings.keyframes) && settings.keyframes.length > 0);
+    })) return null;
+    const sourceVideoLayers = state.videoLayers || [];
+    if (sourceVideoLayers.some(item => (item.compoundId && !compoundIds.has(String(item.compoundId))) || item.spliceRegion ||
+        (item.splicePlaybackMode && !["normal-audio", "normal-muted"].includes(item.splicePlaybackMode)) ||
+        (item.blendMode && item.blendMode !== "normal") || (item.animation && item.animation !== "none") ||
+        (Array.isArray(item.keyframes) && item.keyframes.length > 0) || !identityTransform(item) ||
+        hasActiveNumbers(item.color))) return null;
+    const videoLayers = sourceVideoLayers.map(item => ({
+      path: item.path || item.originalPath || "",
+      start: item.start,
+      end: item.end,
+      sourceStart: item.sourceStart,
+      sourceEnd: item.sourceEnd,
+      trackId: item.trackId || "video",
+      x: item.x || 0,
+      y: item.y || 0,
+      scale: item.scale || 1,
+      opacity: item.opacity ?? 1,
+      rotation: item.rotation || 0,
+      cropTop: number(item.cropTop),
+      cropBottom: number(item.cropBottom),
+      cropLeft: number(item.cropLeft),
+      cropRight: number(item.cropRight),
+      color: item.color || {},
+      compoundId: item.compoundId || "",
+      compoundStackOrder: number(item.compoundStackOrder),
+    }));
+
+    const normalized = normalizeExportFrameBoundaries(mainClipsForPreview, fps).clips;
+    const clips = normalized.map(clip => ({
+      ...clip,
+      path: state.video.path,
+      trackId: state.mainVideoTrackMap?.[clip.id] || "video",
+      settings: { color: {} },
+    }));
+    const duration = Math.max(.001, number(visibleTimelineDuration(), state.duration || 0));
+    const compiled = window.ClipAssistantMlt.compile({
+      inputPath: state.video.path,
+      width: Math.max(16, number(state.width, 1920)),
+      height: Math.max(16, number(state.height, 1080)),
+      fps,
+      outputDuration: duration,
+      trackOrder: state.trackOrder,
+      trackVisibility: effectiveTrackVisibility(),
+      mainVideoClips: clips,
+      videoLayers,
+      mainTimelineOffset: 0,
+      audio: { speed: 1 },
+      includeVideo: true,
+      includeAudio: false,
+      format: "mp4",
+      qualityMode: "balanced",
+      colorSpace: "bt709",
+      spliceLayout: "free",
+      spliceRegions: [],
+      compoundClips: compounds.map(group => ({
+        id: group.id,
+        transform: { ...(group.transform || {}) },
+      })),
+      removals: [],
+      audioMutes: [],
+      audioProcessingEnabled: false,
+      denoise: { strength: 0 },
+      beauty: {},
+      blemishMarks: [],
+      titles: [],
+      captions: [],
+      images: [],
+    });
+    if (!compiled.supported) return null;
+    compiled.frameIndex = Math.max(0, Math.min(compiled.totalFrames - 1, Math.round(Math.max(0, time) * fps)));
+    return compiled;
+  }
+
+  function request(time) {
+    if (state.playing) { clear(); return; }
+    generation++;
+    pendingTime = number(time, state.currentTime);
+    const image = document.getElementById("mltTimelineFrame");
+    const layer = document.getElementById("previewClipLayer");
+    if (image) image.hidden = true;
+    layer?.classList.remove("mlt-rendered-preview");
+    if (pendingTimer) clearTimeout(pendingTimer);
+    pendingTimer = setTimeout(runPendingPreview, 70);
+  }
+
+  async function runPendingPreview() {
+      pendingTimer = 0;
+      if (inFlight || pendingTime == null || state.playing) return;
+      const requestGeneration = generation;
+      const time = pendingTime;
+      pendingTime = null;
+      inFlight = true;
+      let compiled;
+      try { compiled = compilePreview(number(time, state.currentTime)); }
+      catch (error) { console.warn("MLT 预览时间线编译失败", error); }
+      if (!compiled) {
+        const image = document.getElementById("mltTimelineFrame");
+        const layer = document.getElementById("previewClipLayer");
+        if (image) image.hidden = true;
+        layer?.classList.remove("mlt-rendered-preview");
+        inFlight = false;
+        schedulePendingPreview();
+        return;
+      }
+      try {
+        const reply = await window.__desktopCall("mltPreviewFrame", compiled, 60000);
+        if (requestGeneration !== generation || state.playing) return;
+        if (!reply?.ok || !reply.value?.data) throw new Error(reply?.error?.message || "MLT 未返回预览帧");
+        const image = document.getElementById("mltTimelineFrame");
+        const layer = document.getElementById("previewClipLayer");
+        if (!image || !layer) return;
+        image.src = `data:image/jpeg;base64,${reply.value.data}`;
+        if (typeof image.decode === "function") await image.decode();
+        if (requestGeneration !== generation || state.playing) return;
+        image.hidden = false;
+        layer.classList.add("mlt-rendered-preview");
+      } catch (error) {
+        if (requestGeneration !== generation) return;
+        const image = document.getElementById("mltTimelineFrame");
+        const layer = document.getElementById("previewClipLayer");
+        if (image) image.hidden = true;
+        layer?.classList.remove("mlt-rendered-preview");
+        console.warn("MLT 本地帧预览不可用，保留当前预览", error);
+      } finally {
+        inFlight = false;
+        schedulePendingPreview();
+      }
+  }
+
+  function schedulePendingPreview() {
+    if (pendingTime == null || pendingTimer || state.playing) return;
+    pendingTimer = setTimeout(runPendingPreview, 20);
+  }
+
+  window.requestMltTimelinePreview = request;
+  window.clearMltTimelinePreview = clear;
 })();
 </script>
   </body>

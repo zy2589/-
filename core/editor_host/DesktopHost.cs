@@ -50,7 +50,7 @@ public class DesktopHost : Form
     string sessionToken;
     TaskCompletionSource<Dictionary<string, object>> closeReply;
     string closeRequestId;
-    readonly JavaScriptSerializer json = new JavaScriptSerializer();
+    readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = 32 * 1024 * 1024 };
     readonly string root = Environment.GetEnvironmentVariable("CLIPASSIST_INSTALL_ROOT") ?? AppDomain.CurrentDomain.BaseDirectory;
     static readonly string storageRoot = Environment.GetEnvironmentVariable("CLIPASSIST_STORAGE_ROOT") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ChatGPT", "剪辑助手", "用户数据");
     readonly string data = Environment.GetEnvironmentVariable("CLIPASSIST_DESKTOP_DATA") ?? Path.Combine(storageRoot, "运行配置");
@@ -109,6 +109,7 @@ public class DesktopHost : Form
         };
         FormClosed += (s, e) => {
             hostState = "closed";
+            MltRuntime.ClosePreview();
             view.Dispose();
             if (job != IntPtr.Zero) CloseHandle(job);
             try { if (backend != null && !backend.HasExited) backend.Kill(); } catch {}
@@ -574,6 +575,22 @@ public class DesktopHost : Form
                 status.Text = "剪辑界面脚本错误，已记录到运行日志；请返回剪辑首页重试。";
                 status.Show();
                 status.BringToFront();
+                return;
+            }
+            if ((type == "mltStartExport" || type == "mltExportStatus" || type == "mltCancelExport" || type == "mltPreviewFrame") && message.ContainsKey("id")) {
+                string requestId = Convert.ToString(message["id"]);
+                var payload = message.ContainsKey("payload") ? message["payload"] as Dictionary<string, object> : null;
+                try {
+                    object result;
+                    if (type == "mltStartExport") result = MltRuntime.Start(payload, root);
+                    else if (type == "mltPreviewFrame") result = await Task.Run(() => MltRuntime.PreviewFrame(payload, root));
+                    else if (type == "mltExportStatus") result = MltRuntime.Status(payload == null ? "" : Convert.ToString(payload.ContainsKey("jobId") ? payload["jobId"] : ""));
+                    else result = MltRuntime.Cancel(payload == null ? "" : Convert.ToString(payload.ContainsKey("jobId") ? payload["jobId"] : ""));
+                    view.CoreWebView2.PostWebMessageAsJson(json.Serialize(new { id = requestId, result = new { ok = true, value = result } }));
+                } catch (Exception ex) {
+                    Log("MLT_REQUEST_FAILED " + ex.Message);
+                    view.CoreWebView2.PostWebMessageAsJson(json.Serialize(new { id = requestId, error = ex.Message }));
+                }
                 return;
             }
             if (type != "droppedFiles" || !message.ContainsKey("id")) return;

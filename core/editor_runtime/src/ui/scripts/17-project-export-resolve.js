@@ -963,6 +963,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
             height,
             fps,
             codec: $("exportCodec").value,
+            sourceCodec: state.video?.videoCodec || "",
             bitrate,
             colorSpace: $("exportColorSpace").value,
             qualityMode: $("exportQuality").value,
@@ -1132,8 +1133,21 @@ function persistedMediaItem(item, preserveWaveform = false) {
             ),
             quality: "high",
           };
-          const { jobId } = await nativeCall("startExport", config);
+          const mltCompiled = window.ClipAssistantMlt?.compile(config) || null;
+          if (mltCompiled?.fatal) throw new Error(mltCompiled.reason || "MLT 时间线不能安全导出。");
+          const useMlt = !!mltCompiled?.supported;
+          const compatibilityReason = useMlt ? "" : (mltCompiled?.reason || "MLT 时间线编译器未加载");
+          if (useMlt) {
+            $("exportStatus").textContent = "正在启动 MLT 本地时间线核心…";
+          } else {
+            $("exportStatus").textContent = `该工程尚有功能未迁移到 MLT：${compatibilityReason}；本次使用兼容渲染器。`;
+          }
+          const started = useMlt
+            ? await nativeCall("mltStartExport", mltCompiled)
+            : await nativeCall("startExport", config);
+          const { jobId } = started;
           state.exportJobId = jobId;
+          state.exportBackend = useMlt ? "mlt" : "legacy";
           state.exportProjectId = state.projectId || "";
           $("exportModal").classList.add("background-mode");
           $("backgroundExport").hidden = false;
@@ -1145,7 +1159,10 @@ function persistedMediaItem(item, preserveWaveform = false) {
           $("exportBar").parentElement?.classList.add("waiting");
           while (true) {
             await new Promise((r) => setTimeout(r, 200));
-            const s = await nativeCall("exportStatus", jobId);
+            const s = await nativeCall(
+              useMlt ? "mltExportStatus" : "exportStatus",
+              useMlt ? { jobId } : jobId,
+            );
             const elapsed = Math.max(0, Number(s.elapsed || 0));
             const clock = `${Math.floor(elapsed / 60)}:${String(Math.floor(elapsed % 60)).padStart(2, "0")}`;
             $("exportBar").style.width = `${Math.max(2, (s.progress || 0) * 100)}%`;
@@ -1158,6 +1175,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
               let text =
                 s.message ||
                 `正在导出 ${Math.round((s.progress || 0) * 100)}%${s.encoderLabel ? ` · ${s.encoderLabel}` : ""}`;
+              if (!useMlt) text = `兼容渲染器 · ${compatibilityReason} · ${text}`;
               text = /已用 \d+:\d+/.test(text)
                 ? text.replace(/已用 \d+:\d+/, `已用 ${clock}`)
                 : `${text} · 已用 ${clock}`;
@@ -1175,6 +1193,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
               $("revealExport").onclick = () =>
                 window.native.revealFile(s.outputPath);
               state.exportJobId = "";
+              state.exportBackend = "";
               state.exportProjectId = "";
               updateExportProgressIndicator("导出完成");
               resetExportSpeed();
@@ -1185,6 +1204,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
               $("cancelExport").textContent = "关闭";
               $("backgroundExport").hidden = true;
               state.exportJobId = "";
+              state.exportBackend = "";
               state.exportProjectId = "";
               updateExportProgressIndicator("导出已取消");
               resetExportSpeed();
@@ -1196,6 +1216,7 @@ function persistedMediaItem(item, preserveWaveform = false) {
           chooseButton.disabled = false;
           chooseButton.textContent = originalChooseText;
           state.exportJobId = "";
+          state.exportBackend = "";
           state.exportProjectId = "";
           resetExportSpeed();
           $("cancelExport").textContent = "关闭";

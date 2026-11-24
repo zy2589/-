@@ -196,15 +196,36 @@ def denoise_video(
 
                 start_seconds = input_start / SAMPLE_RATE
                 input_seconds = (input_end - input_start) / SAMPLE_RATE
-                _run(
-                    [
-                        str(ffmpeg), "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
-                        "-ss", f"{start_seconds:.9f}", "-t", f"{input_seconds:.9f}",
-                        "-i", str(channel_path), "-af",
+                if input_start == 0:
+                    # DeepFilterNet starts with a cold recurrent state at the
+                    # beginning of a file. Prime it with a reflected copy of
+                    # the first warmup window, then process the real signal.
+                    # The reflected pre-roll is trimmed off below, so the
+                    # output begins on the original sample grid and every
+                    # sample still passes through denoising.
+                    prefix_frames = min(WARMUP_FRAMES, input_end - input_start)
+                    input_filter = (
+                        f"[0:a]atrim=start_sample=0:end_sample={prefix_frames},areverse,"
+                        f"apad=whole_len={WARMUP_FRAMES},asetpts=PTS-STARTPTS[prefix];"
+                        f"[0:a]atrim=start_sample=0:end_sample={input_end - input_start},"
+                        f"asetpts=PTS-STARTPTS[body];"
+                        f"[prefix][body]concat=n=2:v=0:a=1,"
+                        f"apad=pad_len={WARMUP_FRAMES + CONTEXT_FRAMES}[padded]"
+                    )
+                    input_filters = ["-filter_complex", input_filter, "-map", "[padded]"]
+                else:
+                    input_filters = [
+                        "-af",
                         # Keep extra context after the requested segment so
                         # the model's final analysis window cannot shorten
                         # aligned audio at a chunk or file boundary.
                         f"adelay={WARMUP_FRAMES}S:all=1,apad=pad_len={WARMUP_FRAMES + CONTEXT_FRAMES}",
+                    ]
+                _run(
+                    [
+                        str(ffmpeg), "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+                        "-ss", f"{start_seconds:.9f}", "-t", f"{input_seconds:.9f}",
+                        "-i", str(channel_path), *input_filters,
                         "-c:a", "pcm_s16le", str(part),
                     ], cancel=cancel,
                 )
@@ -266,29 +287,9 @@ def denoise_video(
                     "-c:a", "copy", str(full_channel),
                 ], cwd=work, cancel=cancel,
             )
-            # DeepFilterNet can attenuate the first real phonemes while its
-            # recurrent state settles. Crossfade the source intro into the
-            # enhanced track so the opening speech remains intelligible.
-            opening_blend = min(0.8, total_frames / SAMPLE_RATE)
-            opening_blend_text = f"{opening_blend:.6f}"
-            blended_channel = work / f"blended-channel-{channel}.wav"
-            opening_filter = (
-                f"[0:a]afade=t=out:st=0:d={opening_blend_text}[original];"
-                f"[1:a]afade=t=in:st=0:d={opening_blend_text}[enhanced];"
-                f"[original][enhanced]amix=inputs=2:duration=longest:normalize=0,"
-                f"atrim=end_sample={total_frames},asetpts=PTS-STARTPTS[out]"
-            )
-            _run(
-                [
-                    str(ffmpeg), "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
-                    "-i", str(channel_path), "-i", str(full_channel),
-                    "-filter_complex", opening_filter, "-map", "[out]",
-                    "-c:a", "pcm_s16le", str(blended_channel),
-                ], cancel=cancel,
-            )
-            if _wave_info(blended_channel) != (1, SAMPLE_RATE, total_frames):
-                raise RuntimeError("降噪开头保护音轨帧数异常，未替换原视频")
-            clean_channels.append(blended_channel)
+            if _wave_info(full_channel) != (1, SAMPLE_RATE, total_frames):
+                raise RuntimeError("降噪开头预热音轨帧数异常，未替换原视频")
+            clean_channels.append(full_channel)
 
         cleaned_audio = work / "cleaned.wav"
         if actual_channels == 1:

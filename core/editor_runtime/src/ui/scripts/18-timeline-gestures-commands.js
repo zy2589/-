@@ -440,11 +440,8 @@ function scaleTimelineClipGeometry(ratio) {
         }
         const insertReview = e.target.closest("[data-insert-review]");
         if (insertReview) {
-          if (isTrackLocked("review")) {
-            toast("待处理片段轨道已锁定");
-            return;
-          }
-          insertReviewSegment(insertReview.dataset.insertReview);
+          seekTimeline(state.reviewCaptions.find(item => item.id === insertReview.dataset.insertReview)?.start || state.currentTime || 0);
+          showReviewDetails(insertReview.dataset.insertReview);
           e.preventDefault();
           e.stopPropagation();
           return;
@@ -483,10 +480,10 @@ function scaleTimelineClipGeometry(ratio) {
         const clip = e.target.closest(".clip");
         if (clip) {
           timelineGapSelection = null;
-          if (clip.dataset.type === 'review' && editTool !== 'blade' && !e.target.closest('[data-trim]') &&
-              !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          if (clip.dataset.type === 'review') {
             showReviewDetails(clip.dataset.id);
             e.preventDefault();
+            e.stopPropagation();
             return;
           }
           if (editTool === "blade") {
@@ -1173,6 +1170,16 @@ function scaleTimelineClipGeometry(ratio) {
       document.addEventListener('pointerup',()=>flushTimelinePointerMove(false),true);
       document.addEventListener("pointerup", (e) => {
         if (timelineDrag?.pointer === e.pointerId) {
+          const drag = timelineDrag;
+          let captionReviewToOpen = null;
+          if (drag.element?.dataset.type === "caption" && !drag.trim && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey &&
+              Math.hypot(e.clientX - Number(drag.startX || e.clientX), e.clientY - Number(drag.startY || e.clientY)) <= 3) {
+            const caption = state.captions.find(item => item.id === drag.element.dataset.id);
+            if (caption) captionReviewToOpen = state.reviewCaptions.find(item =>
+              (!item.captionTrackId || item.captionTrackId === (caption.trackId || "caption")) &&
+              (!item.ownerClipId || !caption.ownerClipId || item.ownerClipId === caption.ownerClipId) &&
+              Number(item.start) < Number(caption.end) && Number(item.end) > Number(caption.start)) || null;
+          }
           const collapseSelectedCaption = shouldCollapseSelectedCaptionOnClick(timelineDrag, e);
           hideTrimAudioDetail();
           hideSnapGuide();
@@ -1434,6 +1441,10 @@ function scaleTimelineClipGeometry(ratio) {
           updateInspector();
           timelineDrag = null;
           queueAutosave();
+          if (captionReviewToOpen) {
+            seekTimeline(captionReviewToOpen.start);
+            showReviewDetails(captionReviewToOpen.id);
+          }
         }
         if (objectDrag?.pointer === e.pointerId) {
           if (objectDrag.framePending) cancelAnimationFrame(objectDrag.framePending);

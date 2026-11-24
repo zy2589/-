@@ -404,6 +404,7 @@
         filterLook: { id: "none", intensity: 1, baseColor: null },
         lut: null,
         exportJobId: "",
+        exportBackend: "",
         exportProjectId: "",
         layout: defaultStartupLayout(),
       };
@@ -1494,6 +1495,7 @@
           filterLook: { id: "none", intensity: 1, baseColor: null },
           lut: null,
           exportJobId: state.exportJobId || "",
+          exportBackend: state.exportBackend || "",
           exportProjectId: state.exportProjectId || "",
           layout: defaultStartupLayout(),
         });
@@ -1820,7 +1822,7 @@
         const spoken = short(item.spokenText || item.spoken || item.text);
         const expected = short(item.expectedText);
         const kind = item.type === 'unverifiedAddition' ? '文案外口语待确认' : item.type === 'repeat' ? '疑似重复' : item.type === 'missing' || item.action === 'missing'
-          ? '文案词待确认' : ['addition','extra'].includes(item.type) ? '疑似多读' : '疑似读错';
+          ? item.confirmedMissing ? '文案缺读（已确认）' : '文案词待核实' : ['addition','extra'].includes(item.type) ? '疑似多读' : '疑似读错';
         if (item.type !== 'mismatch') return `${kind}\n${item.type === 'missing' || item.action === 'missing' ? expected || '需试听核对' : spoken || '需试听核对'}`;
         const left = String(item.spokenText || item.spoken || '').trim().split(/\s+/).filter(Boolean);
         const right = String(item.expectedText || '').trim().split(/\s+/).filter(Boolean);
@@ -1845,14 +1847,14 @@
             : item.type === "repeat"
               ? "重复阅读"
               : item.type === "missing" || item.action === "missing"
-                ? item.needsAudioReview ? "未识别到，需试听核对" : "疑似漏读，需试听核对"
+                ? item.confirmedMissing ? "已确认录音未读出" : "未识别到，待试听确认是否漏读"
                 : ['addition','extra'].includes(item.type)
                   ? "识别多出，文案无对应内容"
                   : "用词不一致，需试听核对";
         const reason = item.type === 'unverifiedAddition'
           ? '识别到文案外口语；试听后可选择剪掉，或保留声音并加字幕。'
           : item.type === 'missing' || item.action === 'missing'
-          ? '文案有这段内容，但识别结果没有找到对应口播。试听判断录音里是否有词；有词可手动补字幕，确实没读可确认漏读。'
+          ? item.confirmedMissing ? '已确认录音没有读出这段文案；紫色表示确实缺读。' : '文案有这段内容，但识别结果没有找到对应口播；黄色表示需要试听确认是识别遗漏还是真正缺读。'
           : item.type === 'mismatch'
             ? '识别内容与此位置的文案不一致，可能读法、识别或对齐有误；核对后再修改。'
             : ['addition','extra'].includes(item.type)
@@ -1871,7 +1873,7 @@
           .map((item) => ({
             ...item,
             text: reviewClipText(item),
-            action: item.type === "missing" ? "missing" : item.type === "repeat" ? "review" : "replace",
+            action: item.type === "missing" ? "missing" : item.type === "repeat" ? "review" : item.type === "unverifiedAddition" || item.unverifiedAddition ? "insert" : "replace",
           }));
         for (const caption of state.captions || [])
           for (const word of caption.words || []) {
@@ -2006,7 +2008,9 @@
         if (window.mediaOperationBusy) return {ok:false,error:"素材正在生成，请完成后再退出。"};
         if ($("exportModal")?.classList.contains("on") && $("cancelExport")?.textContent !== "关闭") return {ok:false,error:"请先完成或取消导出，再退出剪辑助手。"};
         if (state.exportJobId) {
-          const job = await nativeCall("exportStatus", state.exportJobId);
+          const job = state.exportBackend === "mlt"
+            ? await nativeCall("mltExportStatus", { jobId: state.exportJobId })
+            : await nativeCall("exportStatus", state.exportJobId);
           if (!["done","completed","cancelled","error","failed"].includes(job.state))
             return {ok:false,error:"导出仍在运行，请先完成或取消导出。"};
         }
@@ -3349,8 +3353,9 @@
         };
       }
       function rippleShiftAllTracks(collections = {}, fromTimelineTime = 0, deltaTimeline = 0) {
-        for(const [key,track] of [['videoLayers','video'],['audioAssets','audio'],['images','image'],['titles','text'],['captions','caption'],['reviewCaptions','review'],['audioMutes','audio'],['issues','review']]){
-          const list=collections[key];if(!list)continue;
+        const shiftedLists=new Set();
+        for(const [key,track] of [['videoLayers','video'],['audioAssets','audio'],['images','image'],['titles','text'],['captions','caption'],['reviewCaptions','review'],['audioMutes','audio'],['issues','review'],['matchIssues','review']]){
+          const list=collections[key];if(!list||shiftedLists.has(list))continue;shiftedLists.add(list);
           const result=editRipple(list,fromTimelineTime,deltaTimeline,{id:uid,rate:Number(collections.audio?.speed||1),enabled:item=>editTrackEnabled(item.trackId||track,collections.trackLocks,collections.trackSyncLocks,true)});
           list.splice(0,list.length,...result);
         }

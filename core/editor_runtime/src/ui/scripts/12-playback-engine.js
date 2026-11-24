@@ -379,6 +379,7 @@
             primary.play().catch(() => {});
         }
         renderPreviewObjects(false);
+        if (!state.playing) window.requestMltTimelinePreview?.(state.currentTime);
         syncPreviewAudio();
         syncTimelineChrome();
         $("timecode").textContent =
@@ -654,6 +655,7 @@
             shuttleSpeed *= 2;
           }
           if (!state.playing) {
+            window.clearMltTimelinePreview?.();
             state.playing = true;
             getActiveVideo().play().catch(() => {});
             startPlaybackAnimationLoop();
@@ -719,6 +721,7 @@
           gapPlayback = null;
           syncPreviewAudio();
           renderPreviewObjects(false);
+          window.requestMltTimelinePreview?.(state.currentTime);
           $("play").textContent = "▶";
           return;
         }
@@ -737,6 +740,7 @@
             startTimeline: state.currentTime,
           };
         }
+        window.clearMltTimelinePreview?.();
         state.playing = true;
         applyMediaPlaybackRate($("video"));
         applyMediaPlaybackRate($("videoAlt"));
@@ -751,6 +755,7 @@
           video.pause();
           syncPreviewAudio();
           $("play").textContent = "▶";
+          window.requestMltTimelinePreview?.(state.currentTime);
           if (message) toast(message);
         };
         try {

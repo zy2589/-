@@ -85,8 +85,9 @@ function assignOverlapLanes(items = []) {
       }
       function clipHtml(c, type, lane = 0, laneCount = 1) {
         const visualType = type === "audioasset" ? "audio" : type;
+        const pendingAudioCheck = (c.type === "missing" || c.action === "missing") && !c.confirmedMissing && c.needsAudioReview !== false;
         const issueClass = type === "review"
-          ? ` ${escapeHtml(c.type || "mismatch")}${c.scripture ? " scripture" : ""}`
+          ? ` ${escapeHtml(c.type || "mismatch")}${pendingAudioCheck ? " audio-unverified" : ""}${c.scripture ? " scripture" : ""}`
           : "";
         const displayText = type === "review"
           ? reviewClipText(c)
@@ -122,7 +123,7 @@ function assignOverlapLanes(items = []) {
                 return `<span class="caption-token ${status}${actionClass}"${word.meaningReview ? ` data-meaning-word="${wordIndex}"` : ''}${actionAttribute}${tokenTitle ? ` title="${escapeHtml(tokenTitle)}"` : ""}>${escapeHtml(word.display)}</span>`;
               })
               .join("")
-          : `<span class="clipname ellipsis"${type === "review" ? reviewAction === "missing" ? ` data-focus-issue="${escapeHtml(c.issueId || c.id)}"` : reviewAction === "insert" ? ` data-insert-review="${escapeHtml(c.id)}" title="试听确认后点击插入正确字幕轨道"` : ` data-cut-review="${escapeHtml(c.id)}"` : ""}>${escapeHtml(displayText)}</span>`;
+          : `<span class="clipname ellipsis"${type === "review" ? reviewAction === "missing" ? ` data-focus-issue="${escapeHtml(c.issueId || c.id)}"` : reviewAction === "insert" ? ` data-insert-review="${escapeHtml(c.id)}" title="点击查看并确认这段文案外口播"` : ` data-cut-review="${escapeHtml(c.id)}"` : ""}>${escapeHtml(displayText)}</span>`;
         const actionClass = type === "review" ? ` ${reviewAction}` : "";
         const reviewHit = type==='caption' ? ' data-caption-details="'+escapeHtml(c.id)+'"' : '';
         const inner = type === "caption" || type === "review"
