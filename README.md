@@ -9,7 +9,7 @@ Windows 桌面剪辑助手，包含**视频下载与降噪、时间线剪辑、C
 ## 功能
 
 - **下载区域**：固定显示 12 行任务，支持按人名、号码、视频名称和可选链接分别创建任务。视频直接按下载格式保存；启用降噪时只处理音频并复制原视频流，不做视频压缩转码。悬停视频名称可预览标题，并在预览框中手动换行、即时查看导出效果。
-- **剪辑区域**：管理视频和音频轨道，可裁切、静音、调色、调整画面位置与大小，并提供上下分区、多分区、斜切和多个画中画等布局。
+- **剪辑区域**：内置 MLT 7.42 多轨时间线核心，管理叠放的视频和音频轨道，可逐帧剪切、精细修剪、调色、调整画面位置与大小，并提供上下分区、多分区、斜切和多个画中画等布局。
 - **CC 语音识别**：Deepgram Nova-3 为默认引擎，也可手动选择 Gemini、Groq Whisper 或本地 Whisper。Gemini 服务繁忙时会自动重试并切换备用模型；识别结果可与文稿匹配，常见专有名词按正确大小写显示。
 - **抠图区域**：提供两个独立页面，可分别导入和处理视频。
 - **工程首页与数据维护**：按日期和名称管理剪辑工程。清理面板可统计并清除过期预览、转写、临时、WebView 和 Python 字节码缓存，也可删除旧发布包及打包暂存；工程永久删除为单独的可选项，并在执行前再次确认。当前安装版、当前发布目录、登录资料、设置、凭据和 Downloads 中的源视频不会被清理。
@@ -36,10 +36,12 @@ DPAPI 凭证与当前 Windows 用户配置关联。迁移到其他 Windows 用�
 
 ## 最新版本
 
-当前唯一发布版本：[`v20261119-190141`](https://github.com/zy2589/-/releases/tag/v20261119-190141)。
+当前发布版本：[`v20261125-000324`](https://github.com/zy2589/-/releases/tag/v20261125-000324)。
 
-- 安装包：[ClipAssistant-installer-20261119-190141.zip](https://github.com/zy2589/-/releases/download/v20261119-190141/ClipAssistant-installer-20261119-190141.zip)
-- 便携包：[ClipAssistant-portable-20261119-190141.zip](https://github.com/zy2589/-/releases/download/v20261119-190141/ClipAssistant-portable-20261119-190141.zip)
+- 安装包：[ClipAssistant-installer-20261125-000324.zip](https://github.com/zy2589/-/releases/download/v20261125-000324/ClipAssistant-installer-20261125-000324.zip)
+- 安装包校验：[ClipAssistant-installer-20261125-000324.zip.sha256](https://github.com/zy2589/-/releases/download/v20261125-000324/ClipAssistant-installer-20261125-000324.zip.sha256)
+- 便携包：[ClipAssistant-portable-20261125-000324.zip](https://github.com/zy2589/-/releases/download/v20261125-000324/ClipAssistant-portable-20261125-000324.zip)
+- 便携包校验：[ClipAssistant-portable-20261125-000324.zip.sha256](https://github.com/zy2589/-/releases/download/v20261125-000324/ClipAssistant-portable-20261125-000324.zip.sha256)
 - SHA-256 校验文件随两个压缩包一并提供；每个版本的变更和安全审核报告见 Release 页面。
 
 ## 本地构建记录
