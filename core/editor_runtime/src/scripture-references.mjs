@@ -68,13 +68,30 @@ export function normalizeScriptureReferences(words = [], {rangeReference = ""} =
     // an unambiguous chapter AND verse; never reinterpret chapter-only prose.
     let parsed=chapterVerse(match[2],match[3]);
     let rangeText=match[5];
+    let conjunctionMeansVerse=false;
     if (!parsed && match[3] && !match[5] && /\bverses?\b/i.test(match[0])) {
       parsed=chapterVerse(match[2]);
       if (parsed) rangeText=match[3];
     }
+    // Speakers often read a citation as “Hebrews nine and twenty seven”.
+    // Reinterpret “and” as the chapter/verse boundary only when that exact
+    // chapter:verse exists in the supplied manuscript.
+    if (match.groups?.rangeConnector?.toLowerCase() === 'and' && rangeText) {
+      const spokenCitation=chapterVerse(match[2],rangeText);
+      if (spokenCitation) {
+        const canonical=`${books.get(match[1].toLowerCase())} ${spokenCitation.chapter}:${spokenCitation.verse}`;
+        const referenceText=String(rangeReference).replace(/[–—]/g,'-').replace(/\s*([:-])\s*/g,'$1');
+        const offset=referenceText.toLowerCase().indexOf(canonical.toLowerCase());
+        if(offset>=0 && !/[\d]/.test(referenceText[offset+canonical.length] || '')) {
+          parsed=spokenCitation;
+          rangeText=null;
+          conjunctionMeansVerse=true;
+        }
+      }
+    }
     if(!parsed) continue;
     // Interpret a conjunction as a range only with an exact manuscript citation.
-    if (match.groups?.rangeConnector?.toLowerCase() === 'and') {
+    if (!conjunctionMeansVerse && match.groups?.rangeConnector?.toLowerCase() === 'and') {
       const canonical = `${books.get(match[1].toLowerCase())} ${parsed.chapter}:${parsed.verse}-${integer(rangeText)}`;
       const referenceText = String(rangeReference).replace(/[–—]/g, '-').replace(/\s*([:-])\s*/g, '$1');
       const offset = referenceText.toLowerCase().indexOf(canonical.toLowerCase());

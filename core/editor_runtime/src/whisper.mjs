@@ -858,14 +858,9 @@ export function tightenTranscriptWordTimes(segments = []) {
   return words;
 }
 
-export function manuscriptRecognitionPrompt(script = "", startRatio = 0, spanRatio = 1, language = speechLanguage()) {
-  const words = lexicalWords(script);
+export function manuscriptRecognitionPrompt(_script = "", _startRatio = 0, _spanRatio = 1, language = speechLanguage()) {
   const languageName = SPEECH_LANGUAGES.find((item) => item.id === language)?.english || "the detected language";
-  if (!words.length) return `Clear spoken ${languageName} speech.`;
-  const start = Math.max(0, Math.min(words.length - 1, Math.floor(words.length * startRatio) - 30));
-  const desired = Math.max(90, Math.min(190, Math.ceil(words.length * Math.max(0.08, spanRatio)) + 60));
-  const excerpt = words.slice(start, start + desired).join(" ");
-  return `Clear spoken ${languageName} transcript. Keep the original language and wording. Expected vocabulary and wording: ${excerpt}`.slice(0, 1200);
+  return `Clear verbatim spoken ${languageName} transcript. Preserve the speaker's wording, restarts, repetitions, and fillers. Do not infer or add words from an external manuscript.`;
 }
 
 export function parseTimestampSeconds(value) {
@@ -963,7 +958,7 @@ const GEMINI_STT_SCHEMA = {
   required: ["segments"],
 };
 
-async function geminiTranscribeFile(filePath, { signal, language = speechLanguage(), script = "" } = {}) {
+async function geminiTranscribeFile(filePath, { signal, language = speechLanguage() } = {}) {
   if (!geminiTranscriptionReady()) throw new Error("请在纠正设置里保存 Gemini API Key，或配置 Vertex 凭证。Antigravity 仅用于文稿纠正。");
   const bytes = await fs.promises.readFile(filePath);
   if (bytes.length > GEMINI_MAX_INLINE_BYTES)
@@ -971,7 +966,7 @@ async function geminiTranscribeFile(filePath, { signal, language = speechLanguag
   const raw = await completeGeminiTranscription({
     model: GEMINI_SPEECH_MODEL,
     system:
-      `You are a multilingual speech-to-text engine. Detect the language spoken in the audio${language && language !== "auto" ? `; it is expected to be ${SPEECH_LANGUAGES.find((item) => item.id === language)?.english || language}` : ""}. Transcribe verbatim in that same language. Keep restarts, repeated words, false starts, and fillers. Do not translate, summarize, or silently correct grammar. Capitalize proper nouns correctly, including God, Jesus, Christ, Lord, Bible, Scripture, and Holy Spirit. Preserve the speaker's words exactly.${script ? ` Expected vocabulary and wording from the manuscript: ${lexicalWords(script).slice(0, 150).join(" ")}` : ""}`,
+      `You are a multilingual speech-to-text engine. Detect the language spoken in the audio${language && language !== "auto" ? `; it is expected to be ${SPEECH_LANGUAGES.find((item) => item.id === language)?.english || language}` : ""}. Transcribe verbatim in that same language. Keep restarts, repeated words, false starts, and fillers. Do not translate, summarize, or silently correct grammar. Capitalize proper nouns correctly, including God, Jesus, Christ, Lord, Bible, Scripture, and Holy Spirit. Preserve the speaker's words exactly. Do not infer or add words from an external manuscript.`,
     input: [
       {
         type: "text",
@@ -991,7 +986,7 @@ async function geminiTranscribeFile(filePath, { signal, language = speechLanguag
 
 export async function transcribeWithGemini(
   audioPath,
-  { duration = 0, job = null, signal = null, language = speechLanguage(), script = "" } = {},
+  { duration = 0, job = null, signal = null, language = speechLanguage() } = {},
 ) {
   const totalDuration = Math.max(0.04, Number(duration || 0.04));
   const size = fs.statSync(audioPath).size;
@@ -999,7 +994,7 @@ export async function transcribeWithGemini(
     size > GEMINI_MAX_INLINE_BYTES || totalDuration > GEMINI_CHUNK_SECONDS + 20;
   if (!needChunks) {
     if (job) job.progress = 0.22;
-    const raw = await geminiTranscribeFile(audioPath, { signal, language, script });
+    const raw = await geminiTranscribeFile(audioPath, { signal, language });
     if (job) job.progress = 0.86;
     const segments = parseGeminiTranscription(raw.text, 0);
     return {
@@ -1024,7 +1019,7 @@ export async function transcribeWithGemini(
     await extractAudioSlice(audioPath, chunkPath, start, length);
     if (job) job.progress = 0.14 + Math.min(0.7, (start / totalDuration) * 0.7);
     try {
-      const raw = await geminiTranscribeFile(chunkPath, { signal, language, script });
+      const raw = await geminiTranscribeFile(chunkPath, { signal, language });
       segments.push(...parseGeminiTranscription(raw.text, start));
       if (raw.model) models.add(raw.model);
     } finally {
@@ -1045,14 +1040,16 @@ export async function transcribeWithGemini(
 
 export function parseDeepgramTranscription(data, offset = 0) {
   const shift = Math.max(0, Number(offset || 0));
-  const toSegment = (text, start, end) => {
+  const toSegment = (text, start, end, confidence) => {
     const clean = String(text || "").trim();
     if (!clean || !Number.isFinite(Number(start))) return null;
+    const score = confidence == null ? Number.NaN : Number(confidence);
     return {
       text: clean,
       start: shift + Number(start),
       end: Math.max(shift + Number(start) + 0.04, shift + Number(end || start)),
       timebase: "seconds",
+      ...(Number.isFinite(score) ? { confidence: score } : {}),
     };
   };
   const alternative = data?.results?.channels?.[0]?.alternatives?.[0] || {};
@@ -1061,7 +1058,7 @@ export function parseDeepgramTranscription(data, offset = 0) {
   if (words.length) {
     const output = words
       .map((word) =>
-        toSegment(word.punctuated_word || word.word || word.text, word.start, word.end),
+        toSegment(word.punctuated_word || word.word || word.text, word.start, word.end, word.confidence),
       )
       .filter(Boolean);
     // Deepgram can occasionally omit a complete utterance from `words` while
@@ -1109,21 +1106,7 @@ function deepgramHttpError(status, body) {
   return new Error(message || `Deepgram 识别失败（${status}）。`);
 }
 
-function deepgramKeyterms(script = "") {
-  const common = new Set(["about", "after", "again", "also", "because", "before", "being", "between", "could", "every", "first", "from", "have", "into", "just", "more", "other", "said", "says", "that", "their", "there", "these", "they", "this", "through", "very", "what", "when", "where", "which", "while", "with", "would", "your"]);
-  const seen = new Set();
-  return (String(script || "").match(/[\p{L}][\p{L}’'-]{3,}/gu) || [])
-    .filter((word) => {
-      const key = word.toLowerCase();
-      if (common.has(key) || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .sort((left, right) => right.length - left.length)
-    .slice(0, 35);
-}
-
-async function deepgramTranscribeFile(filePath, { signal, script = "", language = speechLanguage() } = {}) {
+async function deepgramTranscribeFile(filePath, { signal, language = speechLanguage() } = {}) {
   const key = getDeepgramApiKey();
   if (!key) throw new Error("还没有保存 Deepgram API Key。");
   const bytes = await fs.promises.readFile(filePath);
@@ -1138,7 +1121,9 @@ async function deepgramTranscribeFile(filePath, { signal, script = "", language 
   url.searchParams.set("filler_words", "true");
   if (language === "auto") url.searchParams.set("detect_language", "true");
   else url.searchParams.set("language", language);
-  for (const keyterm of deepgramKeyterms(script)) url.searchParams.append("keyterm", keyterm);
+  // Do not send terms harvested from the whole manuscript as ASR keyterms.
+  // They can bias the recognizer toward words that were not spoken. Manuscript
+  // disambiguation happens later against the nearby, time-aligned passage.
   const response = await fetch(url, {
     method: "POST",
     headers: {
@@ -1159,7 +1144,7 @@ async function deepgramTranscribeFile(filePath, { signal, script = "", language 
 
 export async function transcribeWithDeepgram(
   audioPath,
-  { duration = 0, job = null, signal = null, script = "", language = speechLanguage() } = {},
+  { duration = 0, job = null, signal = null, language = speechLanguage() } = {},
 ) {
   const totalDuration = Math.max(0.04, Number(duration || 0.04));
   const needChunks = totalDuration > DEEPGRAM_CHUNK_SECONDS + 2;
@@ -1169,7 +1154,7 @@ export async function transcribeWithDeepgram(
   }
   if (!needChunks) {
     if (job) job.progress = 0.22;
-    const data = await deepgramTranscribeFile(audioPath, { signal, script, language });
+    const data = await deepgramTranscribeFile(audioPath, { signal, language });
     if (job) job.progress = 0.86;
     return {
       segments: parseDeepgramTranscription(data, 0),
@@ -1192,7 +1177,7 @@ export async function transcribeWithDeepgram(
     await extractAudioSlice(audioPath, chunkPath, start, length);
     if (job) job.progress = 0.14 + Math.min(0.7, (start / totalDuration) * 0.7);
     try {
-      const data = await deepgramTranscribeFile(chunkPath, { signal, script, language });
+      const data = await deepgramTranscribeFile(chunkPath, { signal, language });
       segments.push(...parseDeepgramTranscription(data, start).map(segment => ({ ...segment, chunkIndex: index })));
       const text = data?.results?.channels?.[0]?.alternatives?.[0]?.transcript;
       if (text) texts.push(String(text));
@@ -2176,6 +2161,7 @@ async function finalizeAutoCaptionAnalysis(job, segments, duration, captionLines
     if(gap>12)transcriptGaps.push(gap);
   }
   logSpeechJob(job,'transcript-ready',{segmentCount:unique.length,audioVerifiedWordCount:unique.filter(segment=>segment.audioVerified).length,
+    confidenceWordCount:unique.filter(segment=>segment.confidence!=null&&Number.isFinite(Number(segment.confidence))).length,
     gapsOver12Seconds:transcriptGaps.length,longestGapSeconds:Math.round(Math.max(0,...transcriptGaps)*100)/100});
   if(job.cacheKey) {try{writeTranscriptCache(supportRoot(),job.cacheKey,unique,fallbackText,job.asrModel||'');}catch{/* cache is optional */}}
   const sourceSegments=unique.map(segment=>({...segment}));
@@ -2199,8 +2185,15 @@ async function finalizeAutoCaptionAnalysis(job, segments, duration, captionLines
   }
   for(const issue of aligned?.issues||[])if(issue.type==='missing'){issue.needsAudioReview=true;issue.reason='未识别到这段内容，请先试听核对；确认漏读后再补录';}
   const plan = aligned ? pendingCaptionPlan(aligned) : null;
+  if(aligned&&plan)logSpeechJob(job,'script-alignment-ready',{
+    scriptWordCount:aligned.expected.length,
+    matchedWordCount:aligned.operations.filter(operation=>operation.expected&&operation.spoken&&['match','near'].includes(operation.type)).length,
+    mismatchReviewCount:plan.issues.filter(issue=>issue.type==='mismatch').length,
+    unverifiedAdditionCount:plan.issues.filter(issue=>issue.type==='unverifiedAddition').length,
+    cutUnmatchedWordCount:aligned.operations.filter(operation=>operation.spoken&&!operation.expected&&operation.action==='cut').length,
+  });
   const formatOnlyPlan = !aligned&&manuscript
-    ? pendingCaptionPlan(alignScript({segments:unique,script:manuscript,duration:outputDuration,recoverMissing:false}))
+    ? pendingCaptionPlan(alignScript({segments:unique,script:manuscript,duration:outputDuration,recoverMissing:false}),{reviewUnmatched:false})
     : null;
   const formattedSpeech = !plan&&formatOnlyPlan
     ? applyManuscriptFormattingOnly(formatOnlyPlan.words,manuscript)

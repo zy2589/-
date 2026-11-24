@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "kind": "logi-options-plus-actions-ring-setup-manifest",
+  "importableByLogiOptionsPlus": false,
+  "profile": {
+    "name": "剪辑助手",
+    "device": "Logitech MX Master 4",
+    "hostOS": "Windows",
+    "application": "剪辑助手"
+  },
+  "trigger": {
+    "mouseControl": "Haptic Sense Panel",
+    "optionsPlusAction": "Show Actions Ring"
+  },
+  "haptics": {
+    "enabled": true,
+    "actionsRingNavigation": true,
+    "actionsRingSelection": true,
+    "intensity": "Medium",
+    "intensityOptions": ["Subtle", "Low", "Medium", "High"],
+    "notes": "在 Logi Options+ 的 MX Master 4 > Haptic feedback 设置中启用 Actions Ring 触觉反馈并设置强度。Actions Ring 的导航和选择反馈由 Options+ 提供。"
+  },
+  "ring": [
+    {
+      "position": 1,
+      "label": "打开下载区域",
+      "iconSuggestion": "Download",
+      "actionType": "Keystroke",
+      "keystroke": "Ctrl+Alt+1",
+      "purpose": "切换到剪辑助手下载区域"
+    },
+    {
+      "position": 2,
+      "label": "打开剪辑区域",
+      "iconSuggestion": "Edit",
+      "actionType": "Keystroke",
+      "keystroke": "Ctrl+Alt+2",
+      "purpose": "切换到剪辑助手剪辑区域"
+    },
+    {
+      "position": 3,
+      "label": "匹配文案／校对",
+      "iconSuggestion": "Text",
+      "actionType": "Keystroke",
+      "keystroke": "Ctrl+Alt+M",
+      "purpose": "在剪辑区域运行匹配文案并标出差异"
+    },
+    {
+      "position": 4,
+      "label": "导出视频",
+      "iconSuggestion": "Export",
+      "actionType": "Keystroke",
+      "keystroke": "Ctrl+Alt+E",
+      "purpose": "打开导出设置；需要在设置窗口确认后才会开始导出"
+    },
+    {
+      "position": 5,
+      "label": "时间线放大",
+      "iconSuggestion": "Zoom In",
+      "actionType": "Keystroke",
+      "keystroke": "Ctrl+=",
+      "purpose": "以播放头为中心放大时间线"
+    },
+    {
+      "position": 6,
+      "label": "时间线缩小",
+      "iconSuggestion": "Zoom Out",
+      "actionType": "Keystroke",
+      "keystroke": "Ctrl+-",
+      "purpose": "以播放头为中心缩小时间线"
+    },
+    {
+      "position": 7,
+      "label": "时间线适合视图",
+      "iconSuggestion": "Fit to Screen",
+      "actionType": "Keystroke",
+      "keystroke": "Ctrl+0",
+      "alternateKeystroke": "Shift+Z",
+      "purpose": "缩放时间线以适合视图"
+    }
+  ],
+  "source": {
+    "keyboardShortcuts": [
+      "core/ui.py",
+      "core/editor_runtime/src/ui/scripts/19-fonts-shortcuts-dragdrop.js"
+    ],
+    "hapticSettings": "Logi Options+ > MX Master 4 > Haptic feedback"
+  }
+}

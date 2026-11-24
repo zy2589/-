@@ -266,7 +266,29 @@ def denoise_video(
                     "-c:a", "copy", str(full_channel),
                 ], cwd=work, cancel=cancel,
             )
-            clean_channels.append(full_channel)
+            # DeepFilterNet can attenuate the first real phonemes while its
+            # recurrent state settles. Crossfade the source intro into the
+            # enhanced track so the opening speech remains intelligible.
+            opening_blend = min(0.8, total_frames / SAMPLE_RATE)
+            opening_blend_text = f"{opening_blend:.6f}"
+            blended_channel = work / f"blended-channel-{channel}.wav"
+            opening_filter = (
+                f"[0:a]afade=t=out:st=0:d={opening_blend_text}[original];"
+                f"[1:a]afade=t=in:st=0:d={opening_blend_text}[enhanced];"
+                f"[original][enhanced]amix=inputs=2:duration=longest:normalize=0,"
+                f"atrim=end_sample={total_frames},asetpts=PTS-STARTPTS[out]"
+            )
+            _run(
+                [
+                    str(ffmpeg), "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+                    "-i", str(channel_path), "-i", str(full_channel),
+                    "-filter_complex", opening_filter, "-map", "[out]",
+                    "-c:a", "pcm_s16le", str(blended_channel),
+                ], cancel=cancel,
+            )
+            if _wave_info(blended_channel) != (1, SAMPLE_RATE, total_frames):
+                raise RuntimeError("降噪开头保护音轨帧数异常，未替换原视频")
+            clean_channels.append(blended_channel)
 
         cleaned_audio = work / "cleaned.wav"
         if actual_channels == 1:

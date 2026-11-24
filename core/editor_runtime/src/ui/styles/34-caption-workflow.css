@@ -14,6 +14,7 @@
 .review-filter { gap:6px; align-items:center; margin-bottom:7px; flex-wrap:wrap; }
 .caption-review-row { width:100%; text-align:left; white-space:normal; display:block; margin:5px 0; padding:8px; }
 .caption-review-row.missing { color:#cf9bff; }
+.caption-review-row.unverifiedAddition { color:#f2c15c; }
 .caption-review-row.mismatch,.caption-review-row.repeat { color:#ff9292; }
 .caption-review-entry { display:flex; align-items:stretch; gap:6px; margin:5px 0; }
 .caption-review-entry .caption-review-row { flex:1; min-width:0; margin:0; }

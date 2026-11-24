@@ -51,7 +51,7 @@ function syncCaptionCorrectionReviews() {
   state.reviewCaptions = state.reviewCaptions.filter(review => {
     if (review.meaningImpact === 'same') { resolved.add(review.issueId || review.id); return false; }
     if (resolved.has(review.issueId || review.id)) return false;
-    if (['addition','extra'].includes(review.type)) { resolved.add(review.issueId || review.id); return false; }
+    if (['addition','extra'].includes(review.type) && !review.unverifiedAddition) { resolved.add(review.issueId || review.id); return false; }
     if (review.type === 'mismatch' && captionCorrectionKey(review.spokenText) && captionCorrectionKey(review.expectedText) &&
         !captionCorrectionDiffers(review.spokenText, review.expectedText)) {
       resolved.add(review.issueId || review.id); cosmetic.add(review.issueId || review.id); return false;
@@ -73,6 +73,12 @@ function syncCaptionCorrectionReviews() {
       const expected = word.referenceExpected || word.expectedDisplay || '';
       const addition = ['addition','extra'].includes(word.issueType) || word.matchType === 'spoken_addition';
       if (addition) { word.issueType = 'addition'; word.matchType = 'spoken_addition'; word.issueId = ''; word.action = ''; continue; }
+      if (word.matchType === 'near' && expected) {
+        if (word.issueId) resolved.add(word.issueId);
+        word.display=expected;
+        word.issueType=''; word.issueId=''; word.action='';
+        continue;
+      }
       if (!captionCorrectionDiffers(recognized, expected)) {
         if (word.issueType === 'mismatch') { word.issueType = ''; word.issueId = ''; word.action = ''; }
         continue;
@@ -290,9 +296,230 @@ $("timelineContent").addEventListener('pointerdown', hideReviewHoverCard);
 $("timelineScroll").addEventListener('scroll', hideReviewHoverCard);
 
 let reviewDetailsDialog = null;
+function reviewCutCaptionConflict(review, start, end) {
+  const candidates = [];
+  for (const caption of state.captions || []) {
+    if (review.captionTrackId && caption.trackId && caption.trackId !== review.captionTrackId) continue;
+    if (review.ownerClipId && caption.ownerClipId && caption.ownerClipId !== review.ownerClipId) continue;
+    if (review.sourceMediaId && caption.sourceMediaId && caption.sourceMediaId !== review.sourceMediaId) continue;
+    const words = caption.words?.length ? caption.words : [{
+      display: caption.text, start: caption.start, end: caption.end,
+      issueType: caption.issueType, matchType: caption.matchType,
+    }];
+    for (const word of words) {
+      if (word.issueType === 'addition' || word.issueType === 'extra' || word.matchType === 'spoken_addition') continue;
+      const wordStart = Number(word.start), wordEnd = Number(word.end);
+      if (Number.isFinite(wordStart) && Number.isFinite(wordEnd) && wordStart < end - .004 && wordEnd > start + .004)
+        candidates.push(word);
+    }
+  }
+  return candidates[0] || null;
+}
+function buildUnverifiedCutControls(review) {
+  const panel = document.createElement('div');
+  panel.className = 'review-extra-cut-controls';
+  panel.hidden = true;
+  const note = document.createElement('p');
+  note.className = 'small';
+  note.textContent = '剪切边界按识别时间预填；试听剪后效果，必要时微调，再确认剪掉。';
+  const range = document.createElement('div');
+  range.className = 'review-extra-cut-range';
+  const makeTimeInput = (labelText, value) => {
+    const label = document.createElement('label');
+    label.className = 'small';
+    label.textContent = labelText;
+    const input = document.createElement('input');
+    input.type = 'number'; input.min = '0'; input.max = String(Number(state.duration || 0));
+    input.step = '0.01'; input.value = Number(value || 0).toFixed(2);
+    input.setAttribute('aria-label', labelText);
+    label.appendChild(input);
+    range.appendChild(label);
+    return input;
+  };
+  const startInput = makeTimeInput('开始（秒）', review.start);
+  const endInput = makeTimeInput('结束（秒）', review.end);
+  const status = document.createElement('p');
+  status.className = 'small review-extra-cut-status';
+  const actions = document.createElement('div');
+  actions.className = 'review-details-actions';
+  const preview = document.createElement('button');
+  preview.className = 'btn small'; preview.textContent = '试听剪后';
+  preview.classList.add('review-extra-cut-preview');
+  preview.type = 'button';
+  const commit = document.createElement('button');
+  commit.className = 'btn small primary'; commit.textContent = '确认剪掉';
+  commit.type = 'button';
+  const back = document.createElement('button');
+  back.className = 'btn small'; back.textContent = '返回'; back.type = 'button';
+  const readRange = () => ({ start: Number(startInput.value), end: Number(endInput.value) });
+  const validate = () => {
+    const { start, end } = readRange();
+    const conflict = reviewCutCaptionConflict(review, start, end);
+    const rangeValid = Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end > start + .02 && end <= Number(state.duration || 0);
+    const previewable = rangeValid && typeof reviewCutAudioTarget === 'function' && !!reviewCutAudioTarget(review, start, end);
+    const valid = rangeValid && !conflict && previewable;
+    status.classList.toggle('warning', !!conflict);
+    status.textContent = conflict
+      ? `剪切范围碰到正文字幕“${String(conflict.display || conflict.text || '').trim()}”；请调整边界，避免删掉正文。`
+      : !rangeValid ? '请检查开始和结束时间。'
+      : !previewable ? '无法定位这段口语的原始音频，暂时不能安全试听和剪切。'
+      : '边界可用；剪掉前请试听拼接效果。';
+    commit.disabled = !valid;
+    preview.disabled = !valid;
+    if (typeof stopReviewCutPreview === 'function') stopReviewCutPreview(preview);
+    return valid;
+  };
+  startInput.addEventListener('input', validate);
+  endInput.addEventListener('input', validate);
+  preview.addEventListener('click', () => {
+    if (preview.dataset.active === 'true') { stopReviewCutPreview(preview); return; }
+    if (!validate()) return;
+    const { start, end } = readRange();
+    void auditionReviewCutPreview(review, start, end, preview);
+  });
+  commit.addEventListener('click', () => {
+    if (!validate()) return;
+    if (isTrackLocked('review')) return toast('待处理轨道已锁定，无法剪除这段口语');
+    const { start, end } = readRange();
+    stopReviewCutPreview(preview);
+    reviewDetailsDialog.close();
+    cutScriptIssue(review.issueId || review.id, { scope: { ...review, start, end } });
+  });
+  back.addEventListener('click', () => { stopReviewCutPreview(preview); panel.hidden = true; });
+  actions.append(preview, commit, back);
+  panel.append(note, range, status, actions);
+  validate();
+  return panel;
+}
+function buildMissingCaptionControls(review) {
+  const panel = document.createElement('div');
+  panel.className = 'review-extra-cut-controls review-missing-caption-controls';
+  panel.hidden = true;
+  const note = document.createElement('p');
+  note.className = 'small';
+  note.textContent = '先试听附近音频。只有确认录音里确实说了这段文案时，才手动补入字幕；请按实际发音调整时间。';
+  const textLabel = document.createElement('label');
+  textLabel.className = 'small';
+  textLabel.textContent = '要补入的字幕';
+  const textInput = document.createElement('input');
+  textInput.type = 'text';
+  textInput.value = String(review.expectedText || review.expected || '').trim();
+  textInput.setAttribute('aria-label', '要补入的字幕');
+  textLabel.appendChild(textInput);
+  const range = document.createElement('div');
+  range.className = 'review-extra-cut-range';
+  const duration = Math.max(0, Number(state.duration || 0));
+  const startValue = Math.min(duration, Math.max(0, Number(review.start ?? state.currentTime ?? 0)));
+  const initialTokens = editableCaptionTokens(textInput.value);
+  const estimatedLength = Math.max(.3, Math.min(1.8, initialTokens.length * .3));
+  const endValue = Math.min(duration, Math.max(Number(review.end || startValue), startValue + estimatedLength));
+  const makeTimeInput = (labelText, value) => {
+    const label = document.createElement('label');
+    label.className = 'small';
+    label.textContent = labelText;
+    const input = document.createElement('input');
+    input.type = 'number'; input.min = '0'; input.max = String(duration);
+    input.step = '0.01'; input.value = Number(value || 0).toFixed(2);
+    input.setAttribute('aria-label', labelText);
+    label.appendChild(input);
+    range.appendChild(label);
+    return input;
+  };
+  const startInput = makeTimeInput('开始时间（秒）', startValue);
+  const endInput = makeTimeInput('结束时间（秒）', endValue);
+  const status = document.createElement('p');
+  status.className = 'small review-extra-cut-status';
+  const actions = document.createElement('div');
+  actions.className = 'review-details-actions';
+  const preview = document.createElement('button');
+  preview.className = 'btn small review-extra-cut-preview';
+  preview.textContent = '试听所选范围';
+  preview.type = 'button';
+  const insert = document.createElement('button');
+  insert.className = 'btn small primary';
+  insert.textContent = '确认有词，补入字幕';
+  insert.type = 'button';
+  const cancel = document.createElement('button');
+  cancel.className = 'btn small';
+  cancel.textContent = '返回';
+  cancel.type = 'button';
+  const readRange = () => ({ start: Number(startInput.value), end: Number(endInput.value) });
+  const hasCaptionOverlap = (start, end) => (state.captions || []).some(caption => {
+    if ((caption.trackId || 'caption') !== (review.captionTrackId || 'caption')) return false;
+    const words = caption.words?.length ? caption.words : [{ start: caption.start, end: caption.end }];
+    return words.some(word => Number(word.start) < end - .005 && Number(word.end) > start + .005);
+  });
+  const validate = () => {
+    const { start, end } = readRange();
+    const tokens = editableCaptionTokens(textInput.value);
+    const rangeValid = Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end > start + .02 && end <= duration;
+    const overlap = rangeValid && hasCaptionOverlap(start, end);
+    const locked = isTrackLocked(review.captionTrackId || 'caption') || isTrackLocked('review');
+    status.classList.toggle('warning', !!overlap || locked);
+    status.textContent = !tokens.length ? '请填写要补入的文案。'
+      : !rangeValid ? '请检查开始和结束时间。'
+      : overlap ? '所选时间与已有字幕重叠；请试听并调整时间范围。'
+      : locked ? '字幕或待确认轨道已锁定。'
+      : '只有确认录音中有这段口播后，才点击补入。';
+    preview.disabled = !rangeValid;
+    insert.disabled = !tokens.length || !rangeValid || overlap || locked;
+    return { valid: !insert.disabled, start, end, tokens };
+  };
+  for (const input of [textInput, startInput, endInput]) input.addEventListener('input', validate);
+  preview.addEventListener('click', () => {
+    const { start, end } = readRange();
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start)
+      void auditionReviewSegment(review.id, { start, end });
+  });
+  insert.addEventListener('click', () => {
+    const result = validate();
+    if (!result.valid) return;
+    snapshot();
+    const issueId = review.issueId || review.id;
+    const span = result.end - result.start;
+    const words = result.tokens.map((display, index) => ({
+      display,
+      norm: String(display).toLowerCase().replace(/[^\p{L}\p{N}]/gu, ''),
+      originalDisplay: display,
+      expectedDisplay: display,
+      recognizedDisplay: display,
+      start: result.start + span * index / result.tokens.length,
+      end: result.start + span * (index + 1) / result.tokens.length,
+      matchType: 'edited',
+      issueType: '', issueId: '', action: '',
+      userKept: true, userInserted: true, manuallyConfirmedSpoken: true,
+    }));
+    const caption = {
+      id: uid(), start: result.start, end: result.end,
+      text: joinCaptionWords(words), words,
+      trackId: review.captionTrackId || 'caption',
+      ownerClipId: review.ownerClipId, ownerClipType: review.ownerClipType,
+      sourceMediaId: review.sourceMediaId, transcriptId: review.transcriptId || '',
+    };
+    state.captions ||= [];
+    state.captions.push(caption);
+    state.captions.sort((left, right) => left.start - right.start);
+    state.reviewCaptions = (state.reviewCaptions || []).filter(item => item.id !== review.id && (item.issueId || item.id) !== issueId);
+    state.issues = (state.issues || []).filter(item => item.id !== issueId);
+    state.matchIssues = (state.matchIssues || []).filter(item => item.id !== issueId);
+    state.selected = { type: 'caption', id: caption.id };
+    state.selectedItems = [state.selected];
+    reviewDetailsDialog.close();
+    seekTimeline(result.start);
+    renderAll();
+    queueAutosave();
+    toast('已按你的选择补入字幕；音频未改动');
+  });
+  cancel.addEventListener('click', () => { panel.hidden = true; });
+  actions.append(preview, insert, cancel);
+  panel.append(note, textLabel, range, status, actions);
+  validate();
+  return panel;
+}
 function showReviewDetails(id) {
   const review = state.reviewCaptions.find(r => r.id === id || r.issueId === id);
   if (!review) return;
+  stopReviewCutPreview();
   if (review.meaningContextKey && review.meaningContextKey !== JSON.stringify({spoken:review.spokenText,expected:review.expectedText,...captionMeaningContext(state.captions,review)})) {
     review.spokenZh = ''; review.expectedZh = ''; review.meaningMode = '';
   }
@@ -311,6 +538,7 @@ function showReviewDetails(id) {
       if (pressedOutside && event.target === reviewDetailsDialog && outside(event)) reviewDetailsDialog.close();
       pressedOutside = false;
     });
+    reviewDetailsDialog.addEventListener('close', () => stopReviewCutPreview());
     document.body.appendChild(reviewDetailsDialog);
   }
   reviewDetailsDialog.reviewId = review.id;
@@ -328,18 +556,42 @@ function showReviewDetails(id) {
     element.className = 'btn small'; element.textContent = label;
     element.onclick = action; actions.appendChild(element);
   };
-  const ordered=state.reviewCaptions.filter(r=>['mismatch','repeat','missing'].includes(r.type)).sort((a,b)=>a.start-b.start);
+  const ordered=state.reviewCaptions.filter(r=>['mismatch','repeat','missing','unverifiedAddition'].includes(r.type)).sort((a,b)=>a.start-b.start);
   const position=ordered.findIndex(r=>r.id===review.id);
   if(position>0)button('上一处',()=>showReviewDetails(ordered[position-1].id));
   if(position>=0 && position<ordered.length-1)button('下一处',()=>showReviewDetails(ordered[position+1].id));
   if(review.type==='mismatch')button('重试中文',()=>loadCaptionMeaning(review,null,true));
-  button('试听', () => { reviewDetailsDialog.close(); auditionReviewSegment(review.id); });
-  if (review.type === 'mismatch') button('使用正确文案', () => { if(replaceReviewCaption(review.id,'expected')) reviewDetailsDialog.close(); });
-  if (review.type !== 'missing' && review.action !== 'missing')
-    button('使用识别文案', () => { if(replaceReviewCaption(review.id,'spoken')) reviewDetailsDialog.close(); });
-  button('忽略提示', () => { reviewDetailsDialog.close(); snapshot(); dismissReviewHints([review.id]); });
+  const missingSpeech = review.type === 'missing' || review.action === 'missing';
+  const unverifiedAddition = review.type === 'unverifiedAddition' || review.unverifiedAddition;
+  if (missingSpeech) {
+    button('试听附近音频', () => { stopReviewCutPreview(); auditionReviewSegment(review.id); });
+    button('音频有词，补入字幕', () => {
+      const panel = reviewDetailsDialog.querySelector('.review-missing-caption-controls');
+      if (panel) { panel.hidden = false; panel.querySelector('input')?.focus(); }
+    });
+    button('确认音频未读', () => {
+      if (isTrackLocked('review')) return toast('待确认轨道已锁定');
+      reviewDetailsDialog.close();
+      dismissReviewHints([review.id]);
+    });
+  } else if (unverifiedAddition) {
+    button('试听原片', () => { stopReviewCutPreview(); auditionReviewSegment(review.id); });
+    button('剪掉这段', () => {
+      const panel = reviewDetailsDialog.querySelector('.review-extra-cut-controls');
+      if (panel) { panel.hidden = false; panel.querySelector('input')?.focus(); }
+    });
+    button('保留并加字幕', () => { stopReviewCutPreview(); reviewDetailsDialog.close(); acceptReviewSegment(review.id); });
+  } else {
+    button('试听', () => { reviewDetailsDialog.close(); auditionReviewSegment(review.id); });
+    if (review.type === 'mismatch') button('使用正确文案', () => { if(replaceReviewCaption(review.id,'expected')) reviewDetailsDialog.close(); });
+    if (review.type !== 'missing' && review.action !== 'missing')
+      button('使用识别文案', () => { if(replaceReviewCaption(review.id,'spoken')) reviewDetailsDialog.close(); });
+    button('忽略提示', () => { reviewDetailsDialog.close(); snapshot(); dismissReviewHints([review.id]); });
+  }
   button('关闭', () => reviewDetailsDialog.close());
   reviewDetailsDialog.append(heading, detail, actions);
+  if (missingSpeech) reviewDetailsDialog.append(buildMissingCaptionControls(review));
+  if (unverifiedAddition) reviewDetailsDialog.append(buildUnverifiedCutControls(review));
   if (!reviewDetailsDialog.open) reviewDetailsDialog.showModal();
   if (review.type === 'mismatch') {
     Promise.resolve(loadCaptionMeaning(review)).then(() => {

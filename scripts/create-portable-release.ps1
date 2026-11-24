@@ -1,6 +1,14 @@
 ﻿param([Parameter(Mandatory = $true)][ValidatePattern('^\d{8}-\d{6}$')][string]$Timestamp)
 $ErrorActionPreference = 'Stop'
 $Root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$GitHistoryRoot = Join-Path $Root '可清理数据\Git历史\.git'
+function Invoke-WorkspaceGit([string[]]$GitArguments) {
+    if (Test-Path -LiteralPath (Join-Path $GitHistoryRoot 'HEAD') -PathType Leaf) {
+        & git "--git-dir=$GitHistoryRoot" "--work-tree=$Root" @GitArguments
+    } else {
+        & git -C $Root @GitArguments
+    }
+}
 $Baseline = Join-Path $Root 'release\剪辑助手'
 $ProgramsInstallRoot = Join-Path $env:LOCALAPPDATA 'Programs\剪辑助手'
 $TimeZone = [TimeZoneInfo]::FindSystemTimeZoneById('New Zealand Standard Time')
@@ -8,7 +16,8 @@ $LocalTime = [DateTime]::ParseExact($Timestamp, 'yyyyMMdd-HHmmss', [Globalizatio
 $LocalTime = [TimeZoneInfo]::ConvertTime($LocalTime, $TimeZone)
 $Timestamp = $LocalTime.ToString('yyyyMMdd-HHmmss')
 $Name = "ClipAssistant-portable-$Timestamp"
-$StagingRoot = Join-Path $Root ".build\github-release\$Name"
+$StagingParent = Join-Path $Root '可清理数据\打包暂存'
+$StagingRoot = Join-Path $StagingParent $Name
 $AppTarget = Join-Path $StagingRoot 'release\剪辑助手'
 $ArchiveRoot = Join-Path $Root 'release\archives'
 $ArchivePath = Join-Path $ArchiveRoot "$Name.zip"
@@ -16,8 +25,17 @@ $ArchivePath = Join-Path $ArchiveRoot "$Name.zip"
 if (!(Test-Path -LiteralPath (Join-Path $Baseline '剪辑助手.exe') -PathType Leaf)) {
     throw "完整基线安装包不存在：$Baseline"
 }
+if (!(Test-Path -LiteralPath $StagingParent -PathType Container)) {
+    New-Item -ItemType Directory -Force -Path $StagingParent | Out-Null
+}
 if (Test-Path -LiteralPath $StagingRoot) { throw "打包暂存目录已存在：$StagingRoot" }
 if (Test-Path -LiteralPath $ArchivePath) { throw "版本压缩包已存在：$ArchivePath" }
+
+$AllowedStageRoot = [IO.Path]::GetFullPath($StagingParent).TrimEnd('\') + '\'
+$ResolvedStage = [IO.Path]::GetFullPath($StagingRoot)
+if (!$ResolvedStage.StartsWith($AllowedStageRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    throw '拒绝在指定打包暂存目录之外创建文件。'
+}
 
 New-Item -ItemType Directory -Force -Path (Split-Path $AppTarget -Parent), $ArchiveRoot | Out-Null
 Copy-Item -LiteralPath $Baseline -Destination $AppTarget -Recurse -Force
@@ -66,7 +84,13 @@ $Readme = @"
 [IO.File]::WriteAllText((Join-Path $StagingRoot '使用说明.txt'), $Readme, [Text.Encoding]::UTF8)
 
 $AppHash = (Get-FileHash -LiteralPath (Join-Path $AppTarget '剪辑助手.exe') -Algorithm SHA256).Hash
-$SourceCommit = git -C $Root rev-parse HEAD
+$SourceCommit = 'unavailable'
+try {
+    $GitCommitOutput = @(Invoke-WorkspaceGit -GitArguments @('rev-parse','HEAD') 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $GitCommitOutput.Count -gt 0) {
+        $SourceCommit = $GitCommitOutput[-1].Trim()
+    }
+} catch { }
 $Files = Get-ChildItem -LiteralPath $StagingRoot -Recurse -File
 $Manifest = [ordered]@{
     version = $Name
@@ -124,7 +148,6 @@ $ArchiveHash = (Get-FileHash -LiteralPath $ArchivePath -Algorithm SHA256).Hash
 )
 
 $ResolvedStage = [IO.Path]::GetFullPath($StagingRoot)
-$AllowedStageRoot = [IO.Path]::GetFullPath((Join-Path $Root '.build\github-release')).TrimEnd('\') + '\'
 if (!$ResolvedStage.StartsWith($AllowedStageRoot, [StringComparison]::OrdinalIgnoreCase)) {
     throw '拒绝清理打包暂存目录之外的路径。'
 }

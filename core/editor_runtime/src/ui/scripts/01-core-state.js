@@ -1768,6 +1768,7 @@
           renderPolishSidebarList();
         }
         repairScriptDifferenceLinks();
+        const staleMismatchHintsCleared = reconcileStaleAlignedMismatchHints();
         ensureDynamicTracks();
         recomputeContentDuration();
         applyLayout();
@@ -1794,6 +1795,7 @@
         $("home").classList.add("hidden");
         $("app").classList.add("active");
         state.initializing = false;
+        if (staleMismatchHintsCleared) queueAutosave();
         if (promotedTimelineVideo) queueAutosave();
         await new Promise((resolve) => requestAnimationFrame(resolve));
         updateFrameSize(false);
@@ -1817,8 +1819,8 @@
         };
         const spoken = short(item.spokenText || item.spoken || item.text);
         const expected = short(item.expectedText);
-        const kind = item.type === 'repeat' ? '疑似重复' : item.type === 'missing' || item.action === 'missing'
-          ? '疑似漏读' : ['addition','extra'].includes(item.type) ? '疑似多读' : '疑似读错';
+        const kind = item.type === 'unverifiedAddition' ? '文案外口语待确认' : item.type === 'repeat' ? '疑似重复' : item.type === 'missing' || item.action === 'missing'
+          ? '文案词待确认' : ['addition','extra'].includes(item.type) ? '疑似多读' : '疑似读错';
         if (item.type !== 'mismatch') return `${kind}\n${item.type === 'missing' || item.action === 'missing' ? expected || '需试听核对' : spoken || '需试听核对'}`;
         const left = String(item.spokenText || item.spoken || '').trim().split(/\s+/).filter(Boolean);
         const right = String(item.expectedText || '').trim().split(/\s+/).filter(Boolean);
@@ -1836,18 +1838,21 @@
           return `识别：${item.spokenPhrase || spoken || '未识别到'}\n${meaningLabel}：${meaning(item.spokenZh)}\n正确：${item.expectedPhrase || expected || '无对应内容'}\n${meaningLabel}：${meaning(item.expectedZh)}`;
         }
         if(item.type==='repeat') return `疑似重复\n识别：${spoken || '未识别到'}\n请试听核对是否仍有两次相邻口播。`;
-        const kind =
-          item.scripture
+        const kind = item.type === 'unverifiedAddition'
+          ? '文案外口语待确认'
+          : item.scripture
             ? "📖 经文差异，请自行核对（不影响导出）"
             : item.type === "repeat"
-            ? "重复阅读"
-            : item.type === "missing" || item.action === "missing"
-            ? item.needsAudioReview ? "未识别到，需试听核对" : "疑似漏读，需试听核对"
-            : ['addition','extra'].includes(item.type)
-              ? "识别多出，文案无对应内容"
-              : "用词不一致，需试听核对";
-        const reason = item.type === 'missing' || item.action === 'missing'
-          ? '识别结果缺少这段内容，可能漏读或识别遗漏；试听后确认。'
+              ? "重复阅读"
+              : item.type === "missing" || item.action === "missing"
+                ? item.needsAudioReview ? "未识别到，需试听核对" : "疑似漏读，需试听核对"
+                : ['addition','extra'].includes(item.type)
+                  ? "识别多出，文案无对应内容"
+                  : "用词不一致，需试听核对";
+        const reason = item.type === 'unverifiedAddition'
+          ? '识别到文案外口语；试听后可选择剪掉，或保留声音并加字幕。'
+          : item.type === 'missing' || item.action === 'missing'
+          ? '文案有这段内容，但识别结果没有找到对应口播。试听判断录音里是否有词；有词可手动补字幕，确实没读可确认漏读。'
           : item.type === 'mismatch'
             ? '识别内容与此位置的文案不一致，可能读法、识别或对齐有误；核对后再修改。'
             : ['addition','extra'].includes(item.type)
@@ -1857,7 +1862,7 @@
       }
       function repairScriptDifferenceLinks() {
         state.reviewCaptions = (state.reviewCaptions || [])
-          .filter((item) => ["missing","repeat","mismatch","addition","extra"].includes(item.type))
+          .filter((item) => ["missing","repeat","mismatch","addition","extra","unverifiedAddition"].includes(item.type))
           .filter((item) =>
             item.action === "cut" ||
             item.type === "missing" ||
@@ -1893,6 +1898,33 @@
                 ? "missing"
                 : "replace";
           }
+      }
+      function reconcileStaleAlignedMismatchHints() {
+        const groups=new Map();
+        for (const caption of state.captions||[]) for (const word of caption.words||[]) {
+          if (!word.issueId || word.issueType!=='mismatch') continue;
+          const id=String(word.issueId);
+          if (!groups.has(id)) groups.set(id,[]);
+          groups.get(id).push(word);
+        }
+        const resolved=new Set();
+        for (const [id,words] of groups) {
+          const safe=words.length>0&&words.every(word=>
+            ['match','near'].includes(word.matchType)&&!!(word.referenceExpected||word.expectedDisplay)&&
+            !word.userKept&&!word.reviewDismissed&&word.matchType!=='edited'&&word.issueType!=='edited-timing'
+          );
+          if (!safe) continue;
+          resolved.add(id);
+          for (const word of words) { word.issueId=''; word.issueType=''; word.action=''; }
+        }
+        if (!resolved.size) return 0;
+        const before=(state.reviewCaptions||[]).length;
+        state.reviewCaptions=(state.reviewCaptions||[]).filter(review=>
+          !resolved.has(String(review.issueId||review.id))
+        );
+        for (const field of ['issues','matchIssues'])
+          state[field]=(state[field]||[]).filter(issue=>!resolved.has(String(issue.id||'')));
+        return before-state.reviewCaptions.length;
       }
       async function openProjectById(id) {
         try {

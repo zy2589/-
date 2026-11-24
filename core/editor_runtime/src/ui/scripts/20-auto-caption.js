@@ -350,6 +350,12 @@
               const reviewWords=review.words?.length?review.words:[{display:review.expectedText||review.text||"需补录",start:review.start,end:review.end}];
               const mapped = result.timelinePlaced ? bindMatchedReviewSources([{...review,words:reviewWords}],manuscriptSourceClips()) : mapTranscribedCaptionsToTimeline([{...review,words:reviewWords}]);
               for (const part of mapped) {
+                const alreadyKept=review.type==='unverifiedAddition'&&(part.words||[]).length&&(part.words||[]).every(candidate=>(state.captions||[]).some(caption=>
+                  caption.transcriptId===transcriptId&&(!part.ownerClipId||caption.ownerClipId===part.ownerClipId)&&
+                  (caption.words||[]).some(word=>word.userKept&&(word.matchType==='spoken_addition'||word.matchType==='edited'||word.issueType==='edited-timing'||word.issueType==='addition')&&
+                    Math.max(0,Math.min(Number(word.end),Number(candidate.end))-Math.max(Number(word.start),Number(candidate.start)))/
+                    Math.max(.01,Math.min(Number(word.end)-Number(word.start),Number(candidate.end)-Number(candidate.start)))>=.5)));
+                if(alreadyKept)continue;
                 const id = uid();
                 const pending = {...review,...part,id,issueId:id,captionTrackId:trackId,transcriptId:transcriptId || ""};
                 for (const caption of state.captions.filter(c=>c.transcriptId===transcriptId && c.ownerClipId===part.ownerClipId)) {
@@ -453,7 +459,7 @@
             renderAutoTranscript();
             const pendingCount = (current.result.reviewCaptions || []).length;
             status.textContent = pendingCount
-              ? `已对照正确文案生成 ${generated.length} 段字幕，${pendingCount} 处差异已标注；字幕完整保留，加添内容已标绿。`
+              ? `已按正确文案生成 ${generated.length} 段字幕；${pendingCount} 处需要试听确认，文案外词未自动加入字幕。`
               : defaultTrackOccupied
               ? `正确文案字幕轨道已有内容；已新建字幕轨道并生成 ${generated.length} 段。`
               : `已在“正确文案字幕”轨道生成 ${generated.length} 段。`;

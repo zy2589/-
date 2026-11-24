@@ -612,6 +612,7 @@ export function transcriptWords(segments, script = "") {
         display: token.display,
         norm: token.norm,
         expansion: token.expansion,
+        ...(segment.confidence != null && Number.isFinite(Number(segment.confidence)) ? { confidence: Number(segment.confidence) } : {}),
         keepWithPrevious: !!token.keepWithPrevious,
         scriptureReference: !!token.scriptureReference,
         start: start + ((end - start) * index) / Math.max(1, tokens.length),
@@ -824,7 +825,12 @@ function takeContractionOperations(expected, spoken, expectedIndex, spokenIndex)
 }
 
 function wordRelation(expected, spoken) {
-  if ((expected.scriptureReference || spoken.scriptureReference) && expected.norm !== spoken.norm && /\d/.test(expected.norm + spoken.norm)) return "mismatch";
+  if ((expected.scriptureReference || spoken.scriptureReference) && expected.norm !== spoken.norm && /\d/.test(expected.norm + spoken.norm)) {
+    const expectedNumber=captionCardinalValue(expected.display || expected.norm);
+    const spokenNumber=captionCardinalValue(spoken.display || spoken.norm);
+    if (expectedNumber !== null && expectedNumber === spokenNumber) return "match";
+    return "mismatch";
+  }
   if (expected.norm === spoken.norm) return "match";
   const expectedStem = comparisonStem(expected.norm),
     spokenStem = comparisonStem(spoken.norm);
@@ -996,11 +1002,34 @@ function anchorCandidate(expected, spoken, expectedIndex, spokenIndex, length) {
   return { exact, near };
 }
 
+const COMMON_RESYNC_WORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "been", "but", "by",
+  "for", "from", "he", "her", "him", "his", "i", "if", "in", "is",
+  "it", "its", "of", "on", "or", "our", "she", "that", "the", "their",
+  "them", "there", "they", "this", "to", "was", "we", "were", "what",
+  "when", "who", "will", "with", "you", "your",
+]);
+
+function hasUniqueForwardAnchor(words, cursor, index, length, horizon = 80) {
+  const target = words.slice(index, index + length).map((word) => word.norm);
+  const last = Math.min(words.length - length, cursor + horizon - length);
+  let matches = 0;
+  for (let candidate = cursor; candidate <= last; candidate += 1) {
+    if (target.every((norm, offset) => words[candidate + offset]?.norm === norm)) {
+      matches += 1;
+      if (matches > 1) return false;
+    }
+  }
+  return matches === 1;
+}
+
 function findResyncAnchor(expected, spoken, expectedCursor, spokenCursor) {
   const remainingExpected = expected.length - expectedCursor;
   const remainingSpoken = spoken.length - spokenCursor;
   if (remainingExpected < 2 || remainingSpoken < 2) return null;
-  const horizons = [12, 32, 80, 180, 420];
+  // Resync stays inside the nearby passage. Far manuscript matches and a
+  // globally unique single word are not enough evidence to move the cursor.
+  const horizons = [12, 32, 80];
   for (const horizon of horizons) {
     const expectedLimit = Math.min(remainingExpected - 1, horizon);
     const spokenLimit = Math.min(remainingSpoken - 1, horizon);
@@ -1014,11 +1043,18 @@ function findResyncAnchor(expected, spoken, expectedCursor, spokenCursor) {
           remainingSpoken - spokenDelta,
         );
         for (let length = maximum; length >= 2; length -= 1) {
+          const expectedIndex = expectedCursor + expectedDelta;
+          const spokenIndex = spokenCursor + spokenDelta;
+          const anchorWords = expected.slice(expectedIndex, expectedIndex + length);
+          if (length === 2 && !anchorWords.some((word) =>
+            word.norm.length >= 4 && !COMMON_RESYNC_WORDS.has(word.norm))) continue;
+          if (!hasUniqueForwardAnchor(expected, expectedCursor, expectedIndex, length) ||
+              !hasUniqueForwardAnchor(spoken, spokenCursor, spokenIndex, length)) continue;
           const confidence = anchorCandidate(
             expected,
             spoken,
-            expectedCursor + expectedDelta,
-            spokenCursor + spokenDelta,
+            expectedIndex,
+            spokenIndex,
             length,
           );
           if (!confidence) continue;
@@ -1052,41 +1088,7 @@ function findResyncAnchor(expected, spoken, expectedCursor, spokenCursor) {
     }
     if (best) return best;
   }
-
-  // Last-resort anchor: a unique long word or number.  This rescues a long
-  // wrong paragraph without using common one-word anchors that could jump to
-  // the wrong repeated verse.
-  const expectedPositions = new Map();
-  const spokenPositions = new Map();
-  for (let index = expectedCursor; index < expected.length; index += 1) {
-    const norm = expected[index].norm;
-    if (norm.length < 7 && !/^\d+$/.test(norm)) continue;
-    const values = expectedPositions.get(norm) || [];
-    values.push(index);
-    expectedPositions.set(norm, values);
-  }
-  for (let index = spokenCursor; index < spoken.length; index += 1) {
-    const norm = spoken[index].norm;
-    if (norm.length < 7 && !/^\d+$/.test(norm)) continue;
-    const values = spokenPositions.get(norm) || [];
-    values.push(index);
-    spokenPositions.set(norm, values);
-  }
-  let single = null;
-  for (const [norm, expectedIndexes] of expectedPositions) {
-    const spokenIndexes = spokenPositions.get(norm);
-    if (expectedIndexes.length !== 1 || spokenIndexes?.length !== 1) continue;
-    const candidate = {
-      expectedIndex: expectedIndexes[0],
-      spokenIndex: spokenIndexes[0],
-      length: 1,
-    };
-    const distance =
-      candidate.expectedIndex - expectedCursor +
-      candidate.spokenIndex - spokenCursor;
-    if (!single || distance < single.distance) single = { ...candidate, distance };
-  }
-  return single;
+  return null;
 }
 
 function anchoredAlignment(expected, spoken) {
@@ -1330,6 +1332,29 @@ function recoverManuscriptFirstASR(operations, recoverMissing = true) {
     }
   }
 
+  // In quoted manuscript text, a brief two-token ASR phrase can represent one
+  // fuzzy word (for example, “who wants” for “once”). Use it only when the
+  // exact adjacent manuscript words anchor both sides of the phrase.
+  for (let index = 1; index + 2 < output.length; index += 1) {
+    const group=output.slice(index,index+2);
+    if (group[0]?.type!=='extra' || group[1]?.type!=='mismatch') continue;
+    const expected=group[1].expected;
+    const before=output[index-1], after=output[index+2];
+    if (!expected?.strict || !acceptedOperation(before) || !acceptedOperation(after)) continue;
+    if (meaningChangingWords.has(expected.norm)) continue;
+    if (Number.isInteger(before.expected?.scriptIndex) &&
+        (before.expected.scriptIndex+1!==expected.scriptIndex || expected.scriptIndex+1!==after.expected?.scriptIndex)) continue;
+    const first=group[0].spoken, last=group[1].spoken;
+    if (!first || !last) continue;
+    const span=Number(last.end||last.start||0)-Number(first.start||0);
+    const leftGap=Number(first.start||0)-Number(before.spoken.end||before.spoken.start||0);
+    const rightGap=Number(after.spoken.start||after.spoken.end||0)-Number(last.end||last.start||0);
+    if (span<0 || span>0.9 || leftGap < -0.12 || leftGap > 0.35 || rightGap < -0.12 || rightGap > 0.35) continue;
+    const spoken={...first,display:[first.display,last.display].filter(Boolean).join(' '),norm:expected.norm,
+      start:Number(first.start||0),end:Number(last.end||last.start||first.end||0),manuscriptRecovered:true};
+    output.splice(index,2,{...group[1],spoken,expected,type:'near',relation:'near',manuscriptRecovered:true});
+  }
+
   // 2) One or two consecutive omitted manuscript tokens between reliable
   // anchors. ASR occasionally returns no token at all ("surely" -> —). Do not
   // interpret silence in the transcript as proof that the speaker omitted it.
@@ -1501,63 +1526,14 @@ function rematchPrefixFalseStarts(operations = []) {
   return operations;
 }
 
-const LIST_MARKERS = new Set("number point item step part no".split(" "));
-const LIST_ORDINALS = new Map(
-  Object.entries({
-    one: "1",
-    first: "1",
-    two: "2",
-    second: "2",
-    three: "3",
-    third: "3",
-    four: "4",
-    fourth: "4",
-    five: "5",
-    fifth: "5",
-    six: "6",
-    sixth: "6",
-    seven: "7",
-    seventh: "7",
-    eight: "8",
-    eighth: "8",
-    nine: "9",
-    ninth: "9",
-    ten: "10",
-    tenth: "10",
-  }),
-);
-
-function listOrdinalValue(word) {
-  const raw = String(word || "").toLowerCase();
-  if (LIST_ORDINALS.has(raw)) return LIST_ORDINALS.get(raw);
-  if (/^\d+$/.test(raw)) return String(Number(raw));
-  return "";
-}
-
-function normalizeListPhrase(words = []) {
-  const list = (words || []).map((word) => String(word || "").toLowerCase()).filter(Boolean);
-  if (list.length >= 2 && LIST_MARKERS.has(list[0])) {
-    const ordinal = listOrdinalValue(list[1]);
-    if (ordinal) return ["list", ordinal, ...list.slice(2)];
-  }
-  if (list.length >= 1) {
-    const ordinal = listOrdinalValue(list[0]);
-    if (ordinal) return ["list", ordinal, ...list.slice(1)];
-  }
-  return list;
-}
-
 export function looksLikeAbandonedPrefix(phrase, after) {
   const extra = phraseWordList(phrase);
   const next = phraseWordList(after);
   if (!extra.length || next.length < 2) return false;
-  if (extra.length >= 2 && extra.slice(0, 2).join(" ") === next.slice(0, 2).join(" "))
-    return true;
-  const a = normalizeListPhrase(extra);
-  const b = normalizeListPhrase(next);
-  if (a[0] === "list" && b[0] === "list" && a[1] && a[1] === b[1]) return true;
-  if (extra.length === 1 && LIST_MARKERS.has(extra[0]) && b[0] === "list") return true;
-  return false;
+  // Only literal nearby prefix words are evidence of an abandoned read.
+  // A spoken marker such as "Number" can introduce a manuscript numeral
+  // without being a false start, so it must remain available for review.
+  return extra.length >= 2 && extra.slice(0, 2).join(" ") === next.slice(0, 2).join(" ");
 }
 
 function extractFullManuscriptSentence(operations = [], targetOpIndex = 0) {
@@ -1617,12 +1593,6 @@ function findRelevantManuscriptSentence(operations = [], start = 0, cursor = 0, 
     }
   }
 
-  if (afterOps.length) {
-    const opIndex = operations.findIndex((op, idx) => idx >= cursor && op.expected === afterOps[0].expected);
-    if (opIndex !== -1) {
-      return extractFullManuscriptSentence(operations, opIndex);
-    }
-  }
   return "";
 }
 

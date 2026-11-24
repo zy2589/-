@@ -2,10 +2,19 @@
 $ErrorActionPreference = 'Stop'
 $Root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $AppSource = Join-Path $Root 'release\剪辑助手'
-$StagingRoot = Join-Path $Root ".build\github-release\ClipAssistant-installer-$Timestamp"
+$GitHistoryRoot = Join-Path $Root '可清理数据\Git历史\.git'
+function Invoke-WorkspaceGit([string[]]$GitArguments) {
+    if (Test-Path -LiteralPath (Join-Path $GitHistoryRoot 'HEAD') -PathType Leaf) {
+        & git "--git-dir=$GitHistoryRoot" "--work-tree=$Root" @GitArguments
+    } else {
+        & git -C $Root @GitArguments
+    }
+}
+$StagingParent = Join-Path $Root '可清理数据\打包暂存'
+$StagingRoot = Join-Path $StagingParent "ClipAssistant-installer-$Timestamp"
 $ArchiveRoot = Join-Path $Root 'release\archives'
 $ArchivePath = Join-Path $ArchiveRoot "ClipAssistant-installer-$Timestamp.zip"
-$AllowedStageRoot = [IO.Path]::GetFullPath((Join-Path $Root '.build\github-release')).TrimEnd('\') + '\'
+$AllowedStageRoot = [IO.Path]::GetFullPath($StagingParent).TrimEnd('\') + '\'
 $ResolvedStage = [IO.Path]::GetFullPath($StagingRoot)
 if (!$ResolvedStage.StartsWith($AllowedStageRoot, [StringComparison]::OrdinalIgnoreCase)) {
     throw '安装包暂存路径越界。'
@@ -17,7 +26,8 @@ if ((Test-Path -LiteralPath $StagingRoot) -or (Test-Path -LiteralPath $ArchivePa
     throw '安装包暂存目录或版本文件已存在。'
 }
 
-New-Item -ItemType Directory -Force -Path $StagingRoot, $ArchiveRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $StagingParent, $ArchiveRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $StagingRoot | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $StagingRoot 'release') | Out-Null
 Copy-Item -LiteralPath $AppSource -Destination (Join-Path $StagingRoot 'release\剪辑助手') -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $Root '安装剪辑助手.bat') -Destination $StagingRoot -Force
@@ -35,14 +45,28 @@ $Readme = @'
 '@
 [IO.File]::WriteAllText((Join-Path $StagingRoot '安装说明.txt'), $Readme, [Text.Encoding]::UTF8)
 $ExeHash = (Get-FileHash -LiteralPath (Join-Path $AppSource '剪辑助手.exe') -Algorithm SHA256).Hash
+$ExeSignature = Get-AuthenticodeSignature -LiteralPath (Join-Path $AppSource '剪辑助手.exe')
+$SourceCommit = 'unavailable'
+$WorkingTreeModified = $true
+try {
+    $GitCommitOutput = @(Invoke-WorkspaceGit -GitArguments @('rev-parse','HEAD') 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $GitCommitOutput.Count -gt 0) {
+        $SourceCommit = $GitCommitOutput[-1].Trim()
+        $GitStatusOutput = @(Invoke-WorkspaceGit -GitArguments @('status','--porcelain','--untracked-files=all') 2>$null)
+        if ($LASTEXITCODE -eq 0) { $WorkingTreeModified = $GitStatusOutput.Count -gt 0 }
+    }
+} catch { }
 $Name = "ClipAssistant-installer-$Timestamp"
 $Created = [DateTime]::ParseExact($Timestamp, 'yyyyMMdd-HHmmss', [Globalization.CultureInfo]::InvariantCulture)
 $Created = [TimeZoneInfo]::ConvertTime($Created, [TimeZoneInfo]::FindSystemTimeZoneById('New Zealand Standard Time'))
 $Manifest = [ordered]@{
     version = $Name
     createdAtPacificAuckland = $Created.ToString('yyyy-MM-dd HH:mm:ss zzz')
-    sourceCommit = (git -C $Root rev-parse HEAD)
+    sourceCommit = $SourceCommit
+    sourceTreeModified = $WorkingTreeModified
     executableSha256 = $ExeHash
+    executableSignatureStatus = [string]$ExeSignature.Status
+    executableSigner = if ($ExeSignature.SignerCertificate) { $ExeSignature.SignerCertificate.Subject } else { '' }
     python = '3.14.10'
     ffmpeg = '9.0.2'
     ffprobe = '9.0.2'
@@ -92,5 +116,5 @@ $Hash = (Get-FileHash -LiteralPath $ArchivePath -Algorithm SHA256).Hash
     SizeMB = [math]::Round((Get-Item -LiteralPath $ArchivePath).Length / 1MB, 1)
     Sha256 = $Hash
     ExeSha256 = $ExeHash
-    SourceCommit = (git -C $Root rev-parse HEAD)
+    SourceCommit = $SourceCommit
 } | Format-List

@@ -1,6 +1,6 @@
 function renderIssues() {
   const box=$('issueList');if(!box)return;
-  const pending=Array.from(new Map((state.reviewCaptions||[]).filter(r=>['mismatch','repeat','missing'].includes(r.type)).map(r=>[r.id,r])).values()).sort((a,b)=>a.start-b.start);
+  const pending=Array.from(new Map((state.reviewCaptions||[]).filter(r=>['mismatch','repeat','missing','unverifiedAddition'].includes(r.type)).map(r=>[r.id,r])).values()).sort((a,b)=>a.start-b.start);
   const count=$('reviewPendingCount');if(count)count.textContent=pending.length+' 处待确认';
   const all=typeof captionReviewShowAll!=='undefined' && captionReviewShowAll;
   $('reviewPendingOnly')?.classList.toggle('active',!all);$('reviewAll')?.classList.toggle('active',all);

@@ -652,13 +652,13 @@ export function buildReviewCaptions(
 ) {
   void expectedWords;
   return issues
-    .filter((issue) => ["repeat","mismatch","missing"].includes(issue.type) && issue.start < outputDuration && !issue.suppressReview && issue.action !== "keep")
+    .filter((issue) => ["repeat","mismatch","missing","unverifiedAddition"].includes(issue.type) && issue.start < outputDuration && !issue.suppressReview && issue.action !== "keep")
     .map((issue) => {
       const explicit = String(issue.expectedText || "")
         .replace(/^\s*[—-]\s*$/, "")
         .trim();
       const cuttable = ["extra", "repeat", "mismatch"].includes(issue.type);
-      const acceptable = issue.type === "addition" || issue.action === "insert";
+      const acceptable = issue.type === "addition" || issue.type === "unverifiedAddition" || issue.action === "insert";
       if (!explicit && !cuttable && !acceptable) return null;
       const spoken = String(issue.spokenText || "")
         .replace(/^\s*[—-]\s*$/, "")
@@ -668,10 +668,11 @@ export function buildReviewCaptions(
         issueId: issue.id,
         type: issue.type,
         ...(issue.segmentedRepeat ? {segmentedRepeat:true} : {}),
+        ...(issue.type === "unverifiedAddition" ? {unverifiedAddition:true} : {}),
         pendingCaption: !!issue.pendingCaption,
         needsAudioReview: !!issue.needsAudioReview,
         alreadyDisplayed:!!issue.alreadyDisplayed,
-        reason:issue.reason||({repeat:"重复口播",mismatch:"错误单词",missing:"缺少内容，需要补录",addition:"口语补充",extra:"文案外内容"}[issue.type]||"需要核对"),
+        reason:issue.reason||({repeat:"重复口播",mismatch:"错误单词",missing:"缺少内容，需要补录",addition:"口语补充",extra:"文案外内容",unverifiedAddition:"文案外口语待确认"}[issue.type]||"需要核对"),
         words: issue.words,
         scripture: !!issue.scripture,
         start: issue.start,
@@ -681,7 +682,7 @@ export function buildReviewCaptions(
           : explicit || "需补录",
         expectedText: explicit,
         spokenText: issue.spokenText,
-        action: issue.type === "missing" ? "missing" : issue.type === "repeat" ? "review" : "replace",
+        action: issue.type === "missing" ? "missing" : issue.type === "repeat" ? "review" : issue.type === "unverifiedAddition" ? "insert" : "replace",
       };
     })
     .filter(Boolean);

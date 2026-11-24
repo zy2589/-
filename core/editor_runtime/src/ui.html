@@ -2168,6 +2168,13 @@ om: 1px solid var(--line);
 .review-details-dialog h3 { margin: 0 0 8px; font-size: 16px; }
 .review-details-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; font-size: 13px; margin:8px 0; }
 .review-details-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.review-extra-cut-controls { margin-top:12px; padding-top:10px; border-top:1px solid #41444a; }
+.review-extra-cut-controls p { margin:0 0 8px; line-height:1.5; }
+.review-extra-cut-range { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.review-extra-cut-range label { display:grid; gap:4px; }
+.review-extra-cut-range input { width:100%; min-width:0; }
+.review-extra-cut-status.warning { color:#ff9292; }
+.review-extra-cut-preview:disabled,.review-extra-cut-controls button:disabled { opacity:.5; cursor:not-allowed; }
 .precision-cut-panel { position:fixed; inset:80px 24px auto auto; margin:0; width:min(680px,80vw); padding:16px; background:#24272d; color:#e8ebf0; border:1px solid #69717e; border-radius:8px; z-index:10020; box-shadow:0 12px 40px #0009; }
 .precision-cut-frames { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:12px 0; }
 .precision-cut-frames video { width:100%; height:180px; object-fit:contain; background:#111; }
@@ -2231,6 +2238,7 @@ om: 1px solid var(--line);
 .review-filter { gap:6px; align-items:center; margin-bottom:7px; flex-wrap:wrap; }
 .caption-review-row { width:100%; text-align:left; white-space:normal; display:block; margin:5px 0; padding:8px; }
 .caption-review-row.missing { color:#cf9bff; }
+.caption-review-row.unverifiedAddition { color:#f2c15c; }
 .caption-review-row.mismatch,.caption-review-row.repeat { color:#ff9292; }
 .caption-review-entry { display:flex; align-items:stretch; gap:6px; margin:5px 0; }
 .caption-review-entry .caption-review-row { flex:1; min-width:0; margin:0; }
@@ -3094,6 +3102,10 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
       .clip.review.insert {
         background: rgba(18, 112, 76, 0.76);
         border-color: #31d49a;
+      }
+      .clip.review.unverifiedAddition {
+        background: #a56a19;
+        border-color: #ffc05b;
       }
       .clip.review.missing {
         background: #6445b8;
@@ -4835,7 +4847,7 @@ input[type="range"]:active::-moz-range-thumb { background: #6AAEA7; border-color
               <div class="sectiontitle">口播问题</div>
               <div class="row review-filter"><button class="btn small active" id="reviewPendingOnly">待确认</button><button class="btn small" id="reviewAll">全部记录</button><span class="small" id="reviewPendingCount"></span></div>
               <div id="issueList">
-                <div class="small">匹配文案后显示重复、错读、漏读和多读。</div>
+                <div class="small">匹配文案后显示待确认口语、重复、错读和漏读。</div>
               </div>
               <div class="divider"></div>
               <div class="sectiontitle">字幕断行列表</div>
@@ -6885,35 +6897,12 @@ function harmlessCaptionDifference(spoken, expected) {
   return /^(?:i|you|we|they|he|she|it)(?:'(?:re|m|s|ve|d|ll))?$/.test(a) && /^(?:i|you|we|they|he|she|it)(?:'(?:re|m|s|ve|d|ll))?$/.test(b) && (a.replace(/'(?:re|m|s|ve|d|ll)$/,'')===b || b.replace(/'(?:re|m|s|ve|d|ll)$/,'')===a);
 }
 
-function correctHarmlessCaptionWords(words, issues = []) {
-  let result=words.map(word=>({...word}));const resolvedIssueIds=[];
-  for(const issue of issues) {
-    if(!['mismatch','semantic','spokenDiff'].includes(issue.type) || issue.scripture || issue.strict ||
-      !harmlessCaptionDifference(issue.spokenText,issue.expectedText)) continue;
-    const id=issue.issueId || issue.id;
-    const selected=result.filter(word=>word.issueId===id && word.start<issue.end && word.end>issue.start);
-    if(!selected.length || selected.some(word=>word.userKept || word.reviewDismissed || word.matchType==='edited')) continue;
-    const expected=String(issue.expectedText).trim().split(/\s+/);
-    const spoken=String(issue.spokenText).trim().split(/\s+/);
-    if(selected.length!==expected.length || spoken.length!==expected.length) continue;
-    selected.forEach((word,index)=>{
-      const changed=word.display!==expected[index];
-      Object.assign(word,{display:expected[index],expectedDisplay:expected[index],referenceExpected:expected[index],
-        recognizedDisplay:word.recognizedDisplay || word.originalDisplay || word.display,
-        originalDisplay:word.originalDisplay || spoken[index],autoMildCorrected:changed,autoCorrected:changed,
-        matchType:changed?'spoken_addition':'match',issueType:changed?'addition':'',issueId:'',action:''});
-    });
-    resolvedIssueIds.push(id);
-  }
-  for(const word of result){
-    const spoken=word.recognizedDisplay || word.originalDisplay || word.display;
-    const expected=word.referenceExpected || word.expectedDisplay;
-    if(word.userKept || word.reviewDismissed || word.matchType==='edited' || !expected || !harmlessCaptionDifference(spoken,expected))continue;
-    if(word.issueId)resolvedIssueIds.push(word.issueId);
-    Object.assign(word,{display:expected,recognizedDisplay:spoken,originalDisplay:spoken,referenceExpected:expected,
-      autoMildCorrected:true,autoCorrected:true,matchType:'spoken_addition',issueType:'addition',issueId:'',action:''});
-  }
-  return {words:result,resolvedIssueIds};
+function correctHarmlessCaptionWords(words = []) {
+  // Short function words can change the meaning (`in` / `to`, for example).
+  // Keep the recognized spelling and let the existing local review show the
+  // manuscript candidate; never silently rewrite it or mark the rewrite as a
+  // spoken addition.
+  return {words:words.map(word=>({...word})),resolvedIssueIds:[]};
 }
 // Repair word-level hints that each inherited the same multi-word manuscript phrase.
 // Distinct occurrences, tracks, owners, and manually edited words stay separate.
@@ -7075,7 +7064,7 @@ function editTrackEnabled(track,locks={},syncLocks={},ripple=false){return !lock
 function editRipple(clips,from,delta,{id=()=>crypto.randomUUID(),enabled=()=>true,excluded=new Set(),rate=1,onSplit=()=>{}}={}){
  if(Math.abs(delta)<1e-8)return clips;
  const boundary=delta<0?from+delta:from;
- const portion=(clip,start,end,newId)=>{
+ const portion=(clip,start,end,newId,side='')=>{
   const part={...clip,id:newId||clip.id,start,end};
   if(Number.isFinite(clip.sourceStart)){
    const speed=editRate(clip,rate);
@@ -7083,7 +7072,29 @@ function editRipple(clips,from,delta,{id=()=>crypto.randomUUID(),enabled=()=>tru
    part.sourceEnd=clip.sourceStart+(end-clip.start)*speed;
   }
   if(clip.words){
-   part.words=clip.words.filter(w=>w.end>start&&w.start<end).map(w=>({...w,start:Math.max(start,w.start),end:Math.min(end,w.end)}));
+   // A caption word crossing an edit boundary must belong to only one side.
+   // Filtering only by overlap puts a long word in both portions, duplicating
+   // the recognized text after a ripple cut. During a removal, words centered
+   // in the deleted range belong to neither side.
+   part.words=clip.words.filter(w=>{
+    if(!side)return w.end>start&&w.start<end;
+    const wordStart=Number(w.start),wordEnd=Number(w.end);
+    if(!Number.isFinite(wordStart)||!Number.isFinite(wordEnd)||wordEnd<=wordStart)return false;
+    const center=(wordStart+wordEnd)/2;
+    if(side==='left')return center<boundary;
+    return delta>=0?center>=boundary:center>=from;
+   }).map(w=>{
+    const wordStart=Number(w.start),wordEnd=Number(w.end);
+    const clippedStart=Math.max(start,wordStart),clippedEnd=Math.min(end,wordEnd);
+    const word={...w,start:clippedStart,end:clippedEnd};
+    const sourceStart=Number(w.sourceStart),sourceEnd=Number(w.sourceEnd);
+    if(Number.isFinite(sourceStart)&&Number.isFinite(sourceEnd)&&sourceEnd>sourceStart&&wordEnd>wordStart){
+     const sourceRate=(sourceEnd-sourceStart)/(wordEnd-wordStart);
+     word.sourceStart=sourceStart+(clippedStart-wordStart)*sourceRate;
+     word.sourceEnd=sourceStart+(clippedEnd-wordStart)*sourceRate;
+    }
+    return word;
+   }).filter(w=>w.end>w.start+1e-8);
    part.text=part.words.map(w=>w.display||w.text||'').join(' ').replace(/\s+([,.!?;:])/g,'$1');
   }
   return part;
@@ -7093,9 +7104,9 @@ function editRipple(clips,from,delta,{id=()=>crypto.randomUUID(),enabled=()=>tru
   if(excluded.has(clip.id)||!enabled(clip)||clip.end<=boundary+1e-8)return [clip];
   if(clip.start>=from-1e-8)return [shift(clip)];
   const result=[];
-  if(clip.start<boundary-1e-8)result.push(portion(clip,clip.start,boundary));
+  if(clip.start<boundary-1e-8)result.push(portion(clip,clip.start,boundary,undefined,'left'));
   if(clip.end>from+1e-8){
-   const right=portion(clip,from,clip.end,result.length?id():clip.id);
+   const right=portion(clip,from,clip.end,result.length?id():clip.id,'right');
    if(result.length&&right.linkGroupId)right.linkGroupId+=`:ripple:${from.toFixed(7)}`;
    if(result.length)onSplit(result[0],right);
    result.push(shift(right));
@@ -7246,7 +7257,7 @@ function captionReviewVariants(value) {
 // units, decimals, ranges and chapter separators are intentionally not stripped.
 function captionCardinalValue(value) {
  const raw=String(value ?? '').normalize('NFKC').toLowerCase().trim()
-  .replace(/^["'“‘(\[]+|["'”’).,!;?\]]+$/g,'').replaceAll('〇','零').replaceAll('两','二');
+  .replace(/^["'“‘(:\[]+|["'”’).,!;?:\]]+$/g,'').replaceAll('〇','零').replaceAll('两','二');
  if (/^\d+$/.test(raw)) return String(Number(raw));
  const digits='零一二三四五六七八九';
  if (/^[零一二三四五六七八九]+$/.test(raw)) return String(Number([...raw].map(c=>digits.indexOf(c)).join('')));
@@ -9305,6 +9316,7 @@ function captionMeaningContext(captions, review) {
           renderPolishSidebarList();
         }
         repairScriptDifferenceLinks();
+        const staleMismatchHintsCleared = reconcileStaleAlignedMismatchHints();
         ensureDynamicTracks();
         recomputeContentDuration();
         applyLayout();
@@ -9331,6 +9343,7 @@ function captionMeaningContext(captions, review) {
         $("home").classList.add("hidden");
         $("app").classList.add("active");
         state.initializing = false;
+        if (staleMismatchHintsCleared) queueAutosave();
         if (promotedTimelineVideo) queueAutosave();
         await new Promise((resolve) => requestAnimationFrame(resolve));
         updateFrameSize(false);
@@ -9354,8 +9367,8 @@ function captionMeaningContext(captions, review) {
         };
         const spoken = short(item.spokenText || item.spoken || item.text);
         const expected = short(item.expectedText);
-        const kind = item.type === 'repeat' ? '疑似重复' : item.type === 'missing' || item.action === 'missing'
-          ? '疑似漏读' : ['addition','extra'].includes(item.type) ? '疑似多读' : '疑似读错';
+        const kind = item.type === 'unverifiedAddition' ? '文案外口语待确认' : item.type === 'repeat' ? '疑似重复' : item.type === 'missing' || item.action === 'missing'
+          ? '文案词待确认' : ['addition','extra'].includes(item.type) ? '疑似多读' : '疑似读错';
         if (item.type !== 'mismatch') return `${kind}\n${item.type === 'missing' || item.action === 'missing' ? expected || '需试听核对' : spoken || '需试听核对'}`;
         const left = String(item.spokenText || item.spoken || '').trim().split(/\s+/).filter(Boolean);
         const right = String(item.expectedText || '').trim().split(/\s+/).filter(Boolean);
@@ -9373,18 +9386,21 @@ function captionMeaningContext(captions, review) {
           return `识别：${item.spokenPhrase || spoken || '未识别到'}\n${meaningLabel}：${meaning(item.spokenZh)}\n正确：${item.expectedPhrase || expected || '无对应内容'}\n${meaningLabel}：${meaning(item.expectedZh)}`;
         }
         if(item.type==='repeat') return `疑似重复\n识别：${spoken || '未识别到'}\n请试听核对是否仍有两次相邻口播。`;
-        const kind =
-          item.scripture
+        const kind = item.type === 'unverifiedAddition'
+          ? '文案外口语待确认'
+          : item.scripture
             ? "📖 经文差异，请自行核对（不影响导出）"
             : item.type === "repeat"
-            ? "重复阅读"
-            : item.type === "missing" || item.action === "missing"
-            ? item.needsAudioReview ? "未识别到，需试听核对" : "疑似漏读，需试听核对"
-            : ['addition','extra'].includes(item.type)
-              ? "识别多出，文案无对应内容"
-              : "用词不一致，需试听核对";
-        const reason = item.type === 'missing' || item.action === 'missing'
-          ? '识别结果缺少这段内容，可能漏读或识别遗漏；试听后确认。'
+              ? "重复阅读"
+              : item.type === "missing" || item.action === "missing"
+                ? item.needsAudioReview ? "未识别到，需试听核对" : "疑似漏读，需试听核对"
+                : ['addition','extra'].includes(item.type)
+                  ? "识别多出，文案无对应内容"
+                  : "用词不一致，需试听核对";
+        const reason = item.type === 'unverifiedAddition'
+          ? '识别到文案外口语；试听后可选择剪掉，或保留声音并加字幕。'
+          : item.type === 'missing' || item.action === 'missing'
+          ? '文案有这段内容，但识别结果没有找到对应口播。试听判断录音里是否有词；有词可手动补字幕，确实没读可确认漏读。'
           : item.type === 'mismatch'
             ? '识别内容与此位置的文案不一致，可能读法、识别或对齐有误；核对后再修改。'
             : ['addition','extra'].includes(item.type)
@@ -9394,7 +9410,7 @@ function captionMeaningContext(captions, review) {
       }
       function repairScriptDifferenceLinks() {
         state.reviewCaptions = (state.reviewCaptions || [])
-          .filter((item) => ["missing","repeat","mismatch","addition","extra"].includes(item.type))
+          .filter((item) => ["missing","repeat","mismatch","addition","extra","unverifiedAddition"].includes(item.type))
           .filter((item) =>
             item.action === "cut" ||
             item.type === "missing" ||
@@ -9430,6 +9446,33 @@ function captionMeaningContext(captions, review) {
                 ? "missing"
                 : "replace";
           }
+      }
+      function reconcileStaleAlignedMismatchHints() {
+        const groups=new Map();
+        for (const caption of state.captions||[]) for (const word of caption.words||[]) {
+          if (!word.issueId || word.issueType!=='mismatch') continue;
+          const id=String(word.issueId);
+          if (!groups.has(id)) groups.set(id,[]);
+          groups.get(id).push(word);
+        }
+        const resolved=new Set();
+        for (const [id,words] of groups) {
+          const safe=words.length>0&&words.every(word=>
+            ['match','near'].includes(word.matchType)&&!!(word.referenceExpected||word.expectedDisplay)&&
+            !word.userKept&&!word.reviewDismissed&&word.matchType!=='edited'&&word.issueType!=='edited-timing'
+          );
+          if (!safe) continue;
+          resolved.add(id);
+          for (const word of words) { word.issueId=''; word.issueType=''; word.action=''; }
+        }
+        if (!resolved.size) return 0;
+        const before=(state.reviewCaptions||[]).length;
+        state.reviewCaptions=(state.reviewCaptions||[]).filter(review=>
+          !resolved.has(String(review.issueId||review.id))
+        );
+        for (const field of ['issues','matchIssues'])
+          state[field]=(state[field]||[]).filter(issue=>!resolved.has(String(issue.id||'')));
+        return before-state.reviewCaptions.length;
       }
       async function openProjectById(id) {
         try {
@@ -16126,7 +16169,7 @@ function assignOverlapLanes(items = []) {
                 return `<span class="caption-token ${status}${actionClass}"${word.meaningReview ? ` data-meaning-word="${wordIndex}"` : ''}${actionAttribute}${tokenTitle ? ` title="${escapeHtml(tokenTitle)}"` : ""}>${escapeHtml(word.display)}</span>`;
               })
               .join("")
-          : `<span class="clipname ellipsis"${type === "review" ? reviewAction === "missing" ? ` data-focus-issue="${escapeHtml(c.issueId || c.id)}"` : reviewAction === "insert" ? ` data-insert-review="${escapeHtml(c.id)}" title="不改变原意的口语补充：点击插入正确字幕轨道"` : ` data-cut-review="${escapeHtml(c.id)}"` : ""}>${escapeHtml(displayText)}</span>`;
+          : `<span class="clipname ellipsis"${type === "review" ? reviewAction === "missing" ? ` data-focus-issue="${escapeHtml(c.issueId || c.id)}"` : reviewAction === "insert" ? ` data-insert-review="${escapeHtml(c.id)}" title="试听确认后点击插入正确字幕轨道"` : ` data-cut-review="${escapeHtml(c.id)}"` : ""}>${escapeHtml(displayText)}</span>`;
         const actionClass = type === "review" ? ` ${reviewAction}` : "";
         const reviewHit = type==='caption' ? ' data-caption-details="'+escapeHtml(c.id)+'"' : '';
         const inner = type === "caption" || type === "review"
@@ -16328,7 +16371,7 @@ function assignOverlapLanes(items = []) {
       
 function renderIssues() {
   const box=$('issueList');if(!box)return;
-  const pending=Array.from(new Map((state.reviewCaptions||[]).filter(r=>['mismatch','repeat','missing'].includes(r.type)).map(r=>[r.id,r])).values()).sort((a,b)=>a.start-b.start);
+  const pending=Array.from(new Map((state.reviewCaptions||[]).filter(r=>['mismatch','repeat','missing','unverifiedAddition'].includes(r.type)).map(r=>[r.id,r])).values()).sort((a,b)=>a.start-b.start);
   const count=$('reviewPendingCount');if(count)count.textContent=pending.length+' 处待确认';
   const all=typeof captionReviewShowAll!=='undefined' && captionReviewShowAll;
   $('reviewPendingOnly')?.classList.toggle('active',!all);$('reviewAll')?.classList.toggle('active',all);
@@ -17030,7 +17073,7 @@ function syncCaptionCorrectionReviews() {
   state.reviewCaptions = state.reviewCaptions.filter(review => {
     if (review.meaningImpact === 'same') { resolved.add(review.issueId || review.id); return false; }
     if (resolved.has(review.issueId || review.id)) return false;
-    if (['addition','extra'].includes(review.type)) { resolved.add(review.issueId || review.id); return false; }
+    if (['addition','extra'].includes(review.type) && !review.unverifiedAddition) { resolved.add(review.issueId || review.id); return false; }
     if (review.type === 'mismatch' && captionCorrectionKey(review.spokenText) && captionCorrectionKey(review.expectedText) &&
         !captionCorrectionDiffers(review.spokenText, review.expectedText)) {
       resolved.add(review.issueId || review.id); cosmetic.add(review.issueId || review.id); return false;
@@ -17052,6 +17095,12 @@ function syncCaptionCorrectionReviews() {
       const expected = word.referenceExpected || word.expectedDisplay || '';
       const addition = ['addition','extra'].includes(word.issueType) || word.matchType === 'spoken_addition';
       if (addition) { word.issueType = 'addition'; word.matchType = 'spoken_addition'; word.issueId = ''; word.action = ''; continue; }
+      if (word.matchType === 'near' && expected) {
+        if (word.issueId) resolved.add(word.issueId);
+        word.display=expected;
+        word.issueType=''; word.issueId=''; word.action='';
+        continue;
+      }
       if (!captionCorrectionDiffers(recognized, expected)) {
         if (word.issueType === 'mismatch') { word.issueType = ''; word.issueId = ''; word.action = ''; }
         continue;
@@ -17269,9 +17318,230 @@ $("timelineContent").addEventListener('pointerdown', hideReviewHoverCard);
 $("timelineScroll").addEventListener('scroll', hideReviewHoverCard);
 
 let reviewDetailsDialog = null;
+function reviewCutCaptionConflict(review, start, end) {
+  const candidates = [];
+  for (const caption of state.captions || []) {
+    if (review.captionTrackId && caption.trackId && caption.trackId !== review.captionTrackId) continue;
+    if (review.ownerClipId && caption.ownerClipId && caption.ownerClipId !== review.ownerClipId) continue;
+    if (review.sourceMediaId && caption.sourceMediaId && caption.sourceMediaId !== review.sourceMediaId) continue;
+    const words = caption.words?.length ? caption.words : [{
+      display: caption.text, start: caption.start, end: caption.end,
+      issueType: caption.issueType, matchType: caption.matchType,
+    }];
+    for (const word of words) {
+      if (word.issueType === 'addition' || word.issueType === 'extra' || word.matchType === 'spoken_addition') continue;
+      const wordStart = Number(word.start), wordEnd = Number(word.end);
+      if (Number.isFinite(wordStart) && Number.isFinite(wordEnd) && wordStart < end - .004 && wordEnd > start + .004)
+        candidates.push(word);
+    }
+  }
+  return candidates[0] || null;
+}
+function buildUnverifiedCutControls(review) {
+  const panel = document.createElement('div');
+  panel.className = 'review-extra-cut-controls';
+  panel.hidden = true;
+  const note = document.createElement('p');
+  note.className = 'small';
+  note.textContent = '剪切边界按识别时间预填；试听剪后效果，必要时微调，再确认剪掉。';
+  const range = document.createElement('div');
+  range.className = 'review-extra-cut-range';
+  const makeTimeInput = (labelText, value) => {
+    const label = document.createElement('label');
+    label.className = 'small';
+    label.textContent = labelText;
+    const input = document.createElement('input');
+    input.type = 'number'; input.min = '0'; input.max = String(Number(state.duration || 0));
+    input.step = '0.01'; input.value = Number(value || 0).toFixed(2);
+    input.setAttribute('aria-label', labelText);
+    label.appendChild(input);
+    range.appendChild(label);
+    return input;
+  };
+  const startInput = makeTimeInput('开始（秒）', review.start);
+  const endInput = makeTimeInput('结束（秒）', review.end);
+  const status = document.createElement('p');
+  status.className = 'small review-extra-cut-status';
+  const actions = document.createElement('div');
+  actions.className = 'review-details-actions';
+  const preview = document.createElement('button');
+  preview.className = 'btn small'; preview.textContent = '试听剪后';
+  preview.classList.add('review-extra-cut-preview');
+  preview.type = 'button';
+  const commit = document.createElement('button');
+  commit.className = 'btn small primary'; commit.textContent = '确认剪掉';
+  commit.type = 'button';
+  const back = document.createElement('button');
+  back.className = 'btn small'; back.textContent = '返回'; back.type = 'button';
+  const readRange = () => ({ start: Number(startInput.value), end: Number(endInput.value) });
+  const validate = () => {
+    const { start, end } = readRange();
+    const conflict = reviewCutCaptionConflict(review, start, end);
+    const rangeValid = Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end > start + .02 && end <= Number(state.duration || 0);
+    const previewable = rangeValid && typeof reviewCutAudioTarget === 'function' && !!reviewCutAudioTarget(review, start, end);
+    const valid = rangeValid && !conflict && previewable;
+    status.classList.toggle('warning', !!conflict);
+    status.textContent = conflict
+      ? `剪切范围碰到正文字幕“${String(conflict.display || conflict.text || '').trim()}”；请调整边界，避免删掉正文。`
+      : !rangeValid ? '请检查开始和结束时间。'
+      : !previewable ? '无法定位这段口语的原始音频，暂时不能安全试听和剪切。'
+      : '边界可用；剪掉前请试听拼接效果。';
+    commit.disabled = !valid;
+    preview.disabled = !valid;
+    if (typeof stopReviewCutPreview === 'function') stopReviewCutPreview(preview);
+    return valid;
+  };
+  startInput.addEventListener('input', validate);
+  endInput.addEventListener('input', validate);
+  preview.addEventListener('click', () => {
+    if (preview.dataset.active === 'true') { stopReviewCutPreview(preview); return; }
+    if (!validate()) return;
+    const { start, end } = readRange();
+    void auditionReviewCutPreview(review, start, end, preview);
+  });
+  commit.addEventListener('click', () => {
+    if (!validate()) return;
+    if (isTrackLocked('review')) return toast('待处理轨道已锁定，无法剪除这段口语');
+    const { start, end } = readRange();
+    stopReviewCutPreview(preview);
+    reviewDetailsDialog.close();
+    cutScriptIssue(review.issueId || review.id, { scope: { ...review, start, end } });
+  });
+  back.addEventListener('click', () => { stopReviewCutPreview(preview); panel.hidden = true; });
+  actions.append(preview, commit, back);
+  panel.append(note, range, status, actions);
+  validate();
+  return panel;
+}
+function buildMissingCaptionControls(review) {
+  const panel = document.createElement('div');
+  panel.className = 'review-extra-cut-controls review-missing-caption-controls';
+  panel.hidden = true;
+  const note = document.createElement('p');
+  note.className = 'small';
+  note.textContent = '先试听附近音频。只有确认录音里确实说了这段文案时，才手动补入字幕；请按实际发音调整时间。';
+  const textLabel = document.createElement('label');
+  textLabel.className = 'small';
+  textLabel.textContent = '要补入的字幕';
+  const textInput = document.createElement('input');
+  textInput.type = 'text';
+  textInput.value = String(review.expectedText || review.expected || '').trim();
+  textInput.setAttribute('aria-label', '要补入的字幕');
+  textLabel.appendChild(textInput);
+  const range = document.createElement('div');
+  range.className = 'review-extra-cut-range';
+  const duration = Math.max(0, Number(state.duration || 0));
+  const startValue = Math.min(duration, Math.max(0, Number(review.start ?? state.currentTime ?? 0)));
+  const initialTokens = editableCaptionTokens(textInput.value);
+  const estimatedLength = Math.max(.3, Math.min(1.8, initialTokens.length * .3));
+  const endValue = Math.min(duration, Math.max(Number(review.end || startValue), startValue + estimatedLength));
+  const makeTimeInput = (labelText, value) => {
+    const label = document.createElement('label');
+    label.className = 'small';
+    label.textContent = labelText;
+    const input = document.createElement('input');
+    input.type = 'number'; input.min = '0'; input.max = String(duration);
+    input.step = '0.01'; input.value = Number(value || 0).toFixed(2);
+    input.setAttribute('aria-label', labelText);
+    label.appendChild(input);
+    range.appendChild(label);
+    return input;
+  };
+  const startInput = makeTimeInput('开始时间（秒）', startValue);
+  const endInput = makeTimeInput('结束时间（秒）', endValue);
+  const status = document.createElement('p');
+  status.className = 'small review-extra-cut-status';
+  const actions = document.createElement('div');
+  actions.className = 'review-details-actions';
+  const preview = document.createElement('button');
+  preview.className = 'btn small review-extra-cut-preview';
+  preview.textContent = '试听所选范围';
+  preview.type = 'button';
+  const insert = document.createElement('button');
+  insert.className = 'btn small primary';
+  insert.textContent = '确认有词，补入字幕';
+  insert.type = 'button';
+  const cancel = document.createElement('button');
+  cancel.className = 'btn small';
+  cancel.textContent = '返回';
+  cancel.type = 'button';
+  const readRange = () => ({ start: Number(startInput.value), end: Number(endInput.value) });
+  const hasCaptionOverlap = (start, end) => (state.captions || []).some(caption => {
+    if ((caption.trackId || 'caption') !== (review.captionTrackId || 'caption')) return false;
+    const words = caption.words?.length ? caption.words : [{ start: caption.start, end: caption.end }];
+    return words.some(word => Number(word.start) < end - .005 && Number(word.end) > start + .005);
+  });
+  const validate = () => {
+    const { start, end } = readRange();
+    const tokens = editableCaptionTokens(textInput.value);
+    const rangeValid = Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end > start + .02 && end <= duration;
+    const overlap = rangeValid && hasCaptionOverlap(start, end);
+    const locked = isTrackLocked(review.captionTrackId || 'caption') || isTrackLocked('review');
+    status.classList.toggle('warning', !!overlap || locked);
+    status.textContent = !tokens.length ? '请填写要补入的文案。'
+      : !rangeValid ? '请检查开始和结束时间。'
+      : overlap ? '所选时间与已有字幕重叠；请试听并调整时间范围。'
+      : locked ? '字幕或待确认轨道已锁定。'
+      : '只有确认录音中有这段口播后，才点击补入。';
+    preview.disabled = !rangeValid;
+    insert.disabled = !tokens.length || !rangeValid || overlap || locked;
+    return { valid: !insert.disabled, start, end, tokens };
+  };
+  for (const input of [textInput, startInput, endInput]) input.addEventListener('input', validate);
+  preview.addEventListener('click', () => {
+    const { start, end } = readRange();
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start)
+      void auditionReviewSegment(review.id, { start, end });
+  });
+  insert.addEventListener('click', () => {
+    const result = validate();
+    if (!result.valid) return;
+    snapshot();
+    const issueId = review.issueId || review.id;
+    const span = result.end - result.start;
+    const words = result.tokens.map((display, index) => ({
+      display,
+      norm: String(display).toLowerCase().replace(/[^\p{L}\p{N}]/gu, ''),
+      originalDisplay: display,
+      expectedDisplay: display,
+      recognizedDisplay: display,
+      start: result.start + span * index / result.tokens.length,
+      end: result.start + span * (index + 1) / result.tokens.length,
+      matchType: 'edited',
+      issueType: '', issueId: '', action: '',
+      userKept: true, userInserted: true, manuallyConfirmedSpoken: true,
+    }));
+    const caption = {
+      id: uid(), start: result.start, end: result.end,
+      text: joinCaptionWords(words), words,
+      trackId: review.captionTrackId || 'caption',
+      ownerClipId: review.ownerClipId, ownerClipType: review.ownerClipType,
+      sourceMediaId: review.sourceMediaId, transcriptId: review.transcriptId || '',
+    };
+    state.captions ||= [];
+    state.captions.push(caption);
+    state.captions.sort((left, right) => left.start - right.start);
+    state.reviewCaptions = (state.reviewCaptions || []).filter(item => item.id !== review.id && (item.issueId || item.id) !== issueId);
+    state.issues = (state.issues || []).filter(item => item.id !== issueId);
+    state.matchIssues = (state.matchIssues || []).filter(item => item.id !== issueId);
+    state.selected = { type: 'caption', id: caption.id };
+    state.selectedItems = [state.selected];
+    reviewDetailsDialog.close();
+    seekTimeline(result.start);
+    renderAll();
+    queueAutosave();
+    toast('已按你的选择补入字幕；音频未改动');
+  });
+  cancel.addEventListener('click', () => { panel.hidden = true; });
+  actions.append(preview, insert, cancel);
+  panel.append(note, textLabel, range, status, actions);
+  validate();
+  return panel;
+}
 function showReviewDetails(id) {
   const review = state.reviewCaptions.find(r => r.id === id || r.issueId === id);
   if (!review) return;
+  stopReviewCutPreview();
   if (review.meaningContextKey && review.meaningContextKey !== JSON.stringify({spoken:review.spokenText,expected:review.expectedText,...captionMeaningContext(state.captions,review)})) {
     review.spokenZh = ''; review.expectedZh = ''; review.meaningMode = '';
   }
@@ -17290,6 +17560,7 @@ function showReviewDetails(id) {
       if (pressedOutside && event.target === reviewDetailsDialog && outside(event)) reviewDetailsDialog.close();
       pressedOutside = false;
     });
+    reviewDetailsDialog.addEventListener('close', () => stopReviewCutPreview());
     document.body.appendChild(reviewDetailsDialog);
   }
   reviewDetailsDialog.reviewId = review.id;
@@ -17307,18 +17578,42 @@ function showReviewDetails(id) {
     element.className = 'btn small'; element.textContent = label;
     element.onclick = action; actions.appendChild(element);
   };
-  const ordered=state.reviewCaptions.filter(r=>['mismatch','repeat','missing'].includes(r.type)).sort((a,b)=>a.start-b.start);
+  const ordered=state.reviewCaptions.filter(r=>['mismatch','repeat','missing','unverifiedAddition'].includes(r.type)).sort((a,b)=>a.start-b.start);
   const position=ordered.findIndex(r=>r.id===review.id);
   if(position>0)button('上一处',()=>showReviewDetails(ordered[position-1].id));
   if(position>=0 && position<ordered.length-1)button('下一处',()=>showReviewDetails(ordered[position+1].id));
   if(review.type==='mismatch')button('重试中文',()=>loadCaptionMeaning(review,null,true));
-  button('试听', () => { reviewDetailsDialog.close(); auditionReviewSegment(review.id); });
-  if (review.type === 'mismatch') button('使用正确文案', () => { if(replaceReviewCaption(review.id,'expected')) reviewDetailsDialog.close(); });
-  if (review.type !== 'missing' && review.action !== 'missing')
-    button('使用识别文案', () => { if(replaceReviewCaption(review.id,'spoken')) reviewDetailsDialog.close(); });
-  button('忽略提示', () => { reviewDetailsDialog.close(); snapshot(); dismissReviewHints([review.id]); });
+  const missingSpeech = review.type === 'missing' || review.action === 'missing';
+  const unverifiedAddition = review.type === 'unverifiedAddition' || review.unverifiedAddition;
+  if (missingSpeech) {
+    button('试听附近音频', () => { stopReviewCutPreview(); auditionReviewSegment(review.id); });
+    button('音频有词，补入字幕', () => {
+      const panel = reviewDetailsDialog.querySelector('.review-missing-caption-controls');
+      if (panel) { panel.hidden = false; panel.querySelector('input')?.focus(); }
+    });
+    button('确认音频未读', () => {
+      if (isTrackLocked('review')) return toast('待确认轨道已锁定');
+      reviewDetailsDialog.close();
+      dismissReviewHints([review.id]);
+    });
+  } else if (unverifiedAddition) {
+    button('试听原片', () => { stopReviewCutPreview(); auditionReviewSegment(review.id); });
+    button('剪掉这段', () => {
+      const panel = reviewDetailsDialog.querySelector('.review-extra-cut-controls');
+      if (panel) { panel.hidden = false; panel.querySelector('input')?.focus(); }
+    });
+    button('保留并加字幕', () => { stopReviewCutPreview(); reviewDetailsDialog.close(); acceptReviewSegment(review.id); });
+  } else {
+    button('试听', () => { reviewDetailsDialog.close(); auditionReviewSegment(review.id); });
+    if (review.type === 'mismatch') button('使用正确文案', () => { if(replaceReviewCaption(review.id,'expected')) reviewDetailsDialog.close(); });
+    if (review.type !== 'missing' && review.action !== 'missing')
+      button('使用识别文案', () => { if(replaceReviewCaption(review.id,'spoken')) reviewDetailsDialog.close(); });
+    button('忽略提示', () => { reviewDetailsDialog.close(); snapshot(); dismissReviewHints([review.id]); });
+  }
   button('关闭', () => reviewDetailsDialog.close());
   reviewDetailsDialog.append(heading, detail, actions);
+  if (missingSpeech) reviewDetailsDialog.append(buildMissingCaptionControls(review));
+  if (unverifiedAddition) reviewDetailsDialog.append(buildUnverifiedCutControls(review));
   if (!reviewDetailsDialog.open) reviewDetailsDialog.showModal();
   if (review.type === 'mismatch') {
     Promise.resolve(loadCaptionMeaning(review)).then(() => {
@@ -21375,12 +21670,128 @@ function polishSectionHtml(title, rows, emptyText) {
       function replaceReviewWithSpoken(id) {
         replaceReviewCaption(id, "spoken");
       }
+      let reviewCutPreviewPlayer = null;
+      let reviewCutPreviewFrame = 0;
+      let reviewCutPreviewGeneration = 0;
+      function stopReviewCutPreview(button = null) {
+        reviewCutPreviewGeneration += 1;
+        if (reviewCutPreviewFrame) cancelAnimationFrame(reviewCutPreviewFrame);
+        reviewCutPreviewFrame = 0;
+        if (reviewCutPreviewPlayer) {
+          reviewCutPreviewPlayer.pause();
+          reviewCutPreviewPlayer.removeAttribute('src');
+          reviewCutPreviewPlayer.load();
+          reviewCutPreviewPlayer = null;
+        }
+        const buttons = button ? [button] : document.querySelectorAll('.review-extra-cut-preview');
+        for (const item of buttons) {
+          item.dataset.active = 'false';
+          item.textContent = '试听剪后';
+        }
+      }
+      function reviewCutAudioTarget(review, start, end) {
+        const ownerType = String(review.ownerClipType || '');
+        const collections = [
+          ['audioasset', state.audioAssets || []],
+          ['videolayer', state.videoLayers || []],
+          ['image', state.images || []],
+        ];
+        let media = null, clip = null;
+        for (const [type, list] of collections) {
+          const candidate = list.find(item =>
+            (review.ownerClipId && String(item.id) === String(review.ownerClipId)) ||
+            (review.sourceMediaId && [item.sourceMediaId, item.path, item.id].some(value => String(value || '') === String(review.sourceMediaId))));
+          if (!candidate) continue;
+          const allowed = type === ownerType || !ownerType || ownerType === 'video' || ownerType === 'audio';
+          if (!allowed) continue;
+          if (start < Number(candidate.start || 0) - .002 || end > Number(candidate.end || 0) + .002) continue;
+          media = candidate; clip = candidate; break;
+        }
+        if (!clip) {
+          if (ownerType === 'audioasset' || ownerType === 'videolayer') return null;
+          const clips = ownerType === 'audio' ? mainAudioClips() : mainClips();
+          clip = clips.find(item => start >= Number(item.start || 0) - .002 && end <= Number(item.end || 0) + .002) || null;
+          media = state.video;
+          if (ownerType === 'audio' && !state.avLinked && state.video &&
+              !mainClips().some(item => start >= Number(item.start || 0) - .002 && end <= Number(item.end || 0) + .002)) return null;
+          if (review.sourceMediaId && state.video?.path && String(review.sourceMediaId) !== String(state.video.path) && String(review.sourceMediaId) !== String(state.video.sourceMediaId || '')) {
+            const alternate = [...(state.audioAssets || []), ...(state.videoLayers || [])].find(item =>
+              String(item.sourceMediaId || item.path || '') === String(review.sourceMediaId));
+            if (alternate && start >= alternate.start - .002 && end <= alternate.end + .002) { clip = alternate; media = alternate; }
+          }
+        }
+        if (!clip || !media) return null;
+        const timelineSpan = Number(clip.end || 0) - Number(clip.start || 0);
+        const sourceStart = Number(clip.sourceStart || 0), sourceEnd = Number(clip.sourceEnd || 0);
+        if (!(timelineSpan > .001) || !(sourceEnd > sourceStart + .001)) return null;
+        const rate = (sourceEnd - sourceStart) / timelineSpan;
+        const cutStart = sourceStart + (start - Number(clip.start || 0)) * rate;
+        const cutEnd = sourceStart + (end - Number(clip.start || 0)) * rate;
+        let url = media.playbackAudioUrl || media.url || '';
+        const mediaPath = String(media.path || media.sourceMediaId || '');
+        if (!url && media === state.video) url = state.video?.url || '';
+        if (state.denoiseEnabled && state.denoisedAudio?.url &&
+            (!state.denoisedAudio.sourcePath || state.denoisedAudio.sourcePath === mediaPath))
+          url = state.denoisedAudio.url;
+        if (!url || !(cutEnd > cutStart + .002)) return null;
+        return { url, start: cutStart, end: cutEnd, rate: clamp(rate, .05, 16) };
+      }
+      async function auditionReviewCutPreview(review, start, end, button) {
+        stopReviewCutPreview();
+        const token = reviewCutPreviewGeneration;
+        if (state.playing) await togglePlay();
+        if (token !== reviewCutPreviewGeneration) return;
+        const target = reviewCutAudioTarget(review, start, end);
+        if (!target) return toast('无法定位这段口语的音频；可先试听原片并调整时间');
+        const player = new Audio();
+        reviewCutPreviewPlayer = player;
+        player.preload = 'auto'; player.src = target.url; player.volume = 1;
+        player.playbackRate = target.rate;
+        const padding = .65 * target.rate;
+        const begin = async () => {
+          if (begin.started) return;
+          begin.started = true;
+          if (token !== reviewCutPreviewGeneration || reviewCutPreviewPlayer !== player) return;
+          try {
+            player.currentTime = Math.max(0, target.start - padding);
+            await player.play();
+            if (token !== reviewCutPreviewGeneration || reviewCutPreviewPlayer !== player) return;
+            button.dataset.active = 'true'; button.textContent = '停止试听';
+            let jumped = false;
+            const tick = () => {
+              if (token !== reviewCutPreviewGeneration || reviewCutPreviewPlayer !== player) return;
+              if (!jumped && player.currentTime >= target.start - .006) {
+                jumped = true;
+                player.currentTime = target.end;
+              } else if (jumped && player.currentTime >= target.end + padding) {
+                stopReviewCutPreview(button); return;
+              }
+              reviewCutPreviewFrame = requestAnimationFrame(tick);
+            };
+            reviewCutPreviewFrame = requestAnimationFrame(tick);
+          } catch (error) {
+            stopReviewCutPreview(button);
+            toast('剪后试听失败：' + (error?.message || '无法播放该音频'));
+          }
+        };
+        player.addEventListener('loadedmetadata', begin, { once: true });
+        player.addEventListener('error', () => {
+          if (token !== reviewCutPreviewGeneration) return;
+          stopReviewCutPreview(button); toast('剪后试听失败：原始音频无法读取');
+        }, { once: true });
+        player.load();
+        if (player.readyState >= 1) void begin();
+      }
       function cutReviewSegment(id) {
         const review = state.reviewCaptions.find(
           (item) => item.id === id || item.issueId === id,
         );
         if (!review) {
           if (state.issues.some((item) => item.id === id)) cutScriptIssue(id);
+          return;
+        }
+        if (review.type === 'unverifiedAddition' || review.unverifiedAddition) {
+          showReviewDetails(review.id);
           return;
         }
         if (review.type === 'repeat') return deleteRepeatedReview(review.id);
@@ -21470,11 +21881,11 @@ function polishSectionHtml(title, rows, emptyText) {
             return end;
           }
         }
-        if (review.pendingCaption || (review.type === "addition" && review.words?.length)) {
+        if (review.pendingCaption || (["addition", "unverifiedAddition"].includes(review.type) && review.words?.length)) {
           const tokens = editableCaptionTokens(String(review.spokenText || review.text || ""));
           const words = (review.words?.length ? review.words : tokens.map((display,index)=>({
             display,start:start+(end-start)*index/tokens.length,end:start+(end-start)*(index+1)/tokens.length,
-          }))).map(word=>({...word,matchType:"match",issueType:"",issueId:"",action:"",userKept:true}));
+          }))).map(word=>({...word,matchType:"spoken_addition",issueType:"addition",issueId:"",action:"",userKept:true}));
           if (!words.length) return end;
           words[0].reviewGapBefore=true;
           words.at(-1).reviewGapAfter=true;
@@ -21683,12 +22094,14 @@ function polishSectionHtml(title, rows, emptyText) {
         renderTimeline();
       }
       var reviewAuditionGeneration = 0;
-      async function auditionReviewSegment(id) {
+      async function auditionReviewSegment(id, range = null) {
         const review = state.reviewCaptions.find(r => r.id === id || r.issueId === id);
         if (!review) return;
         const audition = ++reviewAuditionGeneration;
-        const start = Math.max(0, Number(review.start || 0));
-        const end = Math.min(state.duration, Number(review.end || start));
+        const missingSpeech = review.type === 'missing' || review.action === 'missing';
+        const context = range ? 0 : review.type === 'unverifiedAddition' || review.unverifiedAddition ? .28 : missingSpeech ? .45 : 0;
+        const start = Math.max(0, Number(range?.start ?? review.start ?? 0) - context);
+        const end = Math.min(state.duration, Number(range?.end ?? review.end ?? start) + context);
         if (!(end > start)) return toast('这处提示没有可试听的音频');
         if (state.playing) await togglePlay();
         if (audition !== reviewAuditionGeneration) return;
@@ -22165,6 +22578,12 @@ function polishSectionHtml(title, rows, emptyText) {
       function cutScriptIssue(id, { record = true, quiet = false, scope = null } = {}) {
         const issue = state.issues.find((item) => item.id === id);
         if (!issue) return;
+        if ((issue.type === 'unverifiedAddition' || issue.unverifiedAddition) && !scope) {
+          const review = state.reviewCaptions.find(item => (item.issueId || item.id) === id);
+          if (review) showReviewDetails(review.id);
+          else if (!quiet) toast('文案外口语需先在待确认列表中试听确认');
+          return;
+        }
         const target = scope ? { ...issue, ...scope, id: scope.id || issue.id,
           issueId: scope.issueId || issue.issueId || issue.id } : issue;
         const start = Math.max(0, Number(target.start ?? 0));
@@ -22176,15 +22595,16 @@ function polishSectionHtml(title, rows, emptyText) {
           if (!quiet) toast('疑似重复范围覆盖了全部文案，已取消删除以保护工程');
           return;
         }
-        const captionRemoval = planIssueWordsRemoval(id, start, end, target);
-        if (captionRemoval.blocked) {
+        const unverifiedAddition = target.type === 'unverifiedAddition' || target.unverifiedAddition;
+        const captionRemoval = unverifiedAddition ? null : planIssueWordsRemoval(id, start, end, target);
+        if (captionRemoval?.blocked) {
           if (!quiet) toast(issueCaptionRemovalMessage(captionRemoval.reason));
           return;
         }
         if (!mainAudioClips().some(c=>c.start<end&&c.end>start) &&
             state.audioAssets.some(c=>c.start<end&&c.end>start)) {
           if (record) snapshot();
-          if (!removeIssueWords(id,start,end,target,captionRemoval)) return;
+          if (!unverifiedAddition && !removeIssueWords(id,start,end,target,captionRemoval)) return;
           dismissTrimmedIssues(start,end);
           // Independent clips already own their source ranges. Cut the placed
           // timeline directly; mapping through removed main media is invalid.
@@ -22193,20 +22613,41 @@ function polishSectionHtml(title, rows, emptyText) {
           if (!quiet) {seekTimeline(start);renderAll();queueAutosave();toast('已同步删除所选词句及对应音视频');}
           return;
         }
+        if (unverifiedAddition && state.video &&
+            !mainClips().some(clip => start >= Number(clip.start || 0) - .002 && end <= Number(clip.end || 0) + .002)) {
+          if (!quiet) toast('剪切范围跨过视频切口，无法精确保护正文；请调整时间');
+          return;
+        }
         const sourceStart = timelineToSource(start),
           sourceEnd = timelineToSource(end);
         if (sourceEnd <= sourceStart + 0.002) {
           if (!quiet) toast("这一处没有可剪掉的音频范围");
           return;
         }
+        let detachedAudioRange = null, previousMainAudioClips = null;
+        if (unverifiedAddition && !state.avLinked && target.ownerClipType === 'audio') {
+          previousMainAudioClips = mainAudioClips();
+          detachedAudioRange = timelineRangeToSource(start, end, previousMainAudioClips);
+          if (!detachedAudioRange) {
+            if (!quiet) toast('无法精确对应这段独立音频；已取消剪切以保护工程');
+            return;
+          }
+        }
         if (record) snapshot();
-        if (!removeIssueWords(id, start, end, target, captionRemoval)) return;
+        if (!unverifiedAddition && !removeIssueWords(id, start, end, target, captionRemoval)) return;
         state.removals.push({
           start: sourceStart,
           end: sourceEnd,
           source: `script-${target.type || "difference"}`,
         });
+        if (detachedAudioRange) {
+          state.mainAudioRemovals = normalizeRemovalsList([
+            ...(state.mainAudioRemovals || []),
+            { ...detachedAudioRange, source: 'script-unverifiedAddition' },
+          ]);
+        }
         shiftTracks(start, end - start);
+        if (detachedAudioRange) adoptMainAudioMaps(previousMainAudioClips);
         state.reviewCaptions = state.reviewCaptions.filter(item => scope
           ? item.id !== scope.id : (item.issueId || item.id) !== id);
         const remainingIssue = state.reviewCaptions.some(item => (item.issueId || item.id) === id) ||
@@ -29331,6 +29772,12 @@ function registerFontFace(font) {
               const reviewWords=review.words?.length?review.words:[{display:review.expectedText||review.text||"需补录",start:review.start,end:review.end}];
               const mapped = result.timelinePlaced ? bindMatchedReviewSources([{...review,words:reviewWords}],manuscriptSourceClips()) : mapTranscribedCaptionsToTimeline([{...review,words:reviewWords}]);
               for (const part of mapped) {
+                const alreadyKept=review.type==='unverifiedAddition'&&(part.words||[]).length&&(part.words||[]).every(candidate=>(state.captions||[]).some(caption=>
+                  caption.transcriptId===transcriptId&&(!part.ownerClipId||caption.ownerClipId===part.ownerClipId)&&
+                  (caption.words||[]).some(word=>word.userKept&&(word.matchType==='spoken_addition'||word.matchType==='edited'||word.issueType==='edited-timing'||word.issueType==='addition')&&
+                    Math.max(0,Math.min(Number(word.end),Number(candidate.end))-Math.max(Number(word.start),Number(candidate.start)))/
+                    Math.max(.01,Math.min(Number(word.end)-Number(word.start),Number(candidate.end)-Number(candidate.start)))>=.5)));
+                if(alreadyKept)continue;
                 const id = uid();
                 const pending = {...review,...part,id,issueId:id,captionTrackId:trackId,transcriptId:transcriptId || ""};
                 for (const caption of state.captions.filter(c=>c.transcriptId===transcriptId && c.ownerClipId===part.ownerClipId)) {
@@ -29434,7 +29881,7 @@ function registerFontFace(font) {
             renderAutoTranscript();
             const pendingCount = (current.result.reviewCaptions || []).length;
             status.textContent = pendingCount
-              ? `已对照正确文案生成 ${generated.length} 段字幕，${pendingCount} 处差异已标注；字幕完整保留，加添内容已标绿。`
+              ? `已按正确文案生成 ${generated.length} 段字幕；${pendingCount} 处需要试听确认，文案外词未自动加入字幕。`
               : defaultTrackOccupied
               ? `正确文案字幕轨道已有内容；已新建字幕轨道并生成 ${generated.length} 段。`
               : `已在“正确文案字幕”轨道生成 ${generated.length} 段。`;

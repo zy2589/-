@@ -748,6 +748,7 @@ export async function renderDeepFilterTrack(inputPath, strength = 0.8, outputPat
   // and total duration remain identical to the original track.
   const startupProtection = Math.max(0.12, Math.min(0.5, Number(options.startupProtection ?? 0.24)));
   const expectedDuration = Math.max(0.04, Number(options.duration || probeMedia(inputPath).duration || 0));
+  const openingBlend = Math.min(0.8, expectedDuration).toFixed(4);
 
   const ffmpegArgs = ["-y", "-hide_banner", "-loglevel", "error"];
   if (options.time != null && options.duration != null) {
@@ -783,16 +784,29 @@ export async function renderDeepFilterTrack(inputPath, strength = 0.8, outputPat
       throw new Error("DeepFilterNet 输出文件缺失");
     }
 
-    // Encode to target M4A
+    // Blend the untouched opening into the denoised signal. The model's
+    // recurrent state can suppress speech while it settles at file start;
+    // a short crossfade preserves the first phonemes without a hard splice.
+    const openingFilter = [
+      `[0:a]atrim=start=${startupProtection.toFixed(4)},asetpts=PTS-STARTPTS,afade=t=out:st=0:d=${openingBlend}[original]`,
+      `[1:a]atrim=start=${startupProtection.toFixed(4)},asetpts=PTS-STARTPTS,apad,atrim=duration=${expectedDuration.toFixed(4)},afade=t=in:st=0:d=${openingBlend}[denoised]`,
+      `[original][denoised]amix=inputs=2:duration=longest:normalize=0,atrim=duration=${expectedDuration.toFixed(4)},asetpts=PTS-STARTPTS[out]`,
+    ].join(";");
+
+    // Encode to target M4A, preserving the original signal at the very start.
     await run(mediaBinary("ffmpeg"), [
       "-y",
       "-hide_banner",
       "-loglevel",
       "error",
       "-i",
+      rawWav,
+      "-i",
       cleanedWavPath,
-      "-af",
-      `atrim=start=${startupProtection.toFixed(4)},asetpts=PTS-STARTPTS,apad,atrim=duration=${expectedDuration.toFixed(4)}`,
+      "-filter_complex",
+      openingFilter,
+      "-map",
+      "[out]",
       "-c:a",
       "aac",
       "-b:a",

@@ -81,7 +81,7 @@ function captionReviewVariants(value) {
 // units, decimals, ranges and chapter separators are intentionally not stripped.
 export function captionCardinalValue(value) {
  const raw=String(value ?? '').normalize('NFKC').toLowerCase().trim()
-  .replace(/^["'“‘(\[]+|["'”’).,!;?\]]+$/g,'').replaceAll('〇','零').replaceAll('两','二');
+  .replace(/^["'“‘(:\[]+|["'”’).,!;?:\]]+$/g,'').replaceAll('〇','零').replaceAll('两','二');
  if (/^\d+$/.test(raw)) return String(Number(raw));
  const digits='零一二三四五六七八九';
  if (/^[零一二三四五六七八九]+$/.test(raw)) return String(Number([...raw].map(c=>digits.indexOf(c)).join('')));

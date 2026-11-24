@@ -1,11 +1,12 @@
 import {surplusTakeIssues} from './repeated-takes.mjs';
+import crypto from 'node:crypto';
 import {captionTextDiffers,captionReviewDiffers,captionComparisonKey,correctContractionCaptionWords} from '../caption-comparison.mjs';
 import {correctNumericCaptionWords} from '../numeric-caption-correction.mjs';
 import {correctHarmlessCaptionWords} from '../harmless-caption-correction.mjs';
 
-// One policy for CC, manuscript matching and batch editing. Review annotations
-// never remove spoken captions or manufacture audio for missing manuscript words.
-export function pendingCaptionPlan(aligned = {}) {
+// One policy for CC, manuscript matching and batch editing. Manuscript-aligned
+// speech stays on the caption track; unverified extras wait on the review track.
+export function pendingCaptionPlan(aligned = {}, {reviewUnmatched = true} = {}) {
   const operations=aligned.operations || [];
   const sentences=[];let sentence=[];
   for(const op of operations.filter(op=>op.spoken&&!op.spoken.recoveredFromManuscript)){
@@ -26,14 +27,75 @@ export function pendingCaptionPlan(aligned = {}) {
   // fragments on the final take that local word alignment selected incorrectly.
   const candidates=[...(aligned.issues||[]).map(normalizeRepeat).filter(issue=>issue.type!=='repeat' || !detected.some(r=>
     issue.start<r.end && issue.end>r.start || Number.isFinite(r.retainedStart) && issue.start<r.retainedEnd && issue.end>r.retainedStart)),...detected];
-  const issues=candidates.filter(issue=>['repeat','missing','mismatch','semantic','spokenDiff'].includes(issue.type))
-    .filter(issue=>!['mismatch','semantic','spokenDiff'].includes(issue.type)||captionComparisonKey(issue.spokenText)!==captionComparisonKey(issue.expectedText))
-    .map(issue=>({...issue,type:['semantic','spokenDiff'].includes(issue.type)?'mismatch':issue.type,
-      pendingCaption:false,confirmedCut:false,alreadyDisplayed:issue.type!=='missing',suppressReview:false,
-      action:issue.type==='missing'?'missing':issue.type==='repeat'?'review':'replace',
-      words:operations.filter(op=>op.spoken&&!op.spoken.recoveredFromManuscript&&op.spoken.start<issue.end&&op.spoken.end>issue.start).map(op=>({...op.spoken})),
-      reason:issue.type==='missing'?'需要补录；请先试听确认是否确实漏读':issue.type==='repeat'?'重复口播，可试听后手动处理':'与正确文案有差异，可手动替换'}));
-  const words=operations.filter(op=>op.spoken&&!op.spoken.recoveredFromManuscript).map(op=>{
+  const issues=candidates.filter(issue=>['repeat','missing','mismatch','semantic','spokenDiff','addition','extra'].includes(issue.type))
+    .filter(issue=>!(['addition','extra'].includes(issue.type)&&issue.confirmedCut))
+    .filter(issue=>{
+      if(!['mismatch','semantic','spokenDiff'].includes(issue.type))return true;
+      const linked=operations.filter(operation=>operation.issueId===issue.id&&operation.spoken);
+      const unanchoredSemantic=issue.type==='semantic'&&linked.length>0&&linked.every(operation=>!operation.expected);
+      return unanchoredSemantic||captionComparisonKey(issue.spokenText)!==captionComparisonKey(issue.expectedText);
+    })
+    .map(issue=>{
+      const linked=operations.filter(operation=>operation.issueId===issue.id&&operation.spoken);
+      const unverifiedAddition=['addition','extra'].includes(issue.type)||issue.type==='semantic'&&linked.length>0&&linked.every(operation=>!operation.expected);
+      return {...issue,type:unverifiedAddition?'unverifiedAddition':['semantic','spokenDiff'].includes(issue.type)?'mismatch':issue.type,
+      ...(unverifiedAddition?{unverifiedAddition:true}:{}),
+      ...(unverifiedAddition?{expectedText:''}:{}),
+      ...(unverifiedAddition?{audioEvidence:'spoken'}:{}),
+      ...(issue.type==='missing'?{label:'文案词未匹配，试听确认',audioEvidence:'notRecognized'}:{}),
+      pendingCaption:false,confirmedCut:!!issue.confirmedCut,alreadyDisplayed:!unverifiedAddition&&issue.type!=='missing',
+      needsAudioReview:unverifiedAddition||issue.type==='missing',suppressReview:false,
+      action:issue.type==='missing'?'missing':issue.type==='repeat'?'review':unverifiedAddition?'insert':'replace',
+      words:operations.filter(op=>op.spoken&&!op.spoken.recoveredFromManuscript&&
+        (unverifiedAddition?(!op.expected&&(op.issueId===issue.id||op.captionDecisionIssueId===issue.id)):op.spoken.start<issue.end&&op.spoken.end>issue.start))
+        .map(op=>({...op.spoken})),
+      reason:unverifiedAddition?'文案外口语待确认；试听后可选择剪掉或保留并加字幕':issue.type==='missing'?'识别结果没有找到对应口播；试听判断是漏读还是识别遗漏':issue.type==='repeat'?'重复口播，可试听后手动处理':'与正确文案有差异，可手动替换'};
+    });
+  const reviewAdditionIds=new Set(issues.filter(issue=>issue.type==='unverifiedAddition').map(issue=>issue.id));
+  const excludedOperations=new Set();
+  if(reviewUnmatched)for(const operation of operations){
+    if(!operation?.spoken||operation.expected||operation.spoken.recoveredFromManuscript)continue;
+    if(operation.action==='cut'){
+      excludedOperations.add(operation);
+      continue;
+    }
+    if(operation.issueId&&reviewAdditionIds.has(operation.issueId)){
+      excludedOperations.add(operation);
+      continue;
+    }
+  }
+  const syntheticGroups=[];let group=[];
+  const flushGroup=()=>{
+    if(!group.length)return;
+    const start=Number(group[0].spoken.start||0),end=Number(group.at(-1).spoken.end||start+.04),id=crypto.randomUUID();
+    const words=group.map(operation=>({...operation.spoken}));
+    for(const operation of group){
+      excludedOperations.add(operation);
+      operation.captionDecision='review-addition';
+      operation.captionDecisionIssueId=id;
+    }
+    syntheticGroups.push({id,issueId:id,type:'unverifiedAddition',unverifiedAddition:true,label:'文案外口语待确认',spokenText:words.map(word=>word.display).join(' '),expectedText:'',start,end,
+      action:'insert',pendingCaption:false,alreadyDisplayed:false,needsAudioReview:true,confirmedCut:false,suppressReview:false,
+      reason:'文案外口语待确认；试听后选择剪掉或保留并加字幕',words});
+    group=[];
+  };
+  if(reviewUnmatched)for(const operation of operations){
+    const candidate=operation?.spoken&&!operation.expected&&!operation.spoken.recoveredFromManuscript&&
+      operation.action!=='cut'&&!operation.issueId&&
+      (['extra','filler'].includes(operation.type)||operation.issueType==='addition'||operation.issueType==='semantic'||operation.action==='insert')&&
+      !['mismatch','repeat','spokenDiff'].includes(operation.issueType);
+    if(!candidate){flushGroup();continue;}
+    const previous=group.at(-1);
+    if(previous&&Number(operation.spoken.start||0)-Number(previous.spoken.end||0)>.55)flushGroup();
+    group.push(operation);
+  }
+  flushGroup();
+  issues.push(...syntheticGroups);
+  if(reviewUnmatched)for(const operation of operations){
+    if(operation?.spoken&&!operation.expected&&!operation.spoken.recoveredFromManuscript&&operation.issueType==='addition'&&operation.action!=='cut')
+      excludedOperations.add(operation);
+  }
+  const words=operations.filter(op=>op.spoken&&!op.spoken.recoveredFromManuscript&&!excludedOperations.has(op)).map(op=>{
     const spoken=op.spoken;let expected=op.expected;
     const localIssues=issues.filter(i=>i.type!=='missing'&&spoken.start<i.end&&spoken.end>i.start);
     const issue=localIssues.find(i=>i.id===op.issueId)||localIssues[0];
@@ -45,11 +107,10 @@ export function pendingCaptionPlan(aligned = {}) {
         !captionTextDiffers(other.expected.display,spoken.display))?.expected;
     }
     const matched=expected&&!issue&&(['match','near'].includes(op.type)||!captionTextDiffers(spoken.display,expected.display));
-    const addition=!issue&&!matched&&!expected;
     return {...spoken,display:matched?expected.display:spoken.display,
       originalDisplay:spoken.display,expectedDisplay:expected?.display||'',autoCorrected:!!matched&&spoken.display!==expected.display,ccReferenceReview:!!matched,
-      matchType:matched?op.type:addition?'spoken_addition':op.type,
-      issueType:issue?.type || (addition?'addition':''),issueId:issue?.id||'',
+      matchType:op.type,
+      issueType:issue?.type || '',issueId:issue?.id||'',
       action:issue?.action||'',keepWithPrevious:!!spoken.keepWithPrevious||!!expected?.keepWithPrevious,
       scriptureReference:!!spoken.scriptureReference||!!expected?.scriptureReference};
   }).sort((a,b)=>a.start-b.start||a.end-b.end);
