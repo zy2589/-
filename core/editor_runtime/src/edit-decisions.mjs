@@ -99,6 +99,12 @@ export function editHistoryDelta(before,after){
  return Object.keys(old).length?JSON.parse(JSON.stringify({__historyDelta:true,before:old,after:next})):null;
 }
 export function editTrackEnabled(track,locks={},syncLocks={},ripple=false){return !locks[track]&&(!ripple||syncLocks[track]!==false);}
+function remapWordLineBreaks(item, indexes, wordCount) {
+ const breaks=Array.isArray(item?.lineBreaks)?item.lineBreaks.map(Number).filter(Number.isInteger):[];
+ const mapped=breaks.map(value=>indexes.filter(index=>index<value).length)
+  .filter((value,index,all)=>value>0&&value<wordCount&&all.indexOf(value)===index);
+ return {lineBreaks:mapped,lineCount:Math.max(1,mapped.length+1)};
+}
 // Insert at `from`, or remove [from + delta, from]. Preserve source handles.
 export function editRipple(clips,from,delta,{id=()=>crypto.randomUUID(),enabled=()=>true,excluded=new Set(),rate=1,onSplit=()=>{}}={}){
  if(Math.abs(delta)<1e-8)return clips;
@@ -110,19 +116,21 @@ export function editRipple(clips,from,delta,{id=()=>crypto.randomUUID(),enabled=
    part.sourceStart=clip.sourceStart+(start-clip.start)*speed;
    part.sourceEnd=clip.sourceStart+(end-clip.start)*speed;
   }
-  if(clip.words){
+  if(Array.isArray(clip.words)&&clip.words.length){
    // A caption word crossing an edit boundary must belong to only one side.
    // Filtering only by overlap puts a long word in both portions, duplicating
    // the recognized text after a ripple cut. During a removal, words centered
    // in the deleted range belong to neither side.
-   part.words=clip.words.filter(w=>{
-    if(!side)return w.end>start&&w.start<end;
+   const selected=clip.words.map((word,index)=>({word,index})).filter(({word:w})=>{
     const wordStart=Number(w.start),wordEnd=Number(w.end);
     if(!Number.isFinite(wordStart)||!Number.isFinite(wordEnd)||wordEnd<=wordStart)return false;
+    if(wordEnd<=start||wordStart>=end)return false;
+    if(!side)return true;
     const center=(wordStart+wordEnd)/2;
     if(side==='left')return center<boundary;
     return delta>=0?center>=boundary:center>=from;
-   }).map(w=>{
+   });
+   part.words=selected.map(({word:w})=>{
     const wordStart=Number(w.start),wordEnd=Number(w.end);
     const clippedStart=Math.max(start,wordStart),clippedEnd=Math.min(end,wordEnd);
     const word={...w,start:clippedStart,end:clippedEnd};
@@ -134,6 +142,14 @@ export function editRipple(clips,from,delta,{id=()=>crypto.randomUUID(),enabled=
     }
     return word;
    }).filter(w=>w.end>w.start+1e-8);
+   if(part.words.length){
+    part.start=Number(part.words[0].start);
+    part.end=Math.max(part.start+0.04,Number(part.words.at(-1).end));
+    const firstSource=Number(part.words[0].sourceStart),lastSource=Number(part.words.at(-1).sourceEnd);
+    if(part.words[0].sourceStart!=null&&Number.isFinite(firstSource))part.sourceStart=firstSource;
+    if(part.words.at(-1).sourceEnd!=null&&Number.isFinite(lastSource))part.sourceEnd=lastSource;
+    Object.assign(part,remapWordLineBreaks(clip,selected.map(entry=>entry.index),part.words.length));
+   }
    part.text=part.words.map(w=>w.display||w.text||'').join(' ').replace(/\s+([,.!?;:])/g,'$1');
   }
   return part;

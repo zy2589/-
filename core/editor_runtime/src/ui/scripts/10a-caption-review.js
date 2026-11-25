@@ -61,10 +61,134 @@ function restoreUnverifiedAdditionReviews() {
   }
 }
 
+// Keep legacy missing-word issues from the script-comparison lane visible in
+// the same review lane as newer transcript reviews.
+function restoreMissingCaptionReviews() {
+  state.reviewCaptions ||= [];
+  const existing = new Set(state.reviewCaptions.map(item => String(item.issueId || item.id || "")));
+  const duration = Number(state.duration);
+  for (const issue of [...(state.issues || []), ...(state.matchIssues || [])]) {
+    if (String(issue?.type || issue?.issueType || "") !== "missing") continue;
+    const id = String(issue.issueId || issue.id || "");
+    if (!id || existing.has(id) || issue.suppressReview || issue.reviewDismissed || issue.action === "keep") continue;
+    if (issue.transcriptId && state.autoTranscript?.id && issue.transcriptId !== state.autoTranscript.id) continue;
+    const rawStart = Number(issue.start), rawEnd = Number(issue.end);
+    if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd) || rawEnd <= rawStart ||
+        (Number.isFinite(duration) && duration >= 0 && rawStart >= duration)) continue;
+    const start = Math.max(0, rawStart);
+    const end = Number.isFinite(duration) && duration >= 0 ? Math.min(rawEnd, duration) : rawEnd;
+    if (end <= start) continue;
+    const expectedText = String(issue.expectedText || issue.text || "").trim();
+    if (!expectedText) continue;
+    const words = Array.isArray(issue.words) ? issue.words.map(word => ({...word})) : [];
+    state.reviewCaptions.push({
+      ...issue, id: uid(), issueId: id, start, end, expectedText,
+      spokenText: String(issue.spokenText || "—"), text: expectedText, words,
+      type: "missing", pendingCaption: false, alreadyDisplayed: false,
+      needsAudioReview: true, action: "missing", trackId: "review",
+      captionTrackId: issue.captionTrackId || state.autoTranscript?.trackId || "caption",
+      reason: issue.reason || "识别结果没有找到对应口播；试听确认是否漏读。",
+    });
+    existing.add(id);
+  }
+}
+
+// A script alignment can attach an expected word to the next recognized word,
+// even though the same script token was already recognized and captioned.
+// Clear that false "missing" marker only when every occurrence in the script
+// has a one-to-one match in both the transcript and the caption track.
+function resolveFullyCoveredMissingWordReviews(resolved) {
+  const transcript = state.autoTranscript;
+  const script = String($("scriptText")?.value || "");
+  const segments = Array.isArray(transcript?.sourceSegments) ? transcript.sourceSegments : [];
+  if (!transcript?.id || !script || !segments.length) return;
+
+  const tokenKey = value => String(value || "").normalize("NFKC").toLowerCase()
+    .replace(/[^\p{L}\p{N}]/gu, "");
+  const tokens = value => String(value || "").match(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu) || [];
+  const scriptCounts = new Map();
+  for (const token of tokens(script)) {
+    const key = tokenKey(token);
+    if (key) scriptCounts.set(key, (scriptCounts.get(key) || 0) + 1);
+  }
+
+  const captions = (state.captions || []).filter(caption =>
+    (!transcript.trackId || (caption.trackId || "caption") === transcript.trackId));
+  const captionWords = captions.flatMap(caption => (caption.words || []).map(word => ({caption, word})));
+  for (const review of state.reviewCaptions || []) {
+    if (review.type !== "missing" || review.transcriptId !== transcript.id) continue;
+    const expectedTokens = tokens(review.expectedText || review.text);
+    if (expectedTokens.length !== 1) continue;
+    const key = tokenKey(expectedTokens[0]);
+    const expectedCount = scriptCounts.get(key) || 0;
+    if (!key || !expectedCount) continue;
+
+    const spoken = segments.filter(segment => tokenKey(segment.text || segment.display) === key);
+    if (spoken.length !== expectedCount) continue;
+    const captionsForToken = captionWords.filter(({caption, word}) =>
+      tokenKey(word.display || word.text) === key &&
+      (!review.sourceMediaId || !caption.sourceMediaId || caption.sourceMediaId === review.sourceMediaId));
+    if (captionsForToken.length !== expectedCount) continue;
+
+    const usedCaptions = new Set();
+    const allCovered = spoken.every(segment => {
+      const sourceStart = Number(segment.start), sourceEnd = Number(segment.end);
+      if (!Number.isFinite(sourceStart) || !Number.isFinite(sourceEnd) || sourceEnd <= sourceStart) return false;
+      const match = captionsForToken.find(({caption, word}, index) => {
+        if (usedCaptions.has(index) || (review.captionTrackId && (caption.trackId || "caption") !== review.captionTrackId)) return false;
+        const start = Number.isFinite(Number(word.sourceStart)) ? Number(word.sourceStart) : Number(word.start);
+        const end = Number.isFinite(Number(word.sourceEnd)) ? Number(word.sourceEnd) : Number(word.end);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return false;
+        const overlap = Math.min(sourceEnd, end) - Math.max(sourceStart, start);
+        return overlap > 0 && overlap / Math.min(sourceEnd - sourceStart, end - start) >= 0.5;
+      });
+      if (!match) return false;
+      usedCaptions.add(captionsForToken.indexOf(match));
+      return true;
+    });
+    if (!allCovered || usedCaptions.size !== expectedCount) continue;
+    if (review.issueId) resolved.add(review.issueId);
+    if (review.id) resolved.add(review.id);
+  }
+}
+
+// Numbered list labels such as "3." are manuscript structure, not spoken
+// words. Ignore them only when the transcript has nearby speech on both sides
+// and contains no spoken form of that number at the marker position.
+function resolveUnspokenListNumberReviews(resolved) {
+  const transcript = state.autoTranscript;
+  const script = String($("scriptText")?.value || "");
+  const segments = Array.isArray(transcript?.sourceSegments) ? transcript.sourceSegments : [];
+  if (!transcript?.id || !script || !segments.length) return;
+  const numberWords = ["zero","one","two","three","four","five","six","seven","eight","nine","ten",
+    "eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen","twenty"];
+  const tokenKey = value => String(value || "").normalize("NFKC").toLowerCase()
+    .replace(/[^\p{L}\p{N}]/gu, "");
+  for (const review of state.reviewCaptions || []) {
+    if (review.type !== "missing" || review.transcriptId !== transcript.id) continue;
+    const marker = String(review.expectedText || review.text || "").trim().match(/^(\d{1,2})\.$/);
+    if (!marker) continue;
+    const number = Number(marker[1]);
+    const markerPattern = new RegExp(`(?:^|\\s)${marker[1]}\\.\\s`, "m");
+    if (!markerPattern.test(script)) continue;
+    const start = Number(review.start), end = Number(review.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+    const nearby = segments.filter(segment => Number(segment.start) < end + 0.35 && Number(segment.end) > start - 0.35);
+    const spokenForms = new Set([String(number), numberWords[number] || ""]);
+    if (nearby.some(segment => spokenForms.has(tokenKey(segment.text || segment.display)))) continue;
+    const before = segments.some(segment => Number(segment.end) <= start + 0.025 && start - Number(segment.end) <= 0.35);
+    const after = segments.some(segment => Number(segment.start) >= start - 0.025 && Number(segment.start) - start <= 0.35);
+    if (!before || !after) continue;
+    if (review.issueId) resolved.add(review.issueId);
+    if (review.id) resolved.add(review.id);
+  }
+}
+
 function syncCaptionCorrectionReviews() {
   state.reviewCaptions ||= [];
   state.issues ||= [];
   restoreUnverifiedAdditionReviews();
+  restoreMissingCaptionReviews();
   if (typeof keepSpokenReviewInCaptions === 'function') {
     for (const review of state.reviewCaptions) {
       if (review.type !== 'unverifiedAddition' && !review.unverifiedAddition) continue;
@@ -77,6 +201,8 @@ function syncCaptionCorrectionReviews() {
   normalizeCaptionPhraseReviews();
   dedupeCaptionMismatchReviews();
   const resolved = new Set(correctExpandedCaptionWords(state.captions));
+  resolveFullyCoveredMissingWordReviews(resolved);
+  resolveUnspokenListNumberReviews(resolved);
   const cosmetic = new Set();
   const repeatKey=text=>String(text||'').toLowerCase().replace(/[^\p{L}\p{N}]/gu,'');
   const mild=correctHarmlessCaptionWords((state.captions||[]).flatMap(c=>c.words||[]),state.reviewCaptions);

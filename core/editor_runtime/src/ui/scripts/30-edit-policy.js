@@ -43,19 +43,46 @@ function splitBoundCaptions(left,right){
  const boundary=right.start,extra=[];
  for(const caption of [...(state.captions||[]),...(state.reviewCaptions||[])]){
   if(caption.ownerClipId!==left.id||isTrackLocked(caption.trackId||'caption'))continue;
+  if(caption.words?.length){
+   const before=[],after=[];
+   const originalWords=[...caption.words];
+   const originalBreaks=Array.isArray(caption.lineBreaks)?caption.lineBreaks.map(Number):[];
+   for(const word of caption.words){
+    const start=Number(word.start),end=Number(word.end);
+    if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start)continue;
+    ((start+end)/2<boundary?before:after).push(word);
+   }
+   const source=Number(right.sourceStart||0);
+   const setPart=(part,words,ownerId,side)=>{
+    part.words=words;
+    part.ownerClipId=ownerId;
+    part.start=Number(words[0].start);
+    part.end=Math.max(part.start+.04,Number(words.at(-1).end));
+    part.text=joinCaptionWords(words);
+    const firstSource=Number(words[0].sourceStart),lastSource=Number(words.at(-1).sourceEnd);
+    if(Number.isFinite(firstSource))part.sourceStart=firstSource;
+    else if(side==='right')part.sourceStart=source;
+    if(Number.isFinite(lastSource))part.sourceEnd=lastSource;
+    else if(side==='left')part.sourceEnd=source;
+    const retainedIndexes=originalWords.map((word,index)=>({word,index})).filter(entry=>words.includes(entry.word)).map(entry=>entry.index);
+    part.lineBreaks=originalBreaks.map(breakIndex=>retainedIndexes.filter(index=>index<breakIndex).length)
+     .filter((breakIndex,index,all)=>breakIndex>0&&breakIndex<words.length&&all.indexOf(breakIndex)===index);
+    part.lineCount=Math.max(1,part.lineBreaks.length+1);
+   };
+   if(before.length&&after.length){
+    const copy=cloneClipData(caption);copy.id=uid();
+    setPart(caption,before,left.id,'left');
+    setPart(copy,after,right.id,'right');
+    extra.push({copy,review:(state.reviewCaptions||[]).includes(caption)});
+   }else if(before.length)setPart(caption,before,left.id,'left');
+   else if(after.length)setPart(caption,after,right.id,'right');
+   continue;
+  }
   if(caption.start>=boundary-1e-7){caption.ownerClipId=right.id;continue;}
   if(caption.end<=boundary+1e-7)continue;
   const copy=cloneClipData(caption);copy.id=uid();copy.ownerClipId=right.id;
   copy.start=boundary;caption.end=boundary;
   const source=Number(right.sourceStart||0);caption.sourceEnd=source;copy.sourceStart=source;
-  if(caption.words?.length){
-   const before=[],after=[];
-   for(const word of caption.words){
-    if(word.start<boundary)before.push({...word,end:Math.min(word.end,boundary),sourceEnd:Math.min(Number(word.sourceEnd??source),source)});
-    if(word.end>boundary)after.push({...word,start:Math.max(word.start,boundary),sourceStart:Math.max(Number(word.sourceStart??source),source)});
-   }
-   caption.words=before;copy.words=after;caption.text=joinCaptionWords(before);copy.text=joinCaptionWords(after);
-  }
   extra.push({copy,review:(state.reviewCaptions||[]).includes(caption)});
  }
  for(const {copy,review} of extra)(review?state.reviewCaptions:state.captions).push(copy);

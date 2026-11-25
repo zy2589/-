@@ -5,7 +5,7 @@ import os from "node:os";
 import crypto from "node:crypto";
 import { spawn, spawnSync, execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { CAPTION_WORD_MARGIN_EM, estimatedWordWidth, normalizedFontWeight, paintedLineWidth, wordGap, wrapCaptionWordList } from "../text-layout.mjs";
+import { CAPTION_WORD_MARGIN_EM, captionEffectiveBoxWidth, estimatedWordWidth, normalizedFontWeight, paintedLineWidth, wordGap, wrapCaptionWordList } from "../text-layout.mjs";
 import {
   defaultSupportRoot,
   fallbackFontFiles,
@@ -170,16 +170,18 @@ export function captionRasterOverlayOffset(frameW, frameH, x, y, w, h) {
   };
 }
 
-function captionLayoutOrigin(caption = {}, canvas = {}) {
+function captionLayoutOrigin(caption = {}, canvas = {}, fallbackStyle = {}) {
   const width = Math.max(320, Number(canvas.width || 1080));
   const height = Math.max(320, Number(canvas.height || 1920));
   const x = Number.isFinite(Number(caption.x)) ? Number(caption.x) : 0;
   const y = Number.isFinite(Number(caption.y)) ? Number(caption.y) : 538;
+  const style = { ...(fallbackStyle || {}), ...(caption.style || {}) };
+  const configuredBoxWidth = Math.max(160, Math.min(width, Number(caption.width || width * 0.8)));
   return {
     width,
     height,
     scale: Math.max(0.05, Math.min(8, Number(caption.scale || 1))),
-    boxWidth: Math.max(160, Math.min(width, Number(caption.width || width * 0.8))),
+    boxWidth: Math.min(width, captionEffectiveBoxWidth(configuredBoxWidth, style.captionLines, width)),
     posX: Math.round(width / 2 + x),
     posY: Math.round(height / 2 + y),
   };
@@ -703,12 +705,12 @@ function createAssSubtitleFile(config, destination = "") {
   const outline = Math.max(0, Math.round(Number(style.stroke || 0) * scale));
   const shadow = 0;
   const letterSpacing = Number(style.letterSpacing || 0) * scale;
-  const firstOrigin = captionLayoutOrigin(captions[0], { width, height });
+  const firstOrigin = captionLayoutOrigin(captions[0], { width, height }, style);
   const textBoxWidth = firstOrigin.boxWidth;
   const horizontalMargin = Math.max(0, Math.round((width - textBoxWidth) / 2));
   const animation = style.animation || "fade";
   const events = captions.flatMap((caption) => {
-    const origin = captionLayoutOrigin(caption, { width, height });
+    const origin = captionLayoutOrigin(caption, { width, height }, style);
     const x = origin.posX;
     const y = origin.posY;
     const result = [];

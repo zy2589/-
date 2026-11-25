@@ -105,6 +105,9 @@ export function captionReviewDiffers(spoken, expected) {
  const number=captionCardinalValue(spoken);
  if (number !== null && number === captionCardinalValue(expected)) return false;
  if (captionScriptureEquivalent(spoken,expected)) return false;
+ const homePageKey=value=>captionComparisonKey(value).replace(/\bhome\s+page\b/g,'homepage');
+ if ((/\bhome\s+page\b/i.test(String(spoken)) || /\bhome\s+page\b/i.test(String(expected))) &&
+     homePageKey(spoken)===homePageKey(expected)) return false;
  const letters=v=>String(v||'').trim().replace(/[.\s]/g,'').toLowerCase();
  if (/^(?:[a-z][.\s]+){1,7}[a-z][.]?$/i.test(String(spoken).trim()) && /^[A-Z]{2,8}[.]?$/.test(String(expected).trim()) && letters(spoken)===letters(expected)) return false;
  const left=captionReviewVariants(spoken),right=captionReviewVariants(expected);

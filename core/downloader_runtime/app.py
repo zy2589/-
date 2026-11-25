@@ -2280,6 +2280,23 @@ class App:
             event.widget.selection_range(0, 'end')
         return 'break'
 
+    def _clipboard_column_values(self, matrix, field):
+        """Read one spreadsheet column, including its optional header row."""
+        if not matrix:
+            return None
+        if field == 'script':
+            aliases = {'正确文案', '正确稿件', '正确文本', '文案内容', '稿件', '文案',
+                       'correctscript', 'correcttext', 'script'}
+            headers = [re.sub(r'[\s：:（）()_/-]+', '', str(cell.get('text', '')).casefold())
+                       for cell in matrix[0]]
+            column = next((index for index, header in enumerate(headers) if header in aliases), None)
+            if column is not None:
+                return [str(row[column].get('text', '')).strip() if column < len(row) else ''
+                        for row in matrix[1:]]
+        if any(len(row) != 1 for row in matrix):
+            return None
+        return [str(row[0].get('text', '')).strip() for row in matrix]
+
     def paste_script_values(self, event, index):
         """Paste one long script or distribute copied spreadsheet cells down the script column."""
         if self.active:
@@ -3695,6 +3712,37 @@ if __name__ == '__main__':
         root.update()
         assert len(instance.progress_labels) == 12
         assert not hasattr(instance, 'row_scrollbar')
+        # Exercise the actual bound Entry paste handler: plain multiline copy
+        # stays in one script, while a copied script column fills consecutive rows.
+        script_entry = instance.script_entries[0]
+        original_entry_clipboard_get = script_entry.clipboard_get
+        original_root_clipboard_get = root.clipboard_get
+        original_paste_matrix = instance._paste_matrix
+        original_read_clipboard_html = read_clipboard_html
+        try:
+            multiline_script = 'First sentence.\nSecond sentence.'
+            script_entry.clipboard_get = lambda: multiline_script
+            root.clipboard_get = lambda: multiline_script
+            instance._paste_matrix = lambda _widget: clipboard_matrix(multiline_script, '')
+            read_clipboard_html = lambda: ''
+            script_entry.event_generate('<<Paste>>', when='now')
+            root.update()
+            assert instance.script_vars[0].get() == 'First sentence. Second sentence.'
+
+            script_table = ('<table><tr><td>正确文案</td></tr>'
+                            '<tr><td>First project script</td></tr>'
+                            '<tr><td>Second project script</td></tr></table>')
+            instance._paste_matrix = lambda _widget: clipboard_matrix('', script_table)
+            read_clipboard_html = lambda: script_table
+            script_entry.event_generate('<<Paste>>', when='now')
+            root.update()
+            assert [instance.script_vars[index].get() for index in (0, 1)] == [
+                'First project script', 'Second project script']
+        finally:
+            script_entry.clipboard_get = original_entry_clipboard_get
+            root.clipboard_get = original_root_clipboard_get
+            instance._paste_matrix = original_paste_matrix
+            read_clipboard_html = original_read_clipboard_html
         geometry=(root.winfo_reqwidth(),root.winfo_reqheight())
         instance.rows[0][0].set('Test person');instance.rows[0][1].set('Long title '*40)
         instance.preview_folder(0);root.update()

@@ -10,6 +10,7 @@ import tempfile
 from types import SimpleNamespace
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image, ImageStat
 
@@ -21,10 +22,11 @@ sys.path.insert(0, str(ROOT / "core" / "downloader_runtime"))
 sys.path.insert(0, str(ROOT))
 
 from core.denoise import denoise_video
+import app as downloader_app
 from app import (App, clipboard_field_rows, clipboard_link_groups, clipboard_matrix,
                  _sheets_clipboard_json_fragment, group_download_jobs, media_name,
                  plan_link_fill, task_pairs, task_rows,
-                 strip_title_hashtags, try_publish_title_png)
+                 clean_video_title, try_publish_title_png)
 from local_design import normalize_manual_title_lines, replace_title, salient_title_spans
 from page_cache import extract_phone_input, format_phone_like
 
@@ -53,7 +55,7 @@ def main():
          'Want to Grow Closer to God? Start These 6 Daily Habits!'),
     )
     for source_title, expected_title in hashtag_titles:
-        if strip_title_hashtags(source_title) != expected_title:
+        if clean_video_title(source_title) != expected_title:
             raise RuntimeError('标题清理预检失败：# 后面的标签没有全部移除，或标题正文被误删。')
 
     folder_link = "https://drive.google.com/drive/folders/test-folder-id"
@@ -156,6 +158,50 @@ def main():
         raise RuntimeError('表头标题清理预检失败：多列表格标题没有进入映射粘贴路径。')
     if clipboard_app.rows[4][1].get() != hashtag_titles[1][1]:
         raise RuntimeError('表头标题清理预检失败：视频名称列仍含有 # 标签。')
+
+    class ScriptPasteEntry:
+        def __init__(self, text):
+            self.text = text
+            self.inserted = ''
+
+        def clipboard_get(self):
+            return self.text
+
+        def selection_present(self):
+            return False
+
+        def insert(self, _index, value):
+            self.inserted = value
+
+    script_text = '第一段文案，\n第二行接着写。\n第三行结束。'
+    script_entry = ScriptPasteEntry(script_text)
+    script_app = App.__new__(App)
+    script_app.active = False
+    script_app.status = ClipboardStatus()
+    script_app.root = SimpleNamespace(clipboard_get=lambda: script_text)
+    script_app._paste_matrix = lambda _widget: clipboard_matrix(script_text, '')
+    with patch.object(downloader_app, 'read_clipboard_html', return_value=''):
+        if App.paste_script_values(script_app, SimpleNamespace(widget=script_entry), 0) != 'break':
+            raise RuntimeError('正确文案多行粘贴预检失败：粘贴事件未被接管。')
+    if script_entry.inserted != '第一段文案， 第二行接着写。 第三行结束。':
+        raise RuntimeError('正确文案多行粘贴预检失败：换行内容没有作为完整文案写入当前行。')
+
+    script_table = (
+        '<table><tr><td>正确文案</td><td>备注</td></tr>'
+        '<tr><td>第一行工程文案</td><td>甲</td></tr>'
+        '<tr><td>第二行工程文案</td><td>乙</td></tr></table>')
+    script_matrix = clipboard_matrix('', script_table)
+    script_row_app = App.__new__(App)
+    script_row_app.active = False
+    script_row_app.status = ClipboardStatus()
+    script_row_app.rows = [(PasteVariable(), PasteVariable(), PasteVariable()) for _ in range(12)]
+    script_row_app.script_vars = [PasteVariable() for _ in range(12)]
+    script_row_app._paste_matrix = lambda _widget: script_matrix
+    with patch.object(downloader_app, 'read_clipboard_html', return_value=script_table):
+        if App.paste_script_values(script_row_app, paste_event, 3) != 'break':
+            raise RuntimeError('正确文案表格粘贴预检失败：带表头的文案列未被接管。')
+    if [script_row_app.script_vars[i].get() for i in (3, 4)] != ['第一行工程文案', '第二行工程文案']:
+        raise RuntimeError('正确文案表格粘贴预检失败：多行文案没有填入对应工程行。')
 
     phone_us = '合拍視頻\\\n電話：+12025550147'
     phone_nz = '1.25倍+ IG輪播圖合拍  \\\n電話： ＋64 27 000 0000'

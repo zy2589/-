@@ -1147,6 +1147,8 @@ function scaleTimelineClipGeometry(ratio) {
               const length = item.originEnd - item.originStart;
               item.obj.start = item.originStart + appliedDelta;
               item.obj.end = item.obj.start + length;
+              if (item.type === "caption" || item.type === "review")
+                shiftCaptionWordTimes(item.obj, appliedDelta);
               updateTimelineClipGeometry(item.type, item.id, item.obj);
             }
           }

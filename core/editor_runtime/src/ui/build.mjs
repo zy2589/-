@@ -11,6 +11,8 @@ import {
   reviewCaptionWordMatches,
 } from '../review-caption-deletion.mjs';
 import { buildCaptions, regroupCaptions } from '../alignment/regroup.mjs';
+import { editRipple } from '../edit-decisions.mjs';
+import { splitTimedItem } from '../timeline-edit.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,7 +27,79 @@ function requireBuildCheck(condition, message) {
   if (!condition) throw new Error(`[UI preflight] ${message}`);
 }
 
+function validateCaptionTimingEdits() {
+  const clipsModel = fs.readFileSync(path.join(uiDir, 'scripts/02-clips-model.js'), 'utf8');
+  const helperStart = clipsModel.indexOf('      function captionSourceOwner(caption)');
+  const helperEnd = clipsModel.indexOf('      function mainContentEnd()', helperStart);
+  requireBuildCheck(helperStart >= 0 && helperEnd > helperStart,
+    '字幕时间线辅助函数缺失，无法运行拖动/修剪回归。');
+  const owner = { id: 'clip-1', start: 10, end: 20, sourceStart: 100, sourceEnd: 120 };
+  const helpers = vm.runInNewContext(
+    `${clipsModel.slice(helperStart, helperEnd)}\n({shiftCaptionWordTimes, clampCaptionWordsToBounds});`,
+    {
+      state: { avLinked: true, videoLayers: [], audioAssets: [] },
+      mainClips: () => [owner],
+      mainAudioClips: () => [],
+      joinCaptionWords: words => words.map(word => word.display || word.text || '').join(' ').trim(),
+    },
+  );
+  const dragged = {
+    ownerClipId: owner.id, start: 11, end: 12, sourceStart: 102, sourceEnd: 104,
+    words: [{ display: 'one', start: 11, end: 11.4, sourceStart: 102, sourceEnd: 102.8 }],
+  };
+  helpers.shiftCaptionWordTimes(dragged, 0.5);
+  requireBuildCheck(dragged.words[0].start === 11.5 && dragged.words[0].end === 11.9 &&
+      dragged.words[0].sourceStart === 103 && dragged.words[0].sourceEnd === 103.8 &&
+      dragged.sourceStart === 103 && dragged.sourceEnd === 105,
+    '直接拖动字幕后逐词时间和来源时间必须同步平移。');
+
+  const trimmed = {
+    ownerClipId: owner.id, start: 11.8, end: 12.25, text: 'one two three', lineBreaks: [2], lineCount: 2,
+    words: [
+      { display: 'one', start: 11, end: 11.5, sourceStart: 102, sourceEnd: 103 },
+      { display: 'two', start: 11.6, end: 12, sourceStart: 103.2, sourceEnd: 104 },
+      { display: 'three', start: 12.1, end: 12.5, sourceStart: 104.2, sourceEnd: 105 },
+    ],
+  };
+  helpers.clampCaptionWordsToBounds(trimmed);
+  requireBuildCheck(trimmed.text === 'two three' && trimmed.start === 11.6 && trimmed.end === 12.5 &&
+      trimmed.words.length === 2 && trimmed.words[0].end === 12 &&
+      trimmed.lineBreaks.length === 1 && trimmed.lineBreaks[0] === 1 &&
+      trimmed.sourceStart === 103.2 && trimmed.sourceEnd === 105,
+    '字幕修剪必须保留完整重叠词，并同步重算文字、换行和来源时间。');
+
+  const split = splitTimedItem({
+    id: 'caption-split', start: 1, end: 3, text: 'one two three', lineBreaks: [2], lineCount: 2,
+    words: [
+      { display: 'one', start: 1, end: 1.4, sourceStart: 10, sourceEnd: 10.4 },
+      { display: 'two', start: 1.6, end: 1.9, sourceStart: 10.6, sourceEnd: 10.9 },
+      { display: 'three', start: 2.2, end: 2.6, sourceStart: 11.2, sourceEnd: 11.6 },
+    ],
+  }, 1.5, 'caption-split-right');
+  requireBuildCheck(split?.left.text === 'one' && split.right.text === 'two three' &&
+      split.left.words.length + split.right.words.length === 3 &&
+      split.left.end === split.left.words.at(-1).end && split.right.start === split.right.words[0].start &&
+      split.right.lineBreaks.length === 1 && split.right.lineBreaks[0] === 1,
+    '时间线切片必须按完整词归属，并重算两侧字幕边界和换行。');
+
+  const rippled = editRipple([{
+    id: 'caption-ripple', start: 0, end: 3, sourceStart: 100, sourceEnd: 103,
+    words: [
+      { display: 'A', start: 0.2, end: 0.5, sourceStart: 100.2, sourceEnd: 100.5 },
+      { display: 'boundary', start: 0.8, end: 1.1, sourceStart: 100.8, sourceEnd: 101.1 },
+      { display: 'deleted', start: 1.3, end: 1.6, sourceStart: 101.3, sourceEnd: 101.6 },
+      { display: 'C', start: 2.4, end: 2.8, sourceStart: 102.4, sourceEnd: 102.8 },
+    ],
+  }], 2, -1, { id: () => 'caption-ripple-right' });
+  const rippleWords = rippled.flatMap(caption => caption.words);
+  requireBuildCheck(rippled.length === 2 && rippleWords.filter(word => word.display === 'boundary').length === 1 &&
+      rippleWords.every(word => word.display !== 'deleted') &&
+      rippled[1].words[0].start === 1.4 && rippled[1].words[0].sourceStart === 102.4,
+    '波纹删除不得重复或保留删除区字幕词，后续词需同步移动并保留来源时间。');
+}
+
 function validateUiArtifacts({ combinedBody, combinedJs, fullHtml }) {
+  validateCaptionTimingEdits();
   // Parse the exact JavaScript that will be inlined into ui.html, including
   // kernels and the individual UI modules, before writing a package artifact.
   new vm.Script(combinedJs, { filename: 'generated-ui-inline.js' });

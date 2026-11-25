@@ -69,6 +69,7 @@ function captionTextLayout() {
             words,
             style,
             boxWidth,
+            canvasWidth: Number(state.width || 1080),
             scale,
             lineMode: state.captionLines,
             measure: (text, _style, measuredFontSize, _scale, word) => {
@@ -282,6 +283,7 @@ function captionTextLayout() {
           text: caption?.text || "",
           words: captionWordsOf(caption).map((word) => [word.display, word.start, word.end, word.emphasis === true]),
           boxWidth,
+          canvasWidth: Number(state.width || 1080),
           scale,
           lines: state.captionLines,
           timingReliable: caption?.timingReliable !== false,

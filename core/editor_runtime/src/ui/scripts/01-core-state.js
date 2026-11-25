@@ -2890,23 +2890,62 @@
         const left = item;
         const right = { ...item, id: nextId };
         if (Array.isArray(item.words) && item.words.length) {
+          const wordTime = (word, key, fallback) => {
+            const raw = word?.[key];
+            const value = Number(raw);
+            return raw != null && Number.isFinite(value) ? value : fallback;
+          };
           const leftWords = [];
           const rightWords = [];
+          const itemStart = Number(item.start || 0);
           for (const word of item.words) {
-            const wordStart = Number(word.start || 0);
-            const wordEnd = Number(word.end || wordStart + 0.01);
+            const wordStart = wordTime(word, "start", itemStart);
+            const wordEnd = wordTime(word, "end", wordStart + 0.01);
             if ((wordStart + wordEnd) / 2 < time) leftWords.push({ ...word });
             else rightWords.push({ ...word });
           }
           if (!leftWords.length || !rightWords.length) return null;
           left.words = leftWords;
-          left.start = Number(leftWords[0].start || item.start);
-          left.end = Math.max(left.start + 0.04, Math.min(time, Number(leftWords.at(-1).end)));
+          left.start = wordTime(leftWords[0], "start", Number(item.start || 0));
+          left.end = Math.max(
+            left.start + 0.04,
+            wordTime(leftWords.at(-1), "end", time),
+          );
           left.text = joinCaptionWords(leftWords);
           right.words = rightWords;
-          right.start = Math.max(time, Number(rightWords[0].start || time));
-          right.end = Number(rightWords.at(-1).end || item.end);
+          right.start = wordTime(rightWords[0], "start", time);
+          right.end = Math.max(
+            right.start + 0.04,
+            wordTime(rightWords.at(-1), "end", Number(item.end || right.start + 0.04)),
+          );
           right.text = joinCaptionWords(rightWords);
+          if (Array.isArray(item.lineBreaks)) {
+            const breaks = item.lineBreaks.map(Number).filter(Number.isInteger);
+            left.lineBreaks = breaks.filter((index) => index > 0 && index < leftWords.length);
+            right.lineBreaks = breaks
+              .filter((index) => index > leftWords.length && index < item.words.length)
+              .map((index) => index - leftWords.length);
+            left.lineCount = Math.max(1, left.lineBreaks.length + 1);
+            right.lineCount = Math.max(1, right.lineBreaks.length + 1);
+          }
+          const sourceStart = Number(item.sourceStart);
+          const sourceEnd = Number(item.sourceEnd);
+          const itemSpan = Math.max(0.002, Number(item.end || itemStart + 0.002) - itemStart);
+          const hasSourceRange =
+            item.sourceStart != null &&
+            item.sourceEnd != null &&
+            Number.isFinite(sourceStart) &&
+            Number.isFinite(sourceEnd);
+          const sourceAt = (timelineTime) =>
+            sourceStart + ((timelineTime - itemStart) / itemSpan) * (sourceEnd - sourceStart);
+          for (const [part, words] of [[left, leftWords], [right, rightWords]]) {
+            const wordSourceStart = wordTime(words[0], "sourceStart", Number.NaN);
+            const wordSourceEnd = wordTime(words.at(-1), "sourceEnd", Number.NaN);
+            if (Number.isFinite(wordSourceStart)) part.sourceStart = wordSourceStart;
+            else if (hasSourceRange) part.sourceStart = sourceAt(part.start);
+            if (Number.isFinite(wordSourceEnd)) part.sourceEnd = wordSourceEnd;
+            else if (hasSourceRange) part.sourceEnd = sourceAt(part.end);
+          }
           return { left, right };
         }
         left.end = time;
