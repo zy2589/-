@@ -311,7 +311,14 @@
           verticalAlign: "middle",
           color: "#ffffff",
           highlight: "#fff275",
+          highlightStyle: "text",
           highlightEnabled: true,
+          highlightBlockWidth: 5,
+          highlightBlockHeight: 3,
+          highlightBlockScale: 1,
+          highlightBlockX: 0,
+          highlightBlockY: 0,
+          highlightBlockRadius: 4,
           stroke: 5,
           strokeColor: "#111111",
           shadow: 0,
@@ -445,7 +452,14 @@
           glow: Number(style?.glow ?? captionStyleDefaults.glow),
           glowColor: style?.glowColor || style?.color || captionStyleDefaults.glowColor,
           backgroundEnabled: !!style?.backgroundEnabled,
+          highlightStyle: style?.highlightStyle === "block" ? "block" : "text",
           highlightEnabled: style?.highlightEnabled !== false,
+          highlightBlockWidth: clamp(Number(style?.highlightBlockWidth ?? captionStyleDefaults.highlightBlockWidth), 0, 80),
+          highlightBlockHeight: clamp(Number(style?.highlightBlockHeight ?? captionStyleDefaults.highlightBlockHeight), 0, 80),
+          highlightBlockScale: clamp(Number(style?.highlightBlockScale ?? captionStyleDefaults.highlightBlockScale), 0.5, 2.5),
+          highlightBlockX: clamp(Number(style?.highlightBlockX ?? captionStyleDefaults.highlightBlockX), -100, 100),
+          highlightBlockY: clamp(Number(style?.highlightBlockY ?? captionStyleDefaults.highlightBlockY), -100, 100),
+          highlightBlockRadius: clamp(Number(style?.highlightBlockRadius ?? captionStyleDefaults.highlightBlockRadius), 0, 80),
           fontItalic: !!style?.fontItalic,
           fontUnderline: !!style?.fontUnderline,
           animation: style?.animation || "fade",
@@ -1821,7 +1835,7 @@
         };
         const spoken = short(item.spokenText || item.spoken || item.text);
         const expected = short(item.expectedText);
-        const kind = item.type === 'unverifiedAddition' ? '文案外口语待确认' : item.type === 'repeat' ? '疑似重复' : item.type === 'missing' || item.action === 'missing'
+        const kind = item.type === 'unverifiedAddition' ? '额外口语已加入' : item.type === 'repeat' ? '疑似重复' : item.type === 'missing' || item.action === 'missing'
           ? item.confirmedMissing ? '文案缺读（已确认）' : '文案词待核实' : ['addition','extra'].includes(item.type) ? '疑似多读' : '疑似读错';
         if (item.type !== 'mismatch') return `${kind}\n${item.type === 'missing' || item.action === 'missing' ? expected || '需试听核对' : spoken || '需试听核对'}`;
         const left = String(item.spokenText || item.spoken || '').trim().split(/\s+/).filter(Boolean);
@@ -1834,12 +1848,10 @@
         const spoken = String(item.spokenText || item.spoken || '').replace(/^\s*[—-]\s*$/, '').trim();
         const expected = String(item.expectedText || "").replace(/^\s*[—-]\s*$/, "").trim();
         if (item.type === 'mismatch') {
-          const meaningLabel = item.meaningMode === 'dictionary' ? '词义参考' : '中文';
-          const meaning = value => item.meaningVersion === 2 && value
-            ? value : ['failed','unavailable','dictionary'].includes(item.meaningReviewStatus) ? '中文暂不可用，请点击重试中文' : '正在查询…';
-          return `识别：${item.spokenPhrase || spoken || '未识别到'}\n${meaningLabel}：${meaning(item.spokenZh)}\n正确：${item.expectedPhrase || expected || '无对应内容'}\n${meaningLabel}：${meaning(item.expectedZh)}`;
+          return `识别文案：${item.spokenPhrase || spoken || '未识别到'}\n正确文案：${item.expectedPhrase || expected || '无对应内容'}`;
         }
-        if(item.type==='repeat') return `疑似重复\n识别：${spoken || '未识别到'}\n请试听核对是否仍有两次相邻口播。`;
+        if(item.type==='repeat') return `识别文案：${spoken || '未识别到'}\n试听确认后，可删除这段重复口播及对应音视频。`;
+        if(item.type==='unverifiedAddition') return `识别文案：${spoken || '未识别到'}\n已自动加入主字幕预览；试听后可确认保留，或删除对应音视频片段。`;
         const kind = item.type === 'unverifiedAddition'
           ? '文案外口语待确认'
           : item.scripture
@@ -1851,9 +1863,7 @@
                 : ['addition','extra'].includes(item.type)
                   ? "识别多出，文案无对应内容"
                   : "用词不一致，需试听核对";
-        const reason = item.type === 'unverifiedAddition'
-          ? '识别到文案外口语；试听后可选择剪掉，或保留声音并加字幕。'
-          : item.type === 'missing' || item.action === 'missing'
+        const reason = item.type === 'missing' || item.action === 'missing'
           ? item.confirmedMissing ? '已确认录音没有读出这段文案；紫色表示确实缺读。' : '文案有这段内容，但识别结果没有找到对应口播；黄色表示需要试听确认是识别遗漏还是真正缺读。'
           : item.type === 'mismatch'
             ? '识别内容与此位置的文案不一致，可能读法、识别或对齐有误；核对后再修改。'
@@ -4056,6 +4066,12 @@
           backgroundHeight: Number(style.backgroundHeight ?? style.padding ?? 14),
           backgroundX: Number(style.backgroundX || 0),
           backgroundY: Number(style.backgroundY || 0),
+          highlightBlockWidth: Number(style.highlightBlockWidth ?? 5),
+          highlightBlockHeight: Number(style.highlightBlockHeight ?? 3),
+          highlightBlockScale: Number(style.highlightBlockScale ?? 1),
+          highlightBlockX: Number(style.highlightBlockX || 0),
+          highlightBlockY: Number(style.highlightBlockY || 0),
+          highlightBlockRadius: Number(style.highlightBlockRadius ?? 4),
         });
         return style;
       }

@@ -528,10 +528,11 @@ def extract_urls(text):
     return urls
 
 
-def strip_title_hashtags(value):
-    """Keep the title text before its first social hashtag."""
-    text = str(value or '').replace('＃', '#')
-    return text.split('#', 1)[0].rstrip()
+def clean_video_title(value):
+    """Remove Markdown asterisks and social hashtags from a video title."""
+    text = str(value or '').replace('＃', '#').replace('＊', '*')
+    text = text.split('#', 1)[0]
+    return text.replace('*', '').strip()
 
 
 class _ClipboardLinkParser(HTMLParser):
@@ -642,6 +643,8 @@ def clipboard_field_rows(matrix):
     columns['phone'] = find_column('phone', ('电话号码', '电话', '号码', '需求备注'))
     columns['title'] = find_column('title', ('文案标题', '视频名称', '标题', '拍摄文案中文',
                                             '拍摄文案英文', '画面标题'))
+    columns['script'] = find_column('script', ('正确文案', '正确稿件', '正确文本', '文案内容',
+                                               '稿件', '文案', 'correctscript', 'correcttext', 'script'))
     columns['link'] = find_column('link', ('拍摄视频链接', '视频链接地址', '视频链接', '视频URL'))
     columns = {field: index for field, index in columns.items() if index is not None}
     if not columns:
@@ -869,7 +872,7 @@ def task_rows(base, rows):
         urls = extract_urls(text)
         if text.strip() and not urls:
             raise ValueError(f'第 {index} 行：没有识别到有效的视频链接')
-        person=person.strip();title=strip_title_hashtags(title).strip()
+        person=person.strip();title=clean_video_title(title)
         # Rows are independent: any combination of person, title, phone and
         # URL is valid. Missing naming fields get stable per-row placeholders.
         name = folder_name(person or f'第{index}行', title or '引流')
@@ -1195,6 +1198,12 @@ class App:
         self.title_color_swatches=(valid_title_colors[:16] if valid_title_colors is not None else
                                    ['#e15f35','#ffd43b','#ffffff','#141414',
                                     '#68a9a2','#4d83c5','#9a70c5','#e25555'])
+        saved_title_backgrounds=saved_settings.get('title_preview_background_colors')
+        valid_title_backgrounds=[value.lower() for value in saved_title_backgrounds
+                                 if isinstance(value,str) and re.fullmatch(r'#[0-9a-fA-F]{6}',value)] if isinstance(saved_title_backgrounds,list) else None
+        self.title_background_swatches=(valid_title_backgrounds[:16] if valid_title_backgrounds is not None else
+                                        ['#16c8d8','#15b8cc','#ffd43b','#ff4f5e',
+                                         '#8d6cff','#56b870','#ffffff','#252525'])
         self.title_font_choices = None
         # The embedded downloader shares the app-wide DaVinci dark theme.
         self.appearance = tk.StringVar(value='深色')
@@ -1295,6 +1304,7 @@ class App:
         self.page_vars=[];self.language_vars=[];self.title_layout_vars=[];self.denoise_vars=[];self.denoise_picks=[];self.auto_page_values=[];self.auto_page_people=[];self.page_match_issues=[]
         self.suggested_page_values=[];self.match_jobs={};self.page_entries=[]
         self.title_entries=[];self.title_font_paths=[];self.title_color_ranges=[]
+        self.title_background_ranges=[];self.title_effects=[]
         self.title_last_values=[];self.title_selection_ranges=[];self.title_manual_lines=[]
         self.phone_vars=[];self.phone_source_numbers=[];self.original_phone_values=[];self.auto_phone_values=[]
         self.background_vars=[];self.background_checks=[];self.progress_labels=[];self.input_entries=[];self.title_layout_picks=[]
@@ -1303,8 +1313,9 @@ class App:
         self.title_preview_manual_text=None;self.title_preview_manual_syncing=False
         self.title_preview_photo=None;self.title_preview_index=None
         self.title_preview_font_var=None;self.title_preview_font_pick=None
+        self.title_preview_effect_var=None;self.title_preview_effect_pick=None
         self.title_font_interaction=False;self.title_font_interaction_after=None
-        self.title_preview_palette=None;self.title_preview_hint=None
+        self.title_preview_palette=None;self.title_preview_background_palette=None;self.title_preview_hint=None
         self.title_preview_after=None;self.title_preview_hide_after=None
         for variable in (self.theme,self.layout,self.resolution):
             variable.trace_add('write',lambda *_:self.refresh_active_title_preview())
@@ -1316,9 +1327,31 @@ class App:
         self.row_form.grid(row=0,column=0,sticky='nsew')
         for column,(weight,minimum) in enumerate(zip(column_weights,column_minimums)):
             self.row_form.columnconfigure(column,weight=weight,minsize=minimum)
+        self.column_refresh_buttons=[]
+        refresh_fields={
+            2:('name','人名'),
+            3:('phone','号码'),
+            4:('title','视频名称'),
+            5:('script','正确文案'),
+            6:('link','视频链接'),
+        }
         for column, text in enumerate(('建工程', '序号', '人名', '号码', '视频名称', '正确文案', '视频链接', '语言', '降噪', '进度', '清空')):
-            ttk.Label(self.row_form, text=text, style='Muted.TLabel').grid(
-                row=0, column=column, sticky='w', padx=4, pady=(0, 8))
+            if column in refresh_fields:
+                field,label_text=refresh_fields[column]
+                header_cell=ttk.Frame(self.row_form)
+                header_cell.grid(row=0,column=column,sticky='nsew',padx=4,pady=(0,8))
+                header_group=ttk.Frame(header_cell)
+                header_group.pack(anchor='center')
+                ttk.Label(header_group,text=text,style='Muted.TLabel').pack(side='left')
+                button=ttk.Button(header_group,text='↻',takefocus=False,
+                                  style='FlatRefresh.TButton',cursor='hand2',
+                                  command=lambda key=field:self.clear_task_column(key))
+                button.pack(side='left',padx=(2,0),fill='y')
+                ToolTip(button,f'清空“{label_text}”整列内容；不影响其他列，可用 Ctrl+Z 恢复。')
+                self.column_refresh_buttons.append(button)
+            else:
+                ttk.Label(self.row_form, text=text, style='Muted.TLabel').grid(
+                    row=0, column=column, sticky='w', padx=4, pady=(0, 8))
         self.rows_ready = False
         self.row_build_after = None
         for entry in self.input_entries:
@@ -1397,6 +1430,20 @@ class App:
             widget.bind('<Control-a>', self.select_all)
         if not self.embedded:
             apply_appearance(root, '深色')
+        else:
+            colors = PALETTES['深色']
+            refresh_style = ttk.Style(root)
+            refresh_style.layout('FlatRefresh.TButton', [('Button.label', {'sticky': 'nswe'})])
+            refresh_style.configure(
+                'FlatRefresh.TButton', font=('Segoe UI Symbol', 10), padding=0,
+                relief='flat', anchor='s', background=colors['bg'],
+                foreground=colors['muted'], borderwidth=0, focuscolor=colors['bg'],
+            )
+            refresh_style.map(
+                'FlatRefresh.TButton',
+                background=[('disabled', colors['bg']), ('pressed', colors['bg']), ('active', colors['bg'])],
+                foreground=[('disabled', colors['disabled']), ('pressed', colors['fg']), ('active', colors['fg'])],
+            )
         if not self.embedded:
             root.after(1000, lambda: sync_appearance(self))
         self.start_button.configure(state='disabled')
@@ -1505,6 +1552,7 @@ class App:
         self.script_vars.append(script);self.create_project_vars.append(create_project)
         self.row_statuses.append('待下载')
         self.title_entries.append(None);self.title_font_paths.append('');self.title_color_ranges.append([])
+        self.title_background_ranges.append([]);self.title_effects.append('')
         self.title_last_values.append(title.get());self.title_selection_ranges.append(None)
         self.title_manual_lines.append(None)
         self.denoise_vars.append(denoise)
@@ -1619,6 +1667,8 @@ class App:
             if current!=previous:
                 self.title_color_ranges[index]=self._remap_title_ranges(
                     previous,current,self.title_color_ranges[index])
+                self.title_background_ranges[index]=self._remap_title_ranges(
+                    previous,current,self.title_background_ranges[index])
                 self.title_last_values[index]=current
             if self.title_manual_lines[index] is not None:
                 from local_design import normalize_manual_title_lines
@@ -1633,12 +1683,12 @@ class App:
     def clean_title_field(self, index):
         title = self.rows[index][1]
         raw = title.get()
-        cleaned = strip_title_hashtags(raw)
+        cleaned = clean_video_title(raw)
         if cleaned != raw:
             manual_lines = self.title_manual_lines[index]
             if manual_lines is not None:
                 from local_design import normalize_manual_title_lines
-                manual_text = '\n'.join(manual_lines).replace('＃', '#').split('#', 1)[0]
+                manual_text = clean_video_title('\n'.join(manual_lines))
                 candidates = [line.strip() for line in manual_text.splitlines() if line.strip()]
                 try:
                     manual_lines = normalize_manual_title_lines(cleaned, candidates)
@@ -1651,7 +1701,7 @@ class App:
             title.set(cleaned)
             self.history_paused = was_paused
             self.record_edit()
-            self.status.config(text='已从视频标题中移除 # 后面的标签。')
+            self.status.config(text='已清理视频名称中的星号和 # 标签。')
 
     def _title_layout_changed(self,index):
         # Explicit manual breaks take precedence over the automatic line-count
@@ -2231,7 +2281,22 @@ class App:
         return 'break'
 
     def paste_script_values(self, event, index):
-        """Paste arbitrarily long script text into the single-line task field."""
+        """Paste one long script or distribute copied spreadsheet cells down the script column."""
+        if self.active:
+            self.status.config(text='下载期间不能批量填入任务。')
+            return 'break'
+        matrix=self._paste_matrix(event.widget)
+        fragment=read_clipboard_html()
+        values=self._clipboard_column_values(matrix,'script')
+        rich_rows=len(matrix)>1 and bool(re.search(r'<tr\b',fragment,re.I))
+        script_headers={'正确文案','正确稿件','正确文本','文案内容','稿件','文案','correctscript','correcttext','script'}
+        has_script_header=bool(matrix and matrix[0] and any(
+            re.sub(r'[\s：:（）()_/-]+','',str(cell.get('text','')).casefold()) in script_headers
+            for cell in matrix[0]))
+        if values is not None and (rich_rows or has_script_header) and len(values)>1:
+            if self.apply_clipboard_rows(index,[{'script':value} for value in values]):
+                self.status.config(text=f'已将 {len(values)} 段正确文案纵向粘贴到对应任务行。')
+            return 'break'
         try:
             value = self.root.clipboard_get()
         except tk.TclError:
@@ -2445,6 +2510,49 @@ class App:
             plain_text = ''
         return clipboard_matrix(plain_text, read_clipboard_html())
 
+    def clear_task_column(self,field):
+        if self.active:
+            self.status.config(text='下载期间不能清空任务列。')
+            return
+        labels={'name':'人名','phone':'号码','title':'视频名称','script':'正确文案','link':'视频链接'}
+        label=labels.get(field)
+        if label is None:
+            return
+        if field=='name':
+            variables=[row[0] for row in self.rows]
+        elif field=='phone':
+            variables=self.phone_vars
+        elif field=='title':
+            variables=[row[1] for row in self.rows]
+        elif field=='script':
+            variables=self.script_vars
+        else:
+            variables=[row[2] for row in self.rows]
+        if not any(variable.get() for variable in variables):
+            self.status.config(text=f'“{label}”列没有内容需要清空。')
+            return
+        self.record_edit()
+        self.history_paused=True
+        try:
+            for index,variable in enumerate(variables):
+                variable.set('')
+                if field=='phone':
+                    self.phone_source_numbers[index]=None
+                    self.original_phone_values[index]=''
+                    self.auto_phone_values[index]=''
+                elif field=='title':
+                    self.title_font_paths[index]=''
+                    self.title_color_ranges[index]=[]
+                    self.title_last_values[index]=''
+                    self.title_selection_ranges[index]=None
+                    self.title_manual_lines[index]=None
+        finally:
+            self.history_paused=False
+        self.record_edit()
+        if field=='title' and self.title_preview_index is not None:
+            self.hide_title_preview()
+        self.status.config(text=f'“{label}”整列已清空；其他列未更改，可用 Ctrl+Z 恢复。')
+
     def paste_column_values(self, event, start_index, field):
         """Fill a form column downward from a copied spreadsheet range."""
         if self.active:
@@ -2456,7 +2564,7 @@ class App:
         mapped = clipboard_field_rows(matrix)
         if mapped:
             if self.apply_clipboard_rows(start_index, mapped):
-                self.status.config(text=f'已按表头批量填入 {len(mapped)} 行演员、号码、文案和视频链接。')
+                self.status.config(text=f'已按表头批量填入 {len(mapped)} 行人名、号码、视频名称、正确文案和视频链接。')
             return 'break'
         if any(len(row) != 1 for row in matrix):
             return None
@@ -2469,10 +2577,10 @@ class App:
         has_rich_link = field == 'link' and any(row[0]['links'] for row in matrix)
         if len(values) == 1 and not has_rich_link:
             if field == 'title':
-                cleaned = strip_title_hashtags(values[0])
+                cleaned = clean_video_title(values[0])
                 if cleaned != values[0]:
                     if self.apply_clipboard_rows(start_index, [{'title': cleaned}]):
-                        self.status.config(text='已从视频标题中移除 # 后面的标签。')
+                        self.status.config(text='已清理视频名称中的星号和 # 标签。')
                     return 'break'
             if field == 'link' and values[0] and not extract_urls(values[0]):
                 self.status.config(
@@ -2509,7 +2617,9 @@ class App:
                 if self.phone_vars[index].get().strip():
                     self.format_phone_cell(index)
             if 'title' in values:
-                self.rows[index][1].set(strip_title_hashtags(values['title']).strip())
+                self.rows[index][1].set(clean_video_title(values['title']))
+            if 'script' in values:
+                self.script_vars[index].set(str(values['script']))
             if 'link' in values:
                 self.rows[index][2].set(str(values['link']).strip())
         if tracked:

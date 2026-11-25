@@ -702,6 +702,28 @@
         -webkit-text-stroke: 0.08em var(--active, #ff4f9a);
         color: #fff;
       }
+      .captionobject[data-highlight-style="block"] .word.active {
+        color: inherit;
+        padding: 0;
+        isolation: isolate;
+        -webkit-text-stroke: inherit;
+      }
+      .captionobject[data-highlight-style="block"] .word { position: relative; }
+      .captionobject[data-highlight-style="block"] .word.active::before {
+        content: "";
+        position: absolute;
+        z-index: -1;
+        inset: calc(-1 * var(--highlight-block-padding-y, 3px)) calc(-1 * var(--highlight-block-padding-x, 5px));
+        background: var(--active, #ffd21f);
+        border-radius: var(--highlight-block-radius, 4px);
+        transform: translate(var(--highlight-block-x, 0px), var(--highlight-block-y, 0px)) scale(var(--highlight-block-scale, 1));
+        transform-origin: center;
+        pointer-events: none;
+      }
+      .captionobject.no-highlight[data-highlight-style="block"] .word.active {
+        color: inherit;
+      }
+      .captionobject.no-highlight[data-highlight-style="block"] .word.active::before { display: none; }
       .captionobject.anim-enter {
         animation: var(--caption-animation, 0.22s ease-out both);
       }

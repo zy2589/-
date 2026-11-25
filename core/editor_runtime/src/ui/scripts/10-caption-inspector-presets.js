@@ -460,7 +460,7 @@ function renderIssues() {
           : "";
         return `<button class="preset" data-preset="${i}" title="${escapeHtml(p.name)}">
           ${customActions}
-          <span class="captionobject anim-enter" data-animation="${escapeHtml(p.style.animation || "fade")}" style="--active:${p.style.highlight || "#ffd21f"};font-family:'${p.style.fontFamily || "Helvetica"}',sans-serif;font-weight:${p.style.fontWeight || 700};color:${presetPreviewColor(p.style, i)};-webkit-text-stroke:${Math.min(3, Math.max(0, Number(p.style.stroke || 0)) * 2)}px ${presetPreviewStroke(p.style, i)};paint-order:stroke fill;${shadowCss}background:${bg};padding:3px 6px;border-radius:${Math.min(16, p.style.radius || 0)}px">
+          <span class="captionobject anim-enter" data-animation="${escapeHtml(p.style.animation || "fade")}" data-highlight-style="${p.style.highlightStyle === "block" ? "block" : "text"}" style="--active:${p.style.highlight || "#ffd21f"};--stroke-color:${p.style.strokeColor || "#000000"};font-family:'${p.style.fontFamily || "Helvetica"}',sans-serif;font-weight:${p.style.fontWeight || 700};color:${presetPreviewColor(p.style, i)};-webkit-text-stroke:${Math.min(3, Math.max(0, Number(p.style.stroke || 0)) * 2)}px ${presetPreviewStroke(p.style, i)};paint-order:stroke fill;${shadowCss}background:${bg};padding:3px 6px;border-radius:${Math.min(16, p.style.radius || 0)}px">
             ${previewText}
           </span>
           <span class="small ellipsis">${escapeHtml(p.name)}</span>
@@ -601,7 +601,22 @@ function renderIssues() {
           $("lineHeightOut").textContent = `${$("lineHeight").value}%`;
           $("fontColor").value = s.color || "#ffffff";
           $("highlightColor").value = s.highlight || "#ffd21f";
+          $("highlightStyle").value = s.highlightStyle === "block" ? "block" : "text";
           $("highlightEnabled").checked = s.highlightEnabled !== false;
+          $("highlightBlockWidth").value = Number(s.highlightBlockWidth ?? 5);
+          $("highlightBlockWidthOut").textContent = $("highlightBlockWidth").value;
+          $("highlightBlockHeight").value = Number(s.highlightBlockHeight ?? 3);
+          $("highlightBlockHeightOut").textContent = $("highlightBlockHeight").value;
+          $("highlightBlockScale").value = Math.round(Number(s.highlightBlockScale ?? 1) * 100);
+          $("highlightBlockScaleOut").textContent = `${$("highlightBlockScale").value}%`;
+          $("highlightBlockX").value = Number(s.highlightBlockX ?? 0);
+          $("highlightBlockXOut").textContent = $("highlightBlockX").value;
+          $("highlightBlockY").value = Number(s.highlightBlockY ?? 0);
+          $("highlightBlockYOut").textContent = $("highlightBlockY").value;
+          $("highlightBlockRadius").value = Number(s.highlightBlockRadius ?? 4);
+          $("highlightBlockRadiusOut").textContent = $("highlightBlockRadius").value;
+          const blockControls = $("highlightBlockControls");
+          if (blockControls) blockControls.style.display = s.highlightStyle === "block" && s.highlightEnabled !== false ? "" : "none";
           syncCaptionMotionControls(s);
           $("strokeColor").value = s.strokeColor || "#000000";
           $("stroke").value = s.stroke || 0;

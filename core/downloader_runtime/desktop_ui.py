@@ -455,6 +455,15 @@ def apply_appearance(root, appearance):
                     selectforeground='#ffffff', focuscolor=colors['border'])
     style.configure('TButton', padding=(8, 3), relief='flat', background=colors['button'],
                     foreground=colors['fg'], borderwidth=0, font=UI_FONT)
+    style.layout('FlatRefresh.TButton', [('Button.label', {'sticky': 'nswe'})])
+    style.configure('FlatRefresh.TButton', font=('Segoe UI Symbol', 10), padding=0, relief='flat', anchor='s',
+                    background=colors['bg'], foreground=colors['muted'], borderwidth=0,
+                    focuscolor=colors['bg'])
+    style.map('FlatRefresh.TButton', background=[('disabled', colors['bg']),
+                                                  ('pressed', colors['bg']),
+                                                  ('active', colors['bg'])],
+              foreground=[('disabled', colors['disabled']),
+                          ('pressed', colors['fg']), ('active', colors['fg'])])
     style.configure('TMenubutton', padding=(8, 3), relief='flat', background=colors['button'])
     for name in ('TButton', 'TMenubutton'):
         style.map(name, background=[('disabled', colors['bg']), ('pressed', colors['border']),
@@ -563,3 +572,18 @@ def apply_appearance(root, appearance):
         for child in widget.winfo_children():
             visit(child)
     visit(root)
+
+
+def apply_refresh_button_style(root, appearance='深色'):
+    """Refresh the compact column-clear button style for the embedded downloader."""
+    colors = PALETTES.get(appearance, PALETTES['深色'])
+    style = ttk.Style(root)
+    style.layout('FlatRefresh.TButton', [('Button.label', {'sticky': 'nswe'})])
+    style.configure('FlatRefresh.TButton', font=('Segoe UI Symbol', 10), padding=0, relief='flat', anchor='s',
+                    background=colors['bg'], foreground=colors['muted'], borderwidth=0,
+                    focuscolor=colors['bg'])
+    style.map('FlatRefresh.TButton', background=[('disabled', colors['bg']),
+                                                  ('pressed', colors['bg']),
+                                                  ('active', colors['bg'])],
+              foreground=[('disabled', colors['disabled']),
+                          ('pressed', colors['fg']), ('active', colors['fg'])])

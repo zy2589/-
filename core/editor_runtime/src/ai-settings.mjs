@@ -1496,7 +1496,10 @@ export async function installAntigravityCli() {
   );
 }
 
-export function openAntigravityLogin() {
+export function openAntigravityLogin(input = {}) {
+  if (input?.source !== "review-settings" || input?.userInitiated !== true) {
+    throw new Error("请在 AI 设置的 Antigravity 页面中点击“登录”启动授权。");
+  }
   if (typeof antigravityTestHooks.login === "function") {
     return antigravityTestHooks.login();
   }

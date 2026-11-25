@@ -1924,7 +1924,7 @@ nativeMethods = {
   }),
   checkAntigravityStatus: safe(() => checkAntigravityStatus()),
   installAntigravityCli: safe(() => installAntigravityCli()),
-  openAntigravityLogin: safe(() => openAntigravityLogin()),
+  openAntigravityLogin: safe((input = {}) => openAntigravityLogin(input || {})),
   submitAntigravityAuthorizationCode: safe((input) => submitAntigravityAuthorizationCode(input || {})),
   openAntigravityDocs: safe(() => openAntigravityDocs()),
   clearGeminiKey: safe(() => clearGeminiKey()),

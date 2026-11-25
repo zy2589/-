@@ -1088,10 +1088,9 @@ export function buildUiHtml() {
   const numericKernel=fs.readFileSync(path.join(uiDir,'../numeric-caption-correction.mjs'),'utf8').replaceAll('export function ','function ');
   const reviewDeletionKernel=fs.readFileSync(path.join(uiDir,'../review-caption-deletion.mjs'),'utf8').replaceAll('export function ','function ');
   const scriptCopyKernel=fs.readFileSync(path.join(uiDir,'../script-copy.mjs'),'utf8').replaceAll('export function ','function ');
-  const meaningContext=fs.readFileSync(path.join(uiDir,'../caption-meaning-review.mjs'),'utf8').split('export function captionMeaningContext')[1].split('export function parseCaptionMeanings')[0];
   const phraseKernel=fs.readFileSync(path.join(uiDir,'../caption-phrase-reviews.mjs'),'utf8').replaceAll('export function ','function ');
   const mildKernel=fs.readFileSync(path.join(uiDir,'../harmless-caption-correction.mjs'),'utf8').replaceAll('export function ','function ');
-  const combinedJs = scriptCopyKernel + reviewDeletionKernel + mildKernel + phraseKernel + editKernel + comparisonKernel + nestedKernel + numericKernel + 'function captionMeaningContext'+meaningContext + scriptFiles
+  const combinedJs = scriptCopyKernel + reviewDeletionKernel + mildKernel + phraseKernel + editKernel + comparisonKernel + nestedKernel + numericKernel + scriptFiles
     .map(f => fs.readFileSync(path.join(uiDir, 'scripts', f), 'utf8'))
     .join('');
 

@@ -672,7 +672,7 @@ export function buildReviewCaptions(
         pendingCaption: !!issue.pendingCaption,
         needsAudioReview: !!issue.needsAudioReview,
         alreadyDisplayed:!!issue.alreadyDisplayed,
-        reason:issue.reason||({repeat:"重复口播",mismatch:"错误单词",missing:"缺少内容，需要补录",addition:"口语补充",extra:"文案外内容",unverifiedAddition:"文案外口语待确认"}[issue.type]||"需要核对"),
+        reason:issue.reason||({repeat:"重复口播，可删除对应片段或保留",mismatch:"错误单词",missing:"缺少内容，需要补录",addition:"口语补充",extra:"文案外内容",unverifiedAddition:"文案外口语已自动加入字幕，待确认"}[issue.type]||"需要核对"),
         words: issue.words,
         scripture: !!issue.scripture,
         start: issue.start,

@@ -891,9 +891,15 @@ function polishSectionHtml(title, rows, emptyText) {
         const issues = new Set(reviews.map(r => String(r.issueId || r.id)));
         const reviewIds = new Set(reviews.map(r => String(r.id)));
         for (const caption of state.captions || []) for (const word of caption.words || []) {
-          if (issues.has(String(word.issueId||''))) {
+          if (issues.has(String(word.issueId||'')) || issues.has(String(word.unverifiedAdditionIssueId||''))) {
             word.reviewDismissed = true;
-            word.issueId = ''; word.issueType = ''; word.action = '';
+            word.issueId = ''; word.action = '';
+            if (word.unverifiedAdditionIssueId) {
+              delete word.unverifiedAdditionIssueId;
+              word.issueType = 'addition';
+              word.matchType = 'spoken_addition';
+              word.userKept = true;
+            } else word.issueType = '';
           }
         }
         state.reviewCaptions = state.reviewCaptions.filter(r => !reviewIds.has(String(r.id)) && !issues.has(String(r.issueId||r.id||'')));
@@ -1258,16 +1264,43 @@ function polishSectionHtml(title, rows, emptyText) {
         let cleared = 0;
         for (const caption of state.captions || []) {
           for (const word of caption.words || []) {
-            if (word.issueId !== issueId) continue;
+            if (word.issueId !== issueId && word.unverifiedAdditionIssueId !== issueId) continue;
+            const wasUnverifiedAddition = word.unverifiedAdditionIssueId === issueId;
             word.action = "";
-            word.issueType = "";
             word.issueId = "";
-            if (word.matchType === "error") word.matchType = "match";
+            if (wasUnverifiedAddition) {
+              delete word.unverifiedAdditionIssueId;
+              word.issueType = "addition";
+              word.matchType = "spoken_addition";
+            } else {
+              word.issueType = "";
+              if (word.matchType === "error") word.matchType = "match";
+            }
             word.userKept = true;
             cleared += 1;
           }
         }
         return cleared;
+      }
+      function removePendingAdditionCaptionWords(issueId) {
+        const targetId = String(issueId || '');
+        let changed = false;
+        state.captions = (state.captions || []).flatMap(caption => {
+          if (!Array.isArray(caption.words)) return [caption];
+          const words = caption.words.filter(word => String(word.unverifiedAdditionIssueId || '') !== targetId);
+          if (words.length === caption.words.length) return [caption];
+          changed = true;
+          if (!words.length) return [];
+          caption.words = words;
+          caption.text = joinCaptionWords(words);
+          const timedWords = words.filter(word => Number.isFinite(Number(word.start)) && Number.isFinite(Number(word.end)));
+          if (timedWords.length) {
+            caption.start = Math.min(...timedWords.map(word => Number(word.start)));
+            caption.end = Math.max(...timedWords.map(word => Number(word.end)));
+          }
+          return [caption];
+        });
+        return changed;
       }
       function dismissReviewMark(review) {
         const issueId = review.issueId || review.id;
@@ -1275,10 +1308,14 @@ function polishSectionHtml(title, rows, emptyText) {
         state.issues = state.issues.filter((item) => item.id !== issueId);
         state.matchIssues = (state.matchIssues || []).filter((item) => item.id !== issueId);
       }
-      function keepSpokenReviewInCaptions(review) {
+      function keepSpokenReviewInCaptions(review, { pendingExtra = false } = {}) {
         const start = Number(review.start || 0),
           end = Math.max(start + 0.04, Number(review.end || start + 0.04));
-        if (review.alreadyDisplayed) {
+        const issueId = String(review.issueId || review.id || "");
+        const pendingFlags = pendingExtra && issueId
+          ? {matchType:"spoken_addition",issueType:"addition",issueId,action:"insert",userKept:false,unverifiedAdditionIssueId:issueId}
+          : {matchType:"spoken_addition",issueType:"addition",issueId:"",action:"",userKept:true};
+        if (review.alreadyDisplayed && !pendingExtra) {
           const tokens=editableCaptionTokens(String(review.spokenText || review.text || ''));
           const existing=(state.captions || []).flatMap(c=>(c.words || []).filter(w=>
             (!review.captionTrackId || c.trackId===review.captionTrackId) && w.start<end && w.end>start));
@@ -1293,13 +1330,39 @@ function polishSectionHtml(title, rows, emptyText) {
           const tokens = editableCaptionTokens(String(review.spokenText || review.text || ""));
           const words = (review.words?.length ? review.words : tokens.map((display,index)=>({
             display,start:start+(end-start)*index/tokens.length,end:start+(end-start)*(index+1)/tokens.length,
-          }))).map(word=>({...word,matchType:"spoken_addition",issueType:"addition",issueId:"",action:"",userKept:true}));
+          }))).map(word=>({...word,...pendingFlags}));
           if (!words.length) return end;
-          words[0].reviewGapBefore=true;
-          words.at(-1).reviewGapAfter=true;
-          state.captions.push({id:uid(),start,end,text:joinCaptionWords(words),words,
-            ownerClipId:review.ownerClipId,ownerClipType:review.ownerClipType,sourceMediaId:review.sourceMediaId,sourceStart:review.sourceStart,sourceEnd:review.sourceEnd,
-            trackId:review.captionTrackId || "caption",transcriptId:review.transcriptId || ""});
+          const trackId = review.captionTrackId || "caption";
+          const compatible = caption =>
+            (caption.trackId || "caption") === trackId &&
+            (!review.sourceMediaId || !caption.sourceMediaId || caption.sourceMediaId === review.sourceMediaId) &&
+            (!review.transcriptId || !caption.transcriptId || caption.transcriptId === review.transcriptId) &&
+            (!review.ownerClipId || !caption.ownerClipId || caption.ownerClipId === review.ownerClipId);
+          const target = (state.captions || [])
+            .filter(caption => compatible(caption) &&
+              Math.min(Number(caption.end), end) - Math.max(Number(caption.start), start) > -0.08)
+            .sort((a,b) =>
+              (Math.min(Number(b.end), end) - Math.max(Number(b.start), start)) -
+              (Math.min(Number(a.end), end) - Math.max(Number(a.start), start)))[0];
+          if (target) {
+            target.words ||= [];
+            for (const word of words) {
+              const existing = target.words.find(item =>
+                !captionTextDiffers(item.display, word.display) &&
+                Number(item.start) < Number(word.end) + 0.08 && Number(item.end) > Number(word.start) - 0.08);
+              if (existing) {
+                Object.assign(existing, pendingFlags);
+              } else target.words.push(word);
+            }
+            target.words.sort((a,b) => Number(a.start) - Number(b.start));
+            target.start = Math.min(Number(target.start), start);
+            target.end = Math.max(Number(target.end), end);
+            target.text = joinCaptionWords(target.words);
+          } else {
+            state.captions.push({id:uid(),start,end,text:joinCaptionWords(words),words,
+              ownerClipId:review.ownerClipId,ownerClipType:review.ownerClipType,sourceMediaId:review.sourceMediaId,sourceStart:review.sourceStart,sourceEnd:review.sourceEnd,
+              trackId,transcriptId:review.transcriptId || ""});
+          }
           state.captions.sort((a,b)=>a.start-b.start);
           return end;
         }
@@ -2034,6 +2097,9 @@ function polishSectionHtml(title, rows, emptyText) {
         }
         const unverifiedAddition = target.type === 'unverifiedAddition' || target.unverifiedAddition;
         const captionRemoval = unverifiedAddition ? null : planIssueWordsRemoval(id, start, end, target);
+        const removeCutCaptionWords = () => unverifiedAddition
+          ? (removePendingAdditionCaptionWords(id), true)
+          : removeIssueWords(id, start, end, target, captionRemoval);
         if (captionRemoval?.blocked) {
           if (!quiet) toast(issueCaptionRemovalMessage(captionRemoval.reason));
           return;
@@ -2041,7 +2107,7 @@ function polishSectionHtml(title, rows, emptyText) {
         if (!mainAudioClips().some(c=>c.start<end&&c.end>start) &&
             state.audioAssets.some(c=>c.start<end&&c.end>start)) {
           if (record) snapshot();
-          if (!unverifiedAddition && !removeIssueWords(id,start,end,target,captionRemoval)) return;
+          if (!removeCutCaptionWords()) return;
           dismissTrimmedIssues(start,end);
           // Independent clips already own their source ranges. Cut the placed
           // timeline directly; mapping through removed main media is invalid.
@@ -2075,7 +2141,7 @@ function polishSectionHtml(title, rows, emptyText) {
           }
         }
         if (record) snapshot();
-        if (!unverifiedAddition && !removeIssueWords(id, start, end, target, captionRemoval)) return;
+        if (!removeCutCaptionWords()) return;
         state.removals.push({
           start: sourceStart,
           end: sourceEnd,

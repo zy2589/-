@@ -48,7 +48,7 @@ export function pendingCaptionPlan(aligned = {}, {reviewUnmatched = true} = {}) 
       words:operations.filter(op=>op.spoken&&!op.spoken.recoveredFromManuscript&&
         (unverifiedAddition?(!op.expected&&(op.issueId===issue.id||op.captionDecisionIssueId===issue.id)):op.spoken.start<issue.end&&op.spoken.end>issue.start))
         .map(op=>({...op.spoken})),
-      reason:unverifiedAddition?'文案外口语待确认；试听后可选择剪掉或保留并加字幕':issue.type==='missing'?'识别结果没有找到对应口播；试听判断是漏读还是识别遗漏':issue.type==='repeat'?'重复口播，可试听后手动处理':'与正确文案有差异，可手动替换'};
+      reason:unverifiedAddition?'文案外口语已自动加入字幕；试听后可保留或剪除':issue.type==='missing'?'识别结果没有找到对应口播；试听判断是漏读还是识别遗漏':issue.type==='repeat'?'重复口播，可试听后删除对应片段或保留':'与正确文案有差异，可手动替换'};
     });
   const reviewAdditionIds=new Set(issues.filter(issue=>issue.type==='unverifiedAddition').map(issue=>issue.id));
   const excludedOperations=new Set();
@@ -75,7 +75,7 @@ export function pendingCaptionPlan(aligned = {}, {reviewUnmatched = true} = {}) 
     }
     syntheticGroups.push({id,issueId:id,type:'unverifiedAddition',unverifiedAddition:true,label:'文案外口语待确认',spokenText:words.map(word=>word.display).join(' '),expectedText:'',start,end,
       action:'insert',pendingCaption:false,alreadyDisplayed:false,needsAudioReview:true,confirmedCut:false,suppressReview:false,
-      reason:'文案外口语待确认；试听后选择剪掉或保留并加字幕',words});
+      reason:'文案外口语已自动加入字幕；试听后可保留或剪除',words});
     group=[];
   };
   if(reviewUnmatched)for(const operation of operations){

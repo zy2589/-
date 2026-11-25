@@ -1,8 +1,17 @@
-﻿$ErrorActionPreference = 'Stop'
+﻿param([string]$InstallDirectoryName = '剪辑助手')
+
+$ErrorActionPreference = 'Stop'
 $Root = [IO.Path]::GetFullPath($PSScriptRoot)
 $Source = [IO.Path]::GetFullPath((Join-Path $Root 'release\剪辑助手'))
 $ProgramsInstallRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Programs')).TrimEnd('\') + '\'
-$Destination = [IO.Path]::GetFullPath((Join-Path $ProgramsInstallRoot '剪辑助手'))
+if ([string]::IsNullOrWhiteSpace($InstallDirectoryName) -or
+    $InstallDirectoryName -in @('.', '..') -or
+    $InstallDirectoryName -match '[\\/:*?"<>|]' -or
+    $InstallDirectoryName.EndsWith('.') -or
+    $InstallDirectoryName.EndsWith(' ')) {
+    throw '安装目录名称无效。'
+}
+$Destination = [IO.Path]::GetFullPath((Join-Path $ProgramsInstallRoot $InstallDirectoryName))
 $ResolvedDestination = [IO.Path]::GetFullPath($Destination)
 if (!$ResolvedDestination.StartsWith($ProgramsInstallRoot, [StringComparison]::OrdinalIgnoreCase)) {
     throw '拒绝清理安装目录之外的程序文件。'
@@ -163,8 +172,8 @@ New-Item -ItemType Directory -Force -Path $Programs | Out-Null
 $Desktop = [Environment]::GetFolderPath('Desktop')
 New-Item -ItemType Directory -Force -Path $Desktop | Out-Null
 $ShortcutPaths = @(
-    (Join-Path $Programs '剪辑助手.lnk'),
-    (Join-Path $Desktop '剪辑助手.lnk')
+    (Join-Path $Programs ($InstallDirectoryName + '.lnk')),
+    (Join-Path $Desktop ($InstallDirectoryName + '.lnk'))
 )
 $Shell = New-Object -ComObject WScript.Shell
 foreach ($ShortcutPath in $ShortcutPaths) {

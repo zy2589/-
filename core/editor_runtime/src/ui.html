@@ -6991,6 +6991,34 @@ function mergeCaptionPhraseReviews(captions, reviews) {
     for(const {word} of group){word.issueId=review.issueId||review.id;word.acronymReviewId=word.issueId;word.issueType='mismatch';word.referenceExpected=review.expectedText;word.expectedDisplay=review.expectedText;}
     Object.assign(review,{start:group[0].word.start,end:group.at(-1).word.end,sourceStart:group[0].word.sourceStart,sourceEnd:group.at(-1).word.sourceEnd,spokenText:group.map(e=>e.word.recognizedDisplay||e.word.originalDisplay||e.word.display).join(' '),captionCorrectionReview:true});
   }
+  // A single alignment issue can be mapped to multiple word-sized review clips.
+  // Keep those adjacent fragments as one actionable review item, so navigation
+  // and dismiss/replace actions do not present the same issue more than once.
+  const mismatchFragments = result.filter(r=>r.type==='mismatch' && (r.issueId || r.id)).sort((a,b)=>a.start-b.start);
+  for (let i=0;i<mismatchFragments.length;i++) {
+    const first=mismatchFragments[i]; if (!result.includes(first)) continue;
+    const issueId=String(first.issueId || first.id);
+    for (let j=i+1;j<mismatchFragments.length;j++) {
+      const next=mismatchFragments[j]; if (!result.includes(next)) continue;
+      if (Number(next.start)-Number(first.end)>.12) break;
+      if (String(next.issueId || next.id)!==issueId || key(next.expectedText)!==key(first.expectedText) ||
+          key(next.spokenText)!==key(first.spokenText)) continue;
+      if (['captionTrackId','sourceMediaId','transcriptId'].some(field=>String(next[field]||'')!==String(first[field]||''))) continue;
+      const nextOwner=String(next.ownerClipId||''), firstOwner=String(first.ownerClipId||'');
+      if (nextOwner && firstOwner && nextOwner!==firstOwner) continue;
+      first.start=Math.min(Number(first.start),Number(next.start));
+      first.end=Math.max(Number(first.end),Number(next.end));
+      if (Number.isFinite(Number(next.sourceStart))) first.sourceStart=Math.min(Number(first.sourceStart??next.sourceStart),Number(next.sourceStart));
+      if (Number.isFinite(Number(next.sourceEnd))) first.sourceEnd=Math.max(Number(first.sourceEnd??next.sourceEnd),Number(next.sourceEnd));
+      const words=[...(first.words||[]),...(next.words||[])].sort((a,b)=>Number(a.start)-Number(b.start));
+      first.words=[...new Map(words.map(word=>[`${word.start}:${word.end}:${word.display||word.text||''}`,word])).values()];
+      first.text=String(first.spokenText||first.text||'').trim();
+      if (!first.ownerClipId) first.ownerClipId=next.ownerClipId;
+      if (!first.ownerClipType) first.ownerClipType=next.ownerClipType;
+      aliases.set(String(next.id||''),issueId);
+      result.splice(result.indexOf(next),1);
+    }
+  }
   const sorted = result.filter(r => r.type === 'mismatch').sort((a,b)=>a.start-b.start);
   for (let i=0;i<sorted.length;i++) {
     const first=sorted[i]; if (!result.includes(first)) continue;
@@ -17784,8 +17812,13 @@ function showReviewDetails(id) {
     element.className = 'btn small' + (danger ? ' danger' : ''); element.textContent = label;
     element.onclick = action; actions.appendChild(element); return element;
   };
-  const ordered=state.reviewCaptions.filter(r=>['mismatch','repeat','missing','unverifiedAddition'].includes(r.type)).sort((a,b)=>a.start-b.start);
-  const position=ordered.findIndex(r=>r.id===review.id);
+  const ordered=[], orderedIssueIds=new Set();
+  for (const item of state.reviewCaptions.filter(r=>['mismatch','repeat','missing','unverifiedAddition'].includes(r.type)).sort((a,b)=>a.start-b.start)) {
+    const issueId=String(item.issueId||item.id||'');
+    if (!issueId || orderedIssueIds.has(issueId)) continue;
+    orderedIssueIds.add(issueId); ordered.push(item);
+  }
+  const position=ordered.findIndex(r=>String(r.issueId||r.id)===String(review.issueId||review.id));
   if(position>0)button('上一处',()=>showReviewDetails(ordered[position-1].id));
   if(position>=0 && position<ordered.length-1)button('下一处',()=>showReviewDetails(ordered[position+1].id));
   if(review.type==='mismatch')button('重试中文',()=>loadCaptionMeaning(review,null,true));
@@ -17836,11 +17869,6 @@ function showReviewDetails(id) {
   button('关闭', () => reviewDetailsDialog.close());
   reviewDetailsDialog.append(heading, detail, actions);
   if (!reviewDetailsDialog.open) reviewDetailsDialog.showModal();
-  if (review.type === 'mismatch') {
-    Promise.resolve(loadCaptionMeaning(review)).then(() => {
-      if (reviewDetailsDialog.open && detail.isConnected) detail.textContent = reviewClipDetails(review);
-    });
-  }
 }
 function selectedVideoGrade(create = false) {
         const selected = state.selected || { type: "video", id: "main" };
@@ -21715,19 +21743,21 @@ function polishSectionHtml(title, rows, emptyText) {
       }
       function dismissReviewHints(ids) {
         const requested = state.reviewCaptions.filter(r => ids.includes(r.id));
-        const reviews = state.reviewCaptions.filter(r => requested.some(target =>
+        const requestedIssues = new Set(requested.map(r=>String(r.issueId||r.id||'')));
+        const reviews = state.reviewCaptions.filter(r => requestedIssues.has(String(r.issueId||r.id||'')) || requested.some(target =>
           r.id === target.id || (typeof sameCaptionMismatchOccurrence === 'function' && sameCaptionMismatchOccurrence(target,r))));
         if (!reviews.length || isTrackLocked('review')) return;
         snapshot();
-        const issues = new Set(reviews.map(r => r.issueId || r.id));
+        const issues = new Set(reviews.map(r => String(r.issueId || r.id)));
+        const reviewIds = new Set(reviews.map(r => String(r.id)));
         for (const caption of state.captions || []) for (const word of caption.words || []) {
-          if (issues.has(word.issueId)) {
+          if (issues.has(String(word.issueId||''))) {
             word.reviewDismissed = true;
             word.issueId = ''; word.issueType = ''; word.action = '';
           }
         }
-        state.reviewCaptions = state.reviewCaptions.filter(r => !ids.includes(r.id));
-        const remaining = new Set(state.reviewCaptions.map(r => r.issueId || r.id));
+        state.reviewCaptions = state.reviewCaptions.filter(r => !reviewIds.has(String(r.id)) && !issues.has(String(r.issueId||r.id||'')));
+        const remaining = new Set(state.reviewCaptions.map(r => String(r.issueId || r.id)));
         state.issues = state.issues.filter(r => !issues.has(r.id) || remaining.has(r.id));
         state.matchIssues = (state.matchIssues || []).filter(r => !issues.has(r.id) || remaining.has(r.id));
         state.selected = null; state.selectedItems = [];
@@ -22125,11 +22155,37 @@ function polishSectionHtml(title, rows, emptyText) {
             display,start:start+(end-start)*index/tokens.length,end:start+(end-start)*(index+1)/tokens.length,
           }))).map(word=>({...word,matchType:"spoken_addition",issueType:"addition",issueId:"",action:"",userKept:true}));
           if (!words.length) return end;
-          words[0].reviewGapBefore=true;
-          words.at(-1).reviewGapAfter=true;
-          state.captions.push({id:uid(),start,end,text:joinCaptionWords(words),words,
-            ownerClipId:review.ownerClipId,ownerClipType:review.ownerClipType,sourceMediaId:review.sourceMediaId,sourceStart:review.sourceStart,sourceEnd:review.sourceEnd,
-            trackId:review.captionTrackId || "caption",transcriptId:review.transcriptId || ""});
+          const trackId = review.captionTrackId || "caption";
+          const compatible = caption =>
+            (caption.trackId || "caption") === trackId &&
+            (!review.sourceMediaId || !caption.sourceMediaId || caption.sourceMediaId === review.sourceMediaId) &&
+            (!review.transcriptId || !caption.transcriptId || caption.transcriptId === review.transcriptId) &&
+            (!review.ownerClipId || !caption.ownerClipId || caption.ownerClipId === review.ownerClipId);
+          const target = (state.captions || [])
+            .filter(caption => compatible(caption) &&
+              Math.min(Number(caption.end), end) - Math.max(Number(caption.start), start) > -0.08)
+            .sort((a,b) =>
+              (Math.min(Number(b.end), end) - Math.max(Number(b.start), start)) -
+              (Math.min(Number(a.end), end) - Math.max(Number(a.start), start)))[0];
+          if (target) {
+            target.words ||= [];
+            for (const word of words) {
+              const existing = target.words.find(item =>
+                !captionTextDiffers(item.display, word.display) &&
+                Number(item.start) < Number(word.end) + 0.08 && Number(item.end) > Number(word.start) - 0.08);
+              if (existing) {
+                Object.assign(existing, {matchType:"spoken_addition",issueType:"addition",issueId:"",action:"",userKept:true});
+              } else target.words.push(word);
+            }
+            target.words.sort((a,b) => Number(a.start) - Number(b.start));
+            target.start = Math.min(Number(target.start), start);
+            target.end = Math.max(Number(target.end), end);
+            target.text = joinCaptionWords(target.words);
+          } else {
+            state.captions.push({id:uid(),start,end,text:joinCaptionWords(words),words,
+              ownerClipId:review.ownerClipId,ownerClipType:review.ownerClipType,sourceMediaId:review.sourceMediaId,sourceStart:review.sourceStart,sourceEnd:review.sourceEnd,
+              trackId,transcriptId:review.transcriptId || ""});
+          }
           state.captions.sort((a,b)=>a.start-b.start);
           return end;
         }
@@ -28473,10 +28529,12 @@ function registerFontFace(font) {
           $("installAntigravity").disabled = false;
         }
       };
-      if ($("loginAntigravity")) $("loginAntigravity").onclick = async () => {
+      if ($("loginAntigravity")) $("loginAntigravity").onclick = async (event) => {
+        if (!event?.isTrusted || !$("reviewSettingsModal")?.classList.contains("on") ||
+            $("reviewProvider")?.value !== "antigravity" || $("antigravitySettings")?.style.display === "none") return;
         try {
           await persistReviewSettings();
-          const result = unwrap(await window.native.openAntigravityLogin());
+          const result = unwrap(await window.native.openAntigravityLogin({ source: "review-settings", userInitiated: true }));
           $("antigravityHint").className = "status";
           $("antigravityHint").textContent = result.alreadyOpen
             ? "登录流程仍在运行。完成浏览器授权后点「检测」；若页面显示授权码，再粘贴到下方提交。"

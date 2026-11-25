@@ -430,10 +430,12 @@ function registerFontFace(font) {
           $("installAntigravity").disabled = false;
         }
       };
-      if ($("loginAntigravity")) $("loginAntigravity").onclick = async () => {
+      if ($("loginAntigravity")) $("loginAntigravity").onclick = async (event) => {
+        if (!event?.isTrusted || !$("reviewSettingsModal")?.classList.contains("on") ||
+            $("reviewProvider")?.value !== "antigravity" || $("antigravitySettings")?.style.display === "none") return;
         try {
           await persistReviewSettings();
-          const result = unwrap(await window.native.openAntigravityLogin());
+          const result = unwrap(await window.native.openAntigravityLogin({ source: "review-settings", userInitiated: true }));
           $("antigravityHint").className = "status";
           $("antigravityHint").textContent = result.alreadyOpen
             ? "登录流程仍在运行。完成浏览器授权后点「检测」；若页面显示授权码，再粘贴到下方提交。"

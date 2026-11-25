@@ -188,7 +188,17 @@
                         value="#000000"
                     /></label>
                     <label><span class="small">朗读高亮颜色</span><input class="input colorinput" id="highlightColor" type="color" value="#ffd21f" /></label>
+                    <label><span class="small">高亮形式</span><select class="input" id="highlightStyle"><option value="text">文字变色</option><option value="block">底块高亮</option></select></label>
                     <label class="switch"><span>朗读高亮</span><input id="highlightEnabled" type="checkbox" checked /></label>
+                  </div>
+                  <div class="field" id="highlightBlockControls" style="display:none; margin-top:8px">
+                    <div class="small" style="margin-bottom:8px;color:var(--muted)">底块尺寸与位置（独立于文字背景）</div>
+                    <div class="field"><div class="fieldhead"><span>底块宽度</span><output id="highlightBlockWidthOut">5</output></div><input class="range" id="highlightBlockWidth" type="range" min="0" max="80" step="1" value="5" /></div>
+                    <div class="field"><div class="fieldhead"><span>底块高度</span><output id="highlightBlockHeightOut">3</output></div><input class="range" id="highlightBlockHeight" type="range" min="0" max="80" step="1" value="3" /></div>
+                    <div class="field"><div class="fieldhead"><span>底块缩放</span><output id="highlightBlockScaleOut">100%</output></div><input class="range" id="highlightBlockScale" type="range" min="50" max="250" step="1" value="100" /></div>
+                    <div class="field"><div class="fieldhead"><span>底块 X 轴偏移</span><output id="highlightBlockXOut">0</output></div><input class="range" id="highlightBlockX" type="range" min="-100" max="100" step="1" value="0" /></div>
+                    <div class="field"><div class="fieldhead"><span>底块 Y 轴偏移</span><output id="highlightBlockYOut">0</output></div><input class="range" id="highlightBlockY" type="range" min="-100" max="100" step="1" value="0" /></div>
+                    <div class="field"><div class="fieldhead"><span>底块圆角</span><output id="highlightBlockRadiusOut">4</output></div><input class="range" id="highlightBlockRadius" type="range" min="0" max="80" step="1" value="4" /></div>
                   </div>
                   <div class="field">
                     <label><span class="small">字幕滚动</span>

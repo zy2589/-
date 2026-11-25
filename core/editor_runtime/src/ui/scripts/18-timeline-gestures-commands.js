@@ -2014,7 +2014,14 @@ function scaleTimelineClipGeometry(ratio) {
         "lineHeight",
         "fontColor",
         "highlightColor",
+        "highlightStyle",
         "highlightEnabled",
+        "highlightBlockWidth",
+        "highlightBlockHeight",
+        "highlightBlockScale",
+        "highlightBlockX",
+        "highlightBlockY",
+        "highlightBlockRadius",
         "strokeColor",
         "stroke",
         "shadowColor",
@@ -2049,7 +2056,22 @@ function scaleTimelineClipGeometry(ratio) {
           s.color = $("fontColor").value;
           s.highlight = $("highlightColor").value;
           s.highlightColor = $("highlightColor").value;
+          s.highlightStyle = $("highlightStyle").value === "block" ? "block" : "text";
           s.highlightEnabled = $("highlightEnabled").checked;
+          s.highlightBlockWidth = Number($("highlightBlockWidth").value);
+          s.highlightBlockHeight = Number($("highlightBlockHeight").value);
+          s.highlightBlockScale = Number($("highlightBlockScale").value) / 100;
+          s.highlightBlockX = Number($("highlightBlockX").value);
+          s.highlightBlockY = Number($("highlightBlockY").value);
+          s.highlightBlockRadius = Number($("highlightBlockRadius").value);
+          const blockControls = $("highlightBlockControls");
+          if (blockControls) blockControls.style.display = s.highlightStyle === "block" && s.highlightEnabled ? "" : "none";
+          $("highlightBlockWidthOut").textContent = s.highlightBlockWidth;
+          $("highlightBlockHeightOut").textContent = s.highlightBlockHeight;
+          $("highlightBlockScaleOut").textContent = `${Math.round(s.highlightBlockScale * 100)}%`;
+          $("highlightBlockXOut").textContent = s.highlightBlockX;
+          $("highlightBlockYOut").textContent = s.highlightBlockY;
+          $("highlightBlockRadiusOut").textContent = s.highlightBlockRadius;
           s.strokeColor = $("strokeColor").value;
           s.stroke = Number($("stroke").value);
           s.shadowColor = $("shadowColor").value;

@@ -362,6 +362,11 @@
                   for (const word of caption.words || []) if (word.issueId === (review.issueId || review.id) &&
                     word.start < part.end && word.end > part.start) word.issueId=id;
                 }
+                if (pending.type === 'unverifiedAddition' || pending.unverifiedAddition) {
+                  pending.autoAddedToCaption = true;
+                  pending.reason = '已自动加入主字幕预览；试听后可确认保留，或删除对应音视频片段。';
+                  keepSpokenReviewInCaptions(pending, { pendingExtra: true });
+                }
                 state.reviewCaptions.push(pending);
                 state.issues.push({...pending,trackId:"review"});
               }

@@ -1,5 +1,16 @@
-﻿param([Parameter(Mandatory = $true)][string]$Timestamp)
+﻿param(
+    [Parameter(Mandatory = $true)][string]$Timestamp,
+    [string]$InstallDirectoryName = '剪辑助手'
+)
 $ErrorActionPreference = 'Stop'
+$InstallDirectoryName = $InstallDirectoryName.Trim()
+if ([string]::IsNullOrWhiteSpace($InstallDirectoryName) -or
+    $InstallDirectoryName -in @('.', '..') -or
+    $InstallDirectoryName -match '[\\/:*?"<>|]' -or
+    $InstallDirectoryName.EndsWith('.') -or
+    $InstallDirectoryName.EndsWith(' ')) {
+    throw '安装目录名称无效。'
+}
 $Root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $AppSource = Join-Path $Root 'release\剪辑助手'
 $GitHistoryRoot = Join-Path $Root '可清理数据\Git历史\.git'
@@ -30,19 +41,27 @@ New-Item -ItemType Directory -Force -Path $StagingParent, $ArchiveRoot | Out-Nul
 New-Item -ItemType Directory -Force -Path $StagingRoot | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $StagingRoot 'release') | Out-Null
 Copy-Item -LiteralPath $AppSource -Destination (Join-Path $StagingRoot 'release\剪辑助手') -Recurse -Force
-Copy-Item -LiteralPath (Join-Path $Root '安装剪辑助手.bat') -Destination $StagingRoot -Force
 Copy-Item -LiteralPath (Join-Path $Root '安装剪辑助手.ps1') -Destination $StagingRoot -Force
 Copy-Item -LiteralPath (Join-Path $AppSource 'README.md') -Destination $StagingRoot -Force
+$InstallerBatch = @"
+@echo off
+setlocal
+chcp 65001 >nul
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0安装剪辑助手.ps1" -InstallDirectoryName "$InstallDirectoryName"
+if errorlevel 1 pause
+endlocal
+"@
+[IO.File]::WriteAllText((Join-Path $StagingRoot '安装剪辑助手.bat'), $InstallerBatch, [Text.UTF8Encoding]::new($true))
 
-$Readme = @'
+$Readme = @"
 剪辑助手独立安装包
 
 1. 完整解压 ZIP 文件。
 2. 双击“安装剪辑助手.bat”。
-3. 安装程序会将软件复制到当前 Windows 用户的 Programs 目录，并创建开始菜单快捷方式。
+3. 安装程序会将软件复制到当前 Windows 用户的 Programs\$InstallDirectoryName 目录，并创建对应的开始菜单和桌面快捷方式。
 
 此安装包包含完整应用运行文件，不需要先下载或安装便携版。项目、设置和凭据数据不会打入包中。
-'@
+"@
 [IO.File]::WriteAllText((Join-Path $StagingRoot '安装说明.txt'), $Readme, [Text.Encoding]::UTF8)
 $ExeHash = (Get-FileHash -LiteralPath (Join-Path $AppSource '剪辑助手.exe') -Algorithm SHA256).Hash
 $ExeSignature = Get-AuthenticodeSignature -LiteralPath (Join-Path $AppSource '剪辑助手.exe')
@@ -67,6 +86,7 @@ $Manifest = [ordered]@{
     executableSha256 = $ExeHash
     executableSignatureStatus = [string]$ExeSignature.Status
     executableSigner = if ($ExeSignature.SignerCertificate) { $ExeSignature.SignerCertificate.Subject } else { '' }
+    installDirectoryName = $InstallDirectoryName
     python = '3.14.10'
     ffmpeg = '9.0.2'
     ffprobe = '9.0.2'

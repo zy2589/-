@@ -55,7 +55,7 @@ function restoreUnverifiedAdditionReviews() {
       pendingCaption: false, alreadyDisplayed: false, needsAudioReview: true,
       action: 'insert', trackId: 'review',
       captionTrackId: issue.captionTrackId || state.autoTranscript?.trackId || 'caption',
-      reason: issue.reason || '文案外口语待确认；试听后可选择剪掉或保留并加字幕',
+      reason: issue.reason || '文案外口语已自动加入字幕；试听后可保留或剪除。',
     });
     existing.add(id);
   }
@@ -65,6 +65,15 @@ function syncCaptionCorrectionReviews() {
   state.reviewCaptions ||= [];
   state.issues ||= [];
   restoreUnverifiedAdditionReviews();
+  if (typeof keepSpokenReviewInCaptions === 'function') {
+    for (const review of state.reviewCaptions) {
+      if (review.type !== 'unverifiedAddition' && !review.unverifiedAddition) continue;
+      if (review.autoAddedToCaption) continue;
+      review.autoAddedToCaption = true;
+      review.reason = '已自动加入主字幕预览；试听后可确认保留，或删除对应音视频片段。';
+      keepSpokenReviewInCaptions({...review, pendingCaption:true}, {pendingExtra:true});
+    }
+  }
   normalizeCaptionPhraseReviews();
   dedupeCaptionMismatchReviews();
   const resolved = new Set(correctExpandedCaptionWords(state.captions));
@@ -271,67 +280,6 @@ function dedupeCaptionMismatchReviews() {
 
 // A fixed hover card stays readable even for clips narrower than a word.
 let reviewHoverCard;
-const meaningReviewPending = new Set();
-const meaningReviewFailures = new Map();
-const meaningReviewTasks = new Map();
-function loadCaptionMeaning(review,event,force=false){
-  if(meaningReviewTasks.has(review.id))return meaningReviewTasks.get(review.id);
-  const task=fetchCaptionMeaning(review,event,force);
-  meaningReviewTasks.set(review.id,task);
-  task.finally(()=>meaningReviewTasks.delete(review.id));
-  return task;
-}
-async function fetchCaptionMeaning(review, event, force = false) {
-  const context = captionMeaningContext(state.captions, review);
-  const contextKey = JSON.stringify({spoken:review.spokenText,expected:review.expectedText,...context});
-  const requestKey = review.id + ':' + contextKey;
-  if (review.meaningContextKey && review.meaningContextKey !== contextKey) {
-    review.spokenZh = ''; review.expectedZh = ''; review.meaningMode = '';
-  }
-  if (review.type !== 'mismatch' || (review.meaningVersion === 2 && review.meaningMode === 'context' &&
-      review.meaningContextKey === contextKey && review.spokenZh && review.expectedZh) || meaningReviewPending.has(review.id) ||
-      (!force && Date.now()-(meaningReviewFailures.get(requestKey)||0)<60000)) return;
-  const project=state.projectId;
-  const spoken=review.spokenText,expected=review.expectedText;
-  let meaningTimeout;
-  meaningReviewPending.add(review.id);
-  review.meaningReviewStatus='loading';
-  try {
-    const fallback=await nativeCall('captionMeaningFallback',{items:[{id:review.id,spoken,expected,...context}]});
-    const definition=fallback.items?.find(i=>i.id===review.id);
-    if(definition && state.projectId===project){Object.assign(review,definition,{meaningReviewStatus:'dictionary'});refreshCaptionMeaningDialog();}
-    const result=await Promise.race([nativeCall('reviewCaptionMeanings',{items:[{id:review.id,spoken,expected,...context}]}),new Promise((_,reject)=>{meaningTimeout=setTimeout(()=>reject(Error('中文查询超时')),20000);})]);
-    const row=result.items?.find(i=>i.id===review.id);
-    if (!row) {
-      meaningReviewFailures.set(requestKey,Date.now());
-      if (state.projectId===project) {
-        review.meaningReviewStatus=result.status==='unavailable'?'unavailable':'failed';
-        if (reviewHoverCard && !reviewHoverCard.hidden) reviewHoverCard.textContent=reviewClipTitle(review);
-      }
-      return;
-    }
-    const current=state.reviewCaptions.find(r=>r.id===review.id);
-    if (state.projectId!==project || !current || current.spokenText!==spoken || current.expectedText!==expected ||
-        JSON.stringify(captionMeaningContext(state.captions,current))!==JSON.stringify(context)) return;
-    Object.assign(current,row,{meaningReviewStatus:result.status,spokenPhrase:context.spokenPhrase,expectedPhrase:context.expectedPhrase,meaningContextKey:contextKey});
-    if (row.meaningMode === 'context') meaningReviewFailures.delete(requestKey);
-    else meaningReviewFailures.set(requestKey,Date.now());
-    for (const issue of state.issues) if (issue.id===(current.issueId || current.id)) Object.assign(issue,row,{id:issue.id});
-    for (const caption of state.captions) for (const word of caption.words || []) if (word.issueId===(current.issueId || current.id)) {
-      word.meaningReview={...row,spokenText:spoken,expectedText:expected,type:'mismatch'};
-      if (row.meaningImpact==='same') {word.issueType='';word.issueId='';word.action='';word.matchType='match';}
-    }
-    renderTimeline();renderCaptionInspector(true);renderAutoTranscript();queueAutosave();
-    if (row.meaningImpact!=='same') {
-      if (reviewHoverCard && !reviewHoverCard.hidden && reviewHoverCard.dataset.reviewId === current.id) reviewHoverCard.textContent=reviewClipTitle(current);
-    } else hideReviewHoverCard();
-  } catch {
-    meaningReviewFailures.set(requestKey,Date.now());
-    review.meaningReviewStatus='failed';
-    if (reviewHoverCard && !reviewHoverCard.hidden && reviewHoverCard.dataset.reviewId === review.id) reviewHoverCard.textContent=reviewClipTitle(review);
-  }
-  finally {clearTimeout(meaningTimeout);meaningReviewPending.delete(review.id);refreshCaptionMeaningDialog();}
-}
 function hideReviewHoverCard() { if (reviewHoverCard) reviewHoverCard.hidden = true; }
 function showReviewHoverCard(event) {
   const clip = event.target.closest?.('.clip[data-type="review"]');
@@ -651,9 +599,6 @@ function showReviewDetails(id) {
   const review = state.reviewCaptions.find(r => r.id === id || r.issueId === id);
   if (!review) return;
   stopReviewCutPreview();
-  if (review.meaningContextKey && review.meaningContextKey !== JSON.stringify({spoken:review.spokenText,expected:review.expectedText,...captionMeaningContext(state.captions,review)})) {
-    review.spokenZh = ''; review.expectedZh = ''; review.meaningMode = '';
-  }
   hideReviewHoverCard();
   if (!reviewDetailsDialog) {
     reviewDetailsDialog = document.createElement('dialog');
@@ -678,13 +623,13 @@ function showReviewDetails(id) {
   heading.textContent = reviewClipTitle(review).split('\n')[0];
   const detail = document.createElement('p');
   detail.className = 'review-details-text';
-  if (review.type === 'mismatch') Object.assign(review, captionMeaningContext(state.captions, review));
   detail.textContent = reviewClipDetails(review);
   const actions = document.createElement('div');
   actions.className = 'review-details-actions';
-  const button = (label, action, danger = false) => {
+  const button = (label, action, danger = false, title = '') => {
     const element = document.createElement('button');
     element.className = 'btn small' + (danger ? ' danger' : ''); element.textContent = label;
+    if (title) element.title = title;
     element.onclick = action; actions.appendChild(element); return element;
   };
   const ordered=[], orderedIssueIds=new Set();
@@ -696,11 +641,37 @@ function showReviewDetails(id) {
   const position=ordered.findIndex(r=>String(r.issueId||r.id)===String(review.issueId||review.id));
   if(position>0)button('上一处',()=>showReviewDetails(ordered[position-1].id));
   if(position>=0 && position<ordered.length-1)button('下一处',()=>showReviewDetails(ordered[position+1].id));
-  if(review.type==='mismatch')button('重试中文',()=>loadCaptionMeaning(review,null,true));
   const missingSpeech = review.type === 'missing' || review.action === 'missing';
   const unverifiedAddition = review.type === 'unverifiedAddition' || review.unverifiedAddition;
+  const repeatedSpeech = review.type === 'repeat';
+  const audition = () => {
+    stopReviewCutPreview();
+    reviewDetailsDialog.close();
+    auditionReviewSegment(review.id);
+  };
+  const keepRecognized = () => {
+    if (review.type === 'mismatch') {
+      if (replaceReviewCaption(review.id, 'spoken')) reviewDetailsDialog.close();
+      return;
+    }
+    stopReviewCutPreview();
+    reviewDetailsDialog.close();
+    acceptReviewSegment(review.id);
+  };
+  const deleteSpokenSegment = () => {
+    if (isTrackLocked('review') || isTrackLocked(review.captionTrackId || 'caption'))
+      return toast('字幕或待处理轨道已锁定，无法删除这段');
+    if (unverifiedAddition) {
+      const conflict = reviewCutCaptionConflict(review, Number(review.start), Number(review.end));
+      if (conflict) return toast(`删除范围碰到正文字幕“${String(conflict.display || conflict.text || '').trim()}”；已取消操作以保护正文`);
+    }
+    stopReviewCutPreview();
+    reviewDetailsDialog.close();
+    if (repeatedSpeech) deleteRepeatedReview(review.id);
+    else cutScriptIssue(review.issueId || review.id, { scope: review });
+  };
+  button('试听', audition);
   if (missingSpeech) {
-    button('试听附近音频', () => { stopReviewCutPreview(); auditionReviewSegment(review.id); });
     button('音频有词，补入字幕', () => insertMissingReviewCaption(review));
     button(review.confirmedMissing ? '已确认录音缺读' : '确认录音确实未读', () => {
       if (isTrackLocked('review')) return toast('待确认轨道已锁定');
@@ -719,34 +690,14 @@ function showReviewDetails(id) {
       reviewDetailsDialog.close();
       renderAll(); queueAutosave(); toast('已确认确实缺读，紫色标记保留；可随时删除提示');
     });
-  } else if (unverifiedAddition) {
-    button('试听原片', () => { stopReviewCutPreview(); auditionReviewSegment(review.id); });
-    button('不保留，剪掉这段', () => {
-      if (isTrackLocked('review')) return toast('待处理轨道已锁定，无法剪除这段口语');
-      const conflict = reviewCutCaptionConflict(review, Number(review.start), Number(review.end));
-      if (conflict) return toast(`识别区间与正文字幕“${String(conflict.display || conflict.text || '').trim()}”重叠，为避免误删已取消剪切`);
-      stopReviewCutPreview();
-      reviewDetailsDialog.close();
-      cutScriptIssue(review.issueId || review.id, { scope: review });
-    });
-    button('保留并加字幕', () => { stopReviewCutPreview(); reviewDetailsDialog.close(); acceptReviewSegment(review.id); });
   } else {
-    button('试听', () => { reviewDetailsDialog.close(); auditionReviewSegment(review.id); });
     if (review.type === 'mismatch') button('使用正确文案', () => { if(replaceReviewCaption(review.id,'expected')) reviewDetailsDialog.close(); });
-    if (review.type !== 'missing' && review.action !== 'missing')
-      button('使用识别文案', () => { if(replaceReviewCaption(review.id,'spoken')) reviewDetailsDialog.close(); });
-    button('忽略提示', () => { reviewDetailsDialog.close(); snapshot(); dismissReviewHints([review.id]); });
+    button('使用识别文案', keepRecognized);
+    if (unverifiedAddition || repeatedSpeech)
+      button('删除', deleteSpokenSegment, true, '删除对应字幕，并同步剪掉对应视频和音频');
   }
-  button('删除提示（保留字幕和音视频）', () => {
-    if (isTrackLocked('review')) return toast('待确认轨道已锁定');
-    reviewDetailsDialog.close(); dismissReviewHints([review.id]);
-  }, true);
+  button('忽略提示', () => { reviewDetailsDialog.close(); dismissReviewHints([review.id]); });
   button('关闭', () => reviewDetailsDialog.close());
   reviewDetailsDialog.append(heading, detail, actions);
   if (!reviewDetailsDialog.open) reviewDetailsDialog.showModal();
-  if (review.type === 'mismatch') {
-    Promise.resolve(loadCaptionMeaning(review)).then(() => {
-      if (reviewDetailsDialog.open && detail.isConnected) detail.textContent = reviewClipDetails(review);
-    });
-  }
 }
