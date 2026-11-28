@@ -11,9 +11,7 @@ import {
 import { normalizeWord, displayWords, formatDisplayWords } from "./engine.mjs";
 
 export function endsCaptionSentence(display) {
-  // Script separators can be appended after terminal punctuation (for example
-  // "lamps.---"). Ignore those suffixes so they do not hide a sentence end.
-  const text = String(display || "").trim().replace(/[-‐‑‒–—]+$/u, "").trim();
+  const text = String(display || "").trim();
   if (!/[.!?…\u3002\uff01\uff1f]/.test(text)) return false;
   return /[.!?…\u3002\uff01\uff1f]["”’」』》〉）】〕〗)\]}'\u201d\u2019]*$/u.test(text);
 }
@@ -335,12 +333,6 @@ function captionFromGroup(group, style, maxWidth, scale) {
 }
 
 const SAFE_CAPTION_BRIDGE_SECONDS = 0.62;
-const MAX_CAPTION_WORD_GAP_SECONDS = 0.5;
-
-function crossesSpokenAdditionBoundary(left, right) {
-  return (String(left?.matchType || "") === "spoken_addition") !==
-    (String(right?.matchType || "") === "spoken_addition");
-}
 
 function bridgeSafeCaptionGaps(captions = []) {
   for (let index = 0; index < captions.length - 1; index += 1) {
@@ -426,9 +418,7 @@ export function regroupCaptions(words, options = {}) {
       const display=String(word?.display||"").trim();if(!display)continue;
       const start=Number(word.start||0),end=Math.max(start+0.04,Number(word.end||start));
       const item={...word,display,start,end},prior=sentence.at(-1);
-      const gap=prior?start-Number(prior.end||0):0;
-      if(sentence.length&&(item.reviewGapBefore||prior?.reviewGapAfter||
-        gap>MAX_CAPTION_WORD_GAP_SECONDS||crossesSpokenAdditionBoundary(prior,item)))flushSentence();
+      if(sentence.length&&(item.reviewGapBefore||prior?.reviewGapAfter))flushSentence();
       sentence.push(item);
       // A comma is a preferred, soft boundary rather than a sentence end.
       // Keep the full clause available to the phrase balancer: hard-flushing
@@ -444,12 +434,7 @@ export function regroupCaptions(words, options = {}) {
       const end = Math.max(start + 0.04, Number(word.end || start));
       const item = { ...word, display, start, end };
       const prior = group.at(-1);
-      if (group.length && (item.reviewGapBefore || prior?.reviewGapAfter || crossesSpokenAdditionBoundary(prior,item))) {
-        flush();
-      } else if (group.length && start - Number(prior.end || 0) > MAX_CAPTION_WORD_GAP_SECONDS) {
-        // A subtitle starts at its first word, so carrying later words across a
-        // long pause makes their text appear early. Start a new card at the
-        // next word's actual time.
+      if (group.length && (item.reviewGapBefore || prior?.reviewGapAfter)) {
         flush();
       } else if (group.length && !item.keepWithPrevious && endsCaptionSentence(prior?.display)) {
         flush();
@@ -464,13 +449,7 @@ export function regroupCaptions(words, options = {}) {
     const caption = captions[index];
     if (caption.words.length >= 2) continue;
     const previous = captions[index - 1];
-    if (!previous) continue;
-    const previousWord = previous.words.at(-1);
-    const currentWord = caption.words[0];
-    const wordGap = Number(currentWord?.start || 0) - Number(previousWord?.end || 0);
-    if (currentWord?.reviewGapBefore || previousWord?.reviewGapAfter ||
-        wordGap > MAX_CAPTION_WORD_GAP_SECONDS || crossesSpokenAdditionBoundary(previousWord,currentWord) ||
-        endsCaptionSentence(previousWord?.display)) continue;
+    if (!previous || caption.words[0]?.reviewGapBefore || previous.words.at(-1)?.reviewGapAfter || endsCaptionSentence(previous.words.at(-1)?.display)) continue;
     const mergedWords = [...previous.words, ...caption.words];
     if (linesNeeded(mergedWords) > maxLines) continue;
     captions.splice(index - 1, 2, captionFromGroup(mergedWords, style, maxWidth, scale));
@@ -552,12 +531,11 @@ export function buildCaptions(expectedWords, options = {}) {
       ? Number(word.start || 0) - Number(priorWord.end || 0)
       : 0;
     const priorEnds = endsCaptionSentence(priorWord?.display || "");
+    const priorClauseEnds = endsCaptionClause(priorWord?.display || "");
     const priorSoftClauseEnds = endsCaptionSoftClause(priorWord?.display || "");
-    const punctuationBoundary = naturalPunctuation
-      ? priorSoftClauseEnds
-      : endsCaptionClause(priorWord?.display || "");
+    const punctuationBoundary = naturalPunctuation ? priorSoftClauseEnds : priorClauseEnds;
     const keepReferenceTogether = !!word.keepWithPrevious;
-    const splitGap = MAX_CAPTION_WORD_GAP_SECONDS;
+    const splitGap = priorEnds ? 0.62 : priorClauseEnds ? 0.75 : 1.85;
     if (
       group.length &&
       ((!keepReferenceTogether &&
@@ -567,7 +545,10 @@ export function buildCaptions(expectedWords, options = {}) {
         (!naturalPunctuation && candidate.length > maxChars) ||
         priorEnds ||
         punctuationBoundary ||
-        (priorWord && crossesSpokenAdditionBoundary(priorWord,word)))) || word.reviewGapBefore || priorWord?.reviewGapAfter)
+        (!naturalPunctuation && priorClauseEnds && group.length >= 3 && timingGap >= 0.45) ||
+        (priorWord &&
+          (word.matchType === "spoken_addition") !==
+            (priorWord.matchType === "spoken_addition")))) || word.reviewGapBefore || priorWord?.reviewGapAfter)
     )
       flush();
     group.push(word);
@@ -578,11 +559,9 @@ export function buildCaptions(expectedWords, options = {}) {
     if (caption.words.length >= 2) continue;
     const next = captions[index + 1];
     const previous = captions[index - 1];
-    const gapToNext = next
-      ? Number(next.words[0]?.start || 0) - Number(caption.words.at(-1)?.end || 0)
-      : Infinity;
+    const gapToNext = next ? Number(next.start) - Number(caption.end) : Infinity;
     const gapFromPrevious = previous
-      ? Number(caption.words[0]?.start || 0) - Number(previous.words.at(-1)?.end || 0)
+      ? Number(caption.start) - Number(previous.end)
       : Infinity;
     const singleton = caption.words[0]?.display || "";
     const closesSentence = endsCaptionSentence(singleton);
@@ -598,15 +577,13 @@ export function buildCaptions(expectedWords, options = {}) {
     const canMergePrevious =
       previous &&
       !caption.words[0]?.reviewGapBefore && !previous.words.at(-1)?.reviewGapAfter &&
-      gapFromPrevious <= MAX_CAPTION_WORD_GAP_SECONDS &&
-      !crossesSpokenAdditionBoundary(previous.words.at(-1),caption.words[0]) &&
+      (gapFromPrevious <= 0.62 || (shortCloser && !previousClosesSentence && gapFromPrevious <= 1.8)) &&
       (naturalPunctuation || previous.words.length + caption.words.length <= maxWords + 1) &&
       !previousClosesSentence;
     const canMergeNext =
       next &&
       !next.words[0]?.reviewGapBefore && !caption.words.at(-1)?.reviewGapAfter &&
-      gapToNext <= MAX_CAPTION_WORD_GAP_SECONDS &&
-      !crossesSpokenAdditionBoundary(caption.words[0],next.words[0]) &&
+      (gapToNext <= 0.62 || (!closesSentence && gapToNext <= 1.85)) &&
       (naturalPunctuation || caption.words.length + next.words.length <= maxWords + 1) &&
       !closesSentence;
     const target = closesSentence
@@ -652,13 +629,13 @@ export function buildReviewCaptions(
 ) {
   void expectedWords;
   return issues
-    .filter((issue) => ["repeat","mismatch","missing","unverifiedAddition"].includes(issue.type) && issue.start < outputDuration && !issue.suppressReview && issue.action !== "keep")
+    .filter((issue) => ["repeat","mismatch","missing"].includes(issue.type) && issue.start < outputDuration && !issue.suppressReview && issue.action !== "keep")
     .map((issue) => {
       const explicit = String(issue.expectedText || "")
         .replace(/^\s*[—-]\s*$/, "")
         .trim();
       const cuttable = ["extra", "repeat", "mismatch"].includes(issue.type);
-      const acceptable = issue.type === "addition" || issue.type === "unverifiedAddition" || issue.action === "insert";
+      const acceptable = issue.type === "addition" || issue.action === "insert";
       if (!explicit && !cuttable && !acceptable) return null;
       const spoken = String(issue.spokenText || "")
         .replace(/^\s*[—-]\s*$/, "")
@@ -668,11 +645,10 @@ export function buildReviewCaptions(
         issueId: issue.id,
         type: issue.type,
         ...(issue.segmentedRepeat ? {segmentedRepeat:true} : {}),
-        ...(issue.type === "unverifiedAddition" ? {unverifiedAddition:true} : {}),
         pendingCaption: !!issue.pendingCaption,
         needsAudioReview: !!issue.needsAudioReview,
         alreadyDisplayed:!!issue.alreadyDisplayed,
-        reason:issue.reason||({repeat:"重复口播，可删除对应片段或保留",mismatch:"错误单词",missing:"缺少内容，需要补录",addition:"口语补充",extra:"文案外内容",unverifiedAddition:"文案外口语已自动加入字幕，待确认"}[issue.type]||"需要核对"),
+        reason:issue.reason||({repeat:"重复口播",mismatch:"错误单词",missing:"缺少内容，需要补录",addition:"口语补充",extra:"文案外内容"}[issue.type]||"需要核对"),
         words: issue.words,
         scripture: !!issue.scripture,
         start: issue.start,
@@ -682,7 +658,7 @@ export function buildReviewCaptions(
           : explicit || "需补录",
         expectedText: explicit,
         spokenText: issue.spokenText,
-        action: issue.type === "missing" ? "missing" : issue.type === "repeat" ? "review" : issue.type === "unverifiedAddition" ? "insert" : "replace",
+        action: issue.type === "missing" ? "missing" : issue.type === "repeat" ? "review" : "replace",
       };
     })
     .filter(Boolean);

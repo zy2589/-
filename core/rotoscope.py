@@ -441,7 +441,7 @@ def _render_smart_corrections(strokes, reference_bbox, person_probability, frame
 
 
 def _create_ort_session(ort, model_path, session_options):
-    """Prefer CUDA, then DirectML, then CPU; report the backend actually used."""
+    """Prefer CUDA, DirectML, Core ML, then CPU; report the backend used."""
     # Load the CUDA wheel's bundled DLL dependencies before constructing any
     # session, including person selection and timeline preview.
     if hasattr(ort, 'preload_dlls'):
@@ -451,7 +451,7 @@ def _create_ort_session(ort, model_path, session_options):
             pass
     available = set(ort.get_available_providers())
     failures = []
-    for provider in ('CUDAExecutionProvider', 'DmlExecutionProvider', 'CPUExecutionProvider'):
+    for provider in ('CUDAExecutionProvider', 'DmlExecutionProvider', 'CoreMLExecutionProvider', 'CPUExecutionProvider'):
         if provider not in available:
             continue
         if provider == 'CUDAExecutionProvider':
@@ -478,7 +478,8 @@ def _create_ort_session(ort, model_path, session_options):
 
 def _provider_label(provider):
     return {'CUDAExecutionProvider': 'GPU（NVIDIA CUDA）',
-            'DmlExecutionProvider': 'GPU（DirectML）'}.get(provider, 'CPU')
+            'DmlExecutionProvider': 'GPU（DirectML）',
+            'CoreMLExecutionProvider': 'Apple Core ML'}.get(provider, 'CPU')
 
 
 class RotoscopeWindow:

@@ -1,14 +1,13 @@
 function renderIssues() {
   const box=$('issueList');if(!box)return;
-  const pending=Array.from(new Map((state.reviewCaptions||[]).filter(r=>['mismatch','repeat','missing','unverifiedAddition'].includes(r.type)).map(r=>[r.id,r])).values()).sort((a,b)=>a.start-b.start);
+  const pending=Array.from(new Map((state.reviewCaptions||[]).filter(r=>['mismatch','repeat','missing'].includes(r.type)).map(r=>[r.id,r])).values()).sort((a,b)=>a.start-b.start);
   const count=$('reviewPendingCount');if(count)count.textContent=pending.length+' 处待确认';
   const all=typeof captionReviewShowAll!=='undefined' && captionReviewShowAll;
   $('reviewPendingOnly')?.classList.toggle('active',!all);$('reviewAll')?.classList.toggle('active',all);
   box.replaceChildren();
   for(const review of pending){
     const row=document.createElement('div');row.className='caption-review-entry';
-    const pendingAudioCheck=(review.type==='missing'||review.action==='missing')&&!review.confirmedMissing&&review.needsAudioReview!==false;
-    const button=document.createElement('button');button.className='btn caption-review-row '+review.type+(pendingAudioCheck?' audio-unverified':'');button.textContent=formatTime(review.start,false)+' · '+reviewClipTitle(review);button.onclick=()=>{seekTimeline(review.start);showReviewDetails(review.id);};
+    const button=document.createElement('button');button.className='btn caption-review-row '+review.type;button.textContent=formatTime(review.start,false)+' · '+reviewClipTitle(review);button.onclick=()=>{seekTimeline(review.start);showReviewDetails(review.id);};
     const audition=document.createElement('button');audition.className='btn caption-review-audition';audition.textContent='试听';audition.title='试听这处问题对应的原始音频';audition.onclick=()=>auditionReviewSegment(review.id);
     row.append(button,audition);box.append(row);
   }
@@ -158,62 +157,10 @@ function renderIssues() {
         if (typeof captionReviewDiffers === 'function' && !captionReviewDiffers(before, after)) return false;
         return !!captionCorrectionKey(before) && !!captionCorrectionKey(after) && captionCorrectionKey(before) !== captionCorrectionKey(after);
       }
-      function captionMismatchReviewGroups(caption) {
-        const groups = new Map();
-        for (const [index, word] of (caption?.words || []).entries()) {
-          const recognized = word.recognizedDisplay || word.originalDisplay || word.display || '';
-          const expected = word.expectedDisplay || word.referenceExpected || '';
-          if (word.issueType !== 'mismatch' || !expected || !captionCorrectionDiffers(recognized, expected)) continue;
-          const key = word.issueId ? `issue:${word.issueId}` : `word:${index}`;
-          if (!groups.has(key)) groups.set(key, { issueId: word.issueId || '', words: [] });
-          groups.get(key).words.push(word);
-        }
-        const seenLabels = new Map();
-        return [...groups.values()].map(group => {
-          const review = group.issueId && (state.reviewCaptions || []).find(item =>
-            (item.issueId || item.id) === group.issueId && item.type === 'mismatch' &&
-            (!item.ownerClipId || item.ownerClipId === (caption.ownerClipId || '')) &&
-            (!item.captionTrackId || item.captionTrackId === (caption.trackId || 'caption')));
-          const unique = values => [...new Map(values.filter(value => String(value || '').trim()).map(value =>
-            [captionCorrectionKey(value), String(value).trim()])).values()];
-          const spoken = review?.spokenText || unique(group.words.map(word => word.recognizedDisplay || word.originalDisplay || word.display)).join(' ');
-          const expected = review?.expectedText || unique(group.words.map(word => word.expectedDisplay || word.referenceExpected)).join(' ');
-          const times = group.words.map(word => [Number(word.start), Number(word.end)])
-            .filter(([start, end]) => Number.isFinite(start) && Number.isFinite(end) && end > start);
-          return {
-            issueId: group.issueId, spokenText: spoken, expectedText: expected,
-            start: times.length ? Math.min(...times.map(([start]) => start)) : NaN,
-            end: times.length ? Math.max(...times.map(([, end]) => end)) : NaN,
-          };
-        }).filter(group => {
-          const spoken = captionCorrectionKey(group.spokenText);
-          const expected = captionCorrectionKey(group.expectedText);
-          if (!spoken || !expected) return false;
-          const key = `${spoken}\u2192${expected}`;
-          const previous = seenLabels.get(key) || [];
-          if (previous.some(item => {
-            if (![group.start, group.end, item.start, item.end].every(Number.isFinite)) return false;
-            const overlap = Math.min(group.end, item.end) - Math.max(group.start, item.start);
-            const shorter = Math.min(group.end - group.start, item.end - item.start);
-            return (overlap > 0.005 && shorter > 0 && overlap / shorter >= 0.75) ||
-              (Math.abs(group.start - item.start) <= 0.035 && Math.abs(group.end - item.end) <= 0.06);
-          })) return false;
-          previous.push({ start: group.start, end: group.end });
-          seenLabels.set(key, previous);
-          return true;
-        });
-      }
       function renderCaptionReferenceChanges(caption) {
         caption.textAuditBaseline ??= caption.text || '';
         const differs = captionCorrectionDiffers;
-        const seen = new Set();
-        const changes = (caption.textChanges || []).filter(change => {
-          if (change.kind === 'manual' || !differs(change.before,change.after)) return false;
-          const before=captionCorrectionKey(change.before),after=captionCorrectionKey(change.after),key=`${before}→${after}`;
-          if (seen.has(key) || captionMismatchReviewGroups(caption).some(group =>
-            captionCorrectionKey(group.spokenText)===before && captionCorrectionKey(group.expectedText)===after)) return false;
-          seen.add(key);return true;
-        }).map(change =>
+        const changes = (caption.textChanges || []).filter(change => change.kind !== 'manual' && differs(change.before, change.after)).map(change =>
           `<div class="caption-mismatch-suggestion small status"><span>${escapeHtml(change.before)}（识别文案） → ${escapeHtml(change.after)}（正确文案）</span></div>`).join('');
         return changes + (caption.words || []).map((word,index) => {
           if(word.autoMildCorrected)return `<div class="caption-mild-note small">已自动处理：${escapeHtml(word.display)}</div>`;
@@ -257,9 +204,10 @@ function renderIssues() {
         renderAll();queueAutosave();
       }
       function renderCaptionMismatchSuggestions(caption) {
-        return renderCaptionReferenceChanges(caption) + captionMismatchReviewGroups(caption).map(group =>
-          `<div class="caption-mismatch-suggestion"><span>${escapeHtml(group.spokenText)}（识别文案） → ${escapeHtml(group.expectedText)}（正确文案）</span></div>`
-        ).join("");
+        return renderCaptionReferenceChanges(caption) + (caption.words || []).map((word, index) =>
+          word.issueType === "mismatch" && word.expectedDisplay && captionCorrectionDiffers(word.recognizedDisplay || word.originalDisplay || word.display, word.expectedDisplay)
+            ? `<div class="caption-mismatch-suggestion"><span>${escapeHtml(word.recognizedDisplay || word.originalDisplay || word.display || "")}（识别文案） → ${escapeHtml(word.expectedDisplay)}（正确文案）</span></div>`
+            : "").join("");
       }
       function renderCaptionEmphasisPicker(caption) {
         if (state.captionStyle?.keywordMode !== true) return "";
@@ -460,7 +408,7 @@ function renderIssues() {
           : "";
         return `<button class="preset" data-preset="${i}" title="${escapeHtml(p.name)}">
           ${customActions}
-          <span class="captionobject anim-enter" data-animation="${escapeHtml(p.style.animation || "fade")}" data-highlight-style="${p.style.highlightStyle === "block" ? "block" : "text"}" style="--active:${p.style.highlight || "#ffd21f"};--stroke-color:${p.style.strokeColor || "#000000"};font-family:'${p.style.fontFamily || "Helvetica"}',sans-serif;font-weight:${p.style.fontWeight || 700};color:${presetPreviewColor(p.style, i)};-webkit-text-stroke:${Math.min(3, Math.max(0, Number(p.style.stroke || 0)) * 2)}px ${presetPreviewStroke(p.style, i)};paint-order:stroke fill;${shadowCss}background:${bg};padding:3px 6px;border-radius:${Math.min(16, p.style.radius || 0)}px">
+          <span class="captionobject anim-enter" data-animation="${escapeHtml(p.style.animation || "fade")}" style="--active:${p.style.highlight || "#ffd21f"};font-family:'${p.style.fontFamily || "Helvetica"}',sans-serif;font-weight:${p.style.fontWeight || 700};color:${presetPreviewColor(p.style, i)};-webkit-text-stroke:${Math.min(3, Math.max(0, Number(p.style.stroke || 0)) * 2)}px ${presetPreviewStroke(p.style, i)};paint-order:stroke fill;${shadowCss}background:${bg};padding:3px 6px;border-radius:${Math.min(16, p.style.radius || 0)}px">
             ${previewText}
           </span>
           <span class="small ellipsis">${escapeHtml(p.name)}</span>
@@ -601,22 +549,7 @@ function renderIssues() {
           $("lineHeightOut").textContent = `${$("lineHeight").value}%`;
           $("fontColor").value = s.color || "#ffffff";
           $("highlightColor").value = s.highlight || "#ffd21f";
-          $("highlightStyle").value = s.highlightStyle === "block" ? "block" : "text";
           $("highlightEnabled").checked = s.highlightEnabled !== false;
-          $("highlightBlockWidth").value = Number(s.highlightBlockWidth ?? 5);
-          $("highlightBlockWidthOut").textContent = $("highlightBlockWidth").value;
-          $("highlightBlockHeight").value = Number(s.highlightBlockHeight ?? 3);
-          $("highlightBlockHeightOut").textContent = $("highlightBlockHeight").value;
-          $("highlightBlockScale").value = Math.round(Number(s.highlightBlockScale ?? 1) * 100);
-          $("highlightBlockScaleOut").textContent = `${$("highlightBlockScale").value}%`;
-          $("highlightBlockX").value = Number(s.highlightBlockX ?? 0);
-          $("highlightBlockXOut").textContent = $("highlightBlockX").value;
-          $("highlightBlockY").value = Number(s.highlightBlockY ?? 0);
-          $("highlightBlockYOut").textContent = $("highlightBlockY").value;
-          $("highlightBlockRadius").value = Number(s.highlightBlockRadius ?? 4);
-          $("highlightBlockRadiusOut").textContent = $("highlightBlockRadius").value;
-          const blockControls = $("highlightBlockControls");
-          if (blockControls) blockControls.style.display = s.highlightStyle === "block" && s.highlightEnabled !== false ? "" : "none";
           syncCaptionMotionControls(s);
           $("strokeColor").value = s.strokeColor || "#000000";
           $("stroke").value = s.stroke || 0;

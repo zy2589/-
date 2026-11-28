@@ -10,11 +10,15 @@ import wave
 from pathlib import Path
 from typing import Callable
 
+from .media_runtime import media_binary
+
 
 SAMPLE_RATE = 48_000
 CHUNK_FRAMES = 60 * SAMPLE_RATE
 CONTEXT_FRAMES = int(0.5 * SAMPLE_RATE)
 WARMUP_FRAMES = int(0.24 * SAMPLE_RATE)
+OPENING_PASSTHROUGH_FRAMES = int(0.8 * SAMPLE_RATE)
+OPENING_BLEND_FRAMES = int(0.12 * SAMPLE_RATE)
 
 
 def _run(command: list[str], *, cwd: Path | None = None, cancel: threading.Event | None = None) -> str:
@@ -122,15 +126,18 @@ def denoise_video(
 ) -> Path:
     """Denoise the audio in a staged video and mux it back without re-encoding video."""
     video = Path(video)
-    ffmpeg = resource_dir / "ffmpeg" / "ffmpeg.exe"
-    ffprobe = resource_dir / "ffmpeg" / "ffprobe.exe"
+    ffmpeg = media_binary(resource_dir, "ffmpeg")
+    ffprobe = media_binary(resource_dir, "ffprobe")
     # Packaged builds stage the shared executable at the resource root.
     # Development checkouts keep it with the editor runtime assets.
     denoiser = next((candidate for candidate in (
-        resource_dir / "deep-filter.exe",
-        resource_dir / "editor-runtime" / "deep-filter.exe",
-        Path(__file__).resolve().parent.parent / "resources" / "editor-runtime" / "deep-filter.exe",
-    ) if candidate.is_file()), resource_dir / "deep-filter.exe")
+        (Path(os.environ["CLIPASSIST_MEDIA_ROOT"]) /
+         ("deep-filter.exe" if os.name == "nt" else "deep-filter"))
+        if os.environ.get("CLIPASSIST_MEDIA_ROOT") else resource_dir / ("deep-filter.exe" if os.name == "nt" else "deep-filter"),
+        resource_dir / "editor-runtime" / ("deep-filter.exe" if os.name == "nt" else "deep-filter"),
+        Path(__file__).resolve().parent.parent / "resources" / "editor-runtime" /
+        ("deep-filter.exe" if os.name == "nt" else "deep-filter"),
+    ) if candidate.is_file()), resource_dir / ("deep-filter.exe" if os.name == "nt" else "deep-filter"))
     for required in (ffmpeg, ffprobe, denoiser):
         if not required.is_file():
             raise RuntimeError(f"降噪运行文件缺失：{required.name}")
@@ -139,7 +146,9 @@ def denoise_video(
     mux_channels = max(1, min(2, int(output_channels or channels)))
     mux_sample_rate = max(8_000, int(output_sample_rate or SAMPLE_RATE))
     strength = max(0, min(100, int(strength_percent))) / 100.0
-    # Keep the strength curve identical to the editor's DeepFilterNet panel.
+    # Keep the existing strength control on the model itself. Only the opening
+    # is protected with source audio; blending dry and wet across the full track
+    # can make speech sound phasey or hollow.
     attenuation_db = round(10.0 + 90.0 * strength)
     final_suffix = video.suffix.lower()
     if final_suffix not in {".mp4", ".m4v", ".mov", ".mkv", ".webm"}:
@@ -186,7 +195,11 @@ def denoise_video(
                 end = min(start + CHUNK_FRAMES, total_frames)
                 input_start = max(0, start - CONTEXT_FRAMES)
                 input_end = min(total_frames, end + CONTEXT_FRAMES)
-                trim_start = WARMUP_FRAMES + start - input_start
+                warmup_frames = (
+                    min(WARMUP_FRAMES, input_end - input_start)
+                    if input_start == 0 else WARMUP_FRAMES
+                )
+                trim_start = warmup_frames + start - input_start
                 part_name = f"input-{channel}-{chunk_index}.wav"
                 clean_name = f"clean-{channel}-{chunk_index}.wav"
                 part = work / part_name
@@ -197,16 +210,13 @@ def denoise_video(
                 start_seconds = input_start / SAMPLE_RATE
                 input_seconds = (input_end - input_start) / SAMPLE_RATE
                 if input_start == 0:
-                    # DeepFilterNet starts with a cold recurrent state at the
-                    # beginning of a file. Prime it with a reflected copy of
-                    # the first warmup window, then process the real signal.
-                    # The reflected pre-roll is trimmed off below, so the
-                    # output begins on the original sample grid and every
-                    # sample still passes through denoising.
-                    prefix_frames = min(WARMUP_FRAMES, input_end - input_start)
+                    # Match 降噪助手: duplicate the real opening as preroll so
+                    # DeepFilterNet sees speech before the first output sample.
+                    # The duplicate is removed below to preserve source timing.
+                    prefix_frames = warmup_frames
                     input_filter = (
-                        f"[0:a]atrim=start_sample=0:end_sample={prefix_frames},areverse,"
-                        f"apad=whole_len={WARMUP_FRAMES},asetpts=PTS-STARTPTS[prefix];"
+                        f"[0:a]atrim=start_sample=0:end_sample={prefix_frames},"
+                        f"asetpts=PTS-STARTPTS[prefix];"
                         f"[0:a]atrim=start_sample=0:end_sample={input_end - input_start},"
                         f"asetpts=PTS-STARTPTS[body];"
                         f"[prefix][body]concat=n=2:v=0:a=1,"
@@ -234,7 +244,7 @@ def denoise_video(
                     progress(f"降噪中 {percent}% · 声道 {channel + 1}/{actual_channels}")
                 denoiser_args = [
                     str(denoiser), "--output-dir", str(enhanced_dir),
-                    "--atten-lim-db", str(attenuation_db), "--compensate-delay",
+                    "--atten-lim-db", str(attenuation_db),
                 ]
                 if strength >= 0.65:
                     denoiser_args.append("--pf")
@@ -305,6 +315,35 @@ def denoise_video(
             )
         if _wave_info(cleaned_audio) != (actual_channels, SAMPLE_RATE, total_frames):
             raise RuntimeError("降噪音轨与原音轨帧数不一致，未替换原视频")
+
+        # Preserve the original only while DeepFilterNet settles, then fade to
+        # the processed track. A whole-track dry/wet mix can sound hollow.
+        opening_frames = min(total_frames, OPENING_PASSTHROUGH_FRAMES)
+        blend_frames = min(OPENING_BLEND_FRAMES, total_frames - opening_frames)
+        if blend_frames > 0:
+            protected_audio = work / "protected-cleaned.wav"
+            opening_start = opening_frames / SAMPLE_RATE
+            blend_duration = blend_frames / SAMPLE_RATE
+            opening_filter = (
+                f"[0:a]afade=t=out:st={opening_start:.6f}:d={blend_duration:.6f}[original];"
+                f"[1:a]afade=t=in:st={opening_start:.6f}:d={blend_duration:.6f}[denoised];"
+                f"[original][denoised]amix=inputs=2:duration=longest:normalize=0,"
+                f"apad,atrim=end_sample={total_frames},asetpts=PTS-STARTPTS[out]"
+            )
+            _run(
+                [
+                    str(ffmpeg), "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+                    "-i", str(normalized), "-i", str(cleaned_audio),
+                    "-filter_complex", opening_filter, "-map", "[out]",
+                    "-c:a", "pcm_s16le", str(protected_audio),
+                ], cancel=cancel,
+            )
+            if _wave_info(protected_audio) != (actual_channels, SAMPLE_RATE, total_frames):
+                raise RuntimeError("降噪开头保护音轨帧数异常，未替换原视频")
+            os.replace(protected_audio, cleaned_audio)
+        elif opening_frames == total_frames:
+            # Very short clips may contain only the first spoken word.
+            shutil.copy2(normalized, cleaned_audio)
 
         staged = work / f"final{final_suffix}"
         audio_codec = "libopus" if final_suffix == ".webm" else "aac"

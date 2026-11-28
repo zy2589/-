@@ -103,6 +103,12 @@ def _load_runtime(engine_dir: Path, storage_root: Path, node_path: Path):
 class EmbeddedEditor:
     """Own one in-process .NET WebView2 child control for the editor page."""
 
+    def __new__(cls, *args, **kwargs):
+        if cls is EmbeddedEditor and sys.platform == "darwin":
+            from .embedded_editor_macos import MacEmbeddedEditor
+            return MacEmbeddedEditor(*args, **kwargs)
+        return super().__new__(cls)
+
     def __init__(self, root: tk.Misc, frame: tk.Widget, engine_dir: Path,
                  storage_root: Path, node_path: Path | None = None,
                  on_error: Callable[[str], None] | None = None,

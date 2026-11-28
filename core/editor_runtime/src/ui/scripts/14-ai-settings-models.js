@@ -343,8 +343,7 @@ function filterSpeechLanguageList(query, languages) {
         }
       }
       async function matchScript({alignmentOnly = false, forceRecognition = false} = {}) {
-        const sourceVideo = manuscriptSourceVideo();
-        if (!sourceVideo?.path) {
+        if (!state.video) {
           toast("请先导入视频");
           return false;
         }
@@ -355,7 +354,6 @@ function filterSpeechLanguageList(query, languages) {
         let matchJobId='';
         try {
           const matchContext = createAutoCaptionContext();
-          const sourceDuration = manuscriptSourceDuration(sourceVideo);
           const model = unwrap(await window.native.modelStatus());
           assertAutoCaptionContext(matchContext);
           if (!model.ready && !model.installed) {
@@ -383,8 +381,8 @@ function filterSpeechLanguageList(query, languages) {
           if (!sourceClips.length) throw new Error("时间线没有保留的源音频片段，无法匹配文案");
           const { jobId } = unwrap(
             await window.native.startScriptAnalysis({
-              inputPath: sourceVideo.path,
-              duration: sourceDuration,
+              inputPath: state.video.path,
+              duration: state.sourceDuration,
               script: $("scriptText").value,
               scriptLanguage: $("manuscriptLanguage")?.value || "",
               removals: [],
@@ -417,13 +415,13 @@ function filterSpeechLanguageList(query, languages) {
               state.issues = [...otherIssues,...(s.result.issues || [])];
               state.matchIssues = (s.result.issues || []).map((issue) => ({ ...issue }));
               state.alignmentOperations = s.result.operations || [];
-              state.alignmentDuration = Number(s.result.outputDuration || sourceDuration || 0);
+              state.alignmentDuration = Number(s.result.outputDuration || state.sourceDuration || 0);
               const reconciliation = reconcileCaptionAdditions(
                 bindMatchedCaptionSources(await applyCaptionGrouping(s.result.captions, state.captionLines), sourceClips),
                 targetCaptions,alignmentOnly?[]:state.autoTranscript?.additionBaseline || [],alignmentOnly?[]:state.autoTranscript?.editBaseline || [],deletedSources);
               const binding = bindGeneratedTranscript(reconciliation.captions,targetTrack);
               state.captions = [...otherCaptions,...reconciliation.captions];
-              state.autoTranscript = {...binding,deletedSources,additionBaseline:reconciliation.baseline,editBaseline:reconciliation.editBaseline,trackId:state.autoTranscript?.trackId || "caption",text:state.recognizedText,sourcePath:sourceVideo.path,sourceSegments:s.result.sourceSegments || [],scriptAssisted:true,panelOpen:true};
+              state.autoTranscript = {...binding,deletedSources,additionBaseline:reconciliation.baseline,editBaseline:reconciliation.editBaseline,trackId:state.autoTranscript?.trackId || "caption",text:state.recognizedText,sourcePath:state.video.path,sourceSegments:s.result.sourceSegments || [],scriptAssisted:true,panelOpen:true};
               state.reviewCaptions = (s.result.reviewCaptions || []).filter((item) =>
                 ["missing","mismatch","repeat"].includes(item.type)
               );

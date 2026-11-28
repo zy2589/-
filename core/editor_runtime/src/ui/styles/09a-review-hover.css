@@ -27,10 +27,3 @@
 .review-details-dialog h3 { margin: 0 0 8px; font-size: 16px; }
 .review-details-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; font-size: 13px; margin:8px 0; }
 .review-details-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.review-extra-cut-controls { margin-top:12px; padding-top:10px; border-top:1px solid #41444a; }
-.review-extra-cut-controls p { margin:0 0 8px; line-height:1.5; }
-.review-extra-cut-range { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
-.review-extra-cut-range label { display:grid; gap:4px; }
-.review-extra-cut-range input { width:100%; min-width:0; }
-.review-extra-cut-status.warning { color:#ff9292; }
-.review-extra-cut-preview:disabled,.review-extra-cut-controls button:disabled { opacity:.5; cursor:not-allowed; }

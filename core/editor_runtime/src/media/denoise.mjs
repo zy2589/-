@@ -741,20 +741,25 @@ export async function renderDeepFilterTrack(inputPath, strength = 0.8, outputPat
   fs.mkdirSync(enhancedDir, { recursive: true, mode: 0o700 });
   const rawWav = path.join(inputDir, "input_48k.wav");
 
-  const amount = Math.max(0, Math.min(1, Number(strength || 0.8)));
-  const attenDb = Math.round(10 + amount * 90); // 10 dB to 100 dB
-  // Give the recurrent model time to settle before the first real phoneme.
-  // The warm-up silence is removed after enhancement, so source timestamps
-  // and total duration remain identical to the original track.
-  const startupProtection = Math.max(0.12, Math.min(0.5, Number(options.startupProtection ?? 0.24)));
+  const parsedStrength = Number(strength);
+  const amount = Math.max(0, Math.min(1, Number.isFinite(parsedStrength) ? parsedStrength : 0.8));
+  const attenDb = Math.round(10 + amount * 90);
   const expectedDuration = Math.max(0.04, Number(options.duration || probeMedia(inputPath).duration || 0));
-  const openingBlend = Math.min(0.8, expectedDuration).toFixed(4);
+  // Match 降噪助手's startup context, then protect the opening before using
+  // only the denoised signal for the rest of the clip.
+  const startupProtection = Math.min(0.24, expectedDuration);
+  const startupFrames = Math.round(startupProtection * 48000);
+  const openingPassthrough = Math.min(0.8, expectedDuration);
+  const openingBlend = Math.min(0.12, Math.max(0, expectedDuration - openingPassthrough));
 
   const ffmpegArgs = ["-y", "-hide_banner", "-loglevel", "error"];
   if (options.time != null && options.duration != null) {
     ffmpegArgs.push("-ss", String(Math.max(0, Number(options.time))), "-t", String(Math.max(0.1, Number(options.duration))));
   }
-  ffmpegArgs.push("-i", inputPath, "-vn", "-af", `adelay=${Math.round(startupProtection * 1000)}:all=1`, "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", rawWav);
+  const startupFilter = startupFrames > 0
+    ? `[0:a]atrim=start_sample=0:end_sample=${startupFrames},asetpts=PTS-STARTPTS[context];[0:a]asetpts=PTS-STARTPTS[source];[context][source]concat=n=2:v=0:a=1[out]`
+    : "[0:a]asetpts=PTS-STARTPTS[out]";
+  ffmpegArgs.push("-i", inputPath, "-filter_complex", startupFilter, "-map", "[out]", "-vn", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", rawWav);
 
   try {
     await run(mediaBinary("ffmpeg"), ffmpegArgs);
@@ -765,11 +770,7 @@ export async function renderDeepFilterTrack(inputPath, strength = 0.8, outputPat
     // DeepFilterNet writes the enhanced file with the input basename.  Keep
     // input/output directories separate; using the same directory makes the
     // native CLI refuse to overwrite the source and silently leaves no result.
-    const deepFilterArgs = [
-      "--output-dir", enhancedDir,
-      "--atten-lim-db", String(attenDb),
-      "--compensate-delay",
-    ];
+    const deepFilterArgs = ["--output-dir", enhancedDir, "--atten-lim-db", String(attenDb)];
     if (amount >= 0.65) deepFilterArgs.push("--pf");
     deepFilterArgs.push(rawWav);
     await run(bin, deepFilterArgs);
@@ -784,14 +785,13 @@ export async function renderDeepFilterTrack(inputPath, strength = 0.8, outputPat
       throw new Error("DeepFilterNet 输出文件缺失");
     }
 
-    // Blend the untouched opening into the denoised signal. The model's
-    // recurrent state can suppress speech while it settles at file start;
-    // a short crossfade preserves the first phonemes without a hard splice.
-    const openingFilter = [
-      `[0:a]atrim=start=${startupProtection.toFixed(4)},asetpts=PTS-STARTPTS,afade=t=out:st=0:d=${openingBlend}[original]`,
-      `[1:a]atrim=start=${startupProtection.toFixed(4)},asetpts=PTS-STARTPTS,apad,atrim=duration=${expectedDuration.toFixed(4)},afade=t=in:st=0:d=${openingBlend}[denoised]`,
-      `[original][denoised]amix=inputs=2:duration=longest:normalize=0,atrim=duration=${expectedDuration.toFixed(4)},asetpts=PTS-STARTPTS[out]`,
-    ].join(";");
+    const sourceTrim =
+      `[0:a]atrim=start=${startupProtection.toFixed(4)}:duration=${expectedDuration.toFixed(4)},asetpts=PTS-STARTPTS,afade=t=out:st=${openingPassthrough.toFixed(4)}:d=${openingBlend.toFixed(4)}[original]`;
+    const denoisedTrim =
+      `[1:a]apad,atrim=start=${startupProtection.toFixed(4)}:duration=${expectedDuration.toFixed(4)},asetpts=PTS-STARTPTS,afade=t=in:st=${openingPassthrough.toFixed(4)}:d=${openingBlend.toFixed(4)}[denoised]`;
+    const outputFilter = openingBlend > 0
+      ? `${sourceTrim};${denoisedTrim};[original][denoised]amix=inputs=2:duration=longest:normalize=0,apad,atrim=duration=${expectedDuration.toFixed(4)},asetpts=PTS-STARTPTS[out]`
+      : `[0:a]atrim=start=${startupProtection.toFixed(4)}:duration=${expectedDuration.toFixed(4)},asetpts=PTS-STARTPTS[out]`;
 
     // Encode to target M4A, preserving the original signal at the very start.
     await run(mediaBinary("ffmpeg"), [
@@ -804,7 +804,7 @@ export async function renderDeepFilterTrack(inputPath, strength = 0.8, outputPat
       "-i",
       cleanedWavPath,
       "-filter_complex",
-      openingFilter,
+      outputFilter,
       "-map",
       "[out]",
       "-c:a",

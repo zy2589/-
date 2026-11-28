@@ -125,7 +125,6 @@ function assignOverlapLanes(items = []) {
               .join("")
           : `<span class="clipname ellipsis"${type === "review" ? reviewAction === "missing" ? ` data-focus-issue="${escapeHtml(c.issueId || c.id)}"` : reviewAction === "insert" ? ` data-insert-review="${escapeHtml(c.id)}" title="点击查看并确认这段文案外口播"` : ` data-cut-review="${escapeHtml(c.id)}"` : ""}>${escapeHtml(displayText)}</span>`;
         const actionClass = type === "review" ? ` ${reviewAction}` : "";
-        const reviewHit = type==='caption' ? ' data-caption-details="'+escapeHtml(c.id)+'"' : '';
         const inner = type === "caption" || type === "review"
           ? `<span class="clip-sticky">${captionWords}</span>`
           : `<span class="clip-sticky">${captionWords}</span>`;
@@ -133,7 +132,7 @@ function assignOverlapLanes(items = []) {
           ? `<span class="solo-kept-mark" style="position:absolute;left:0;top:0;bottom:0;width:2px;background:#4ade80;border-radius:1px;z-index:2"></span>`
           : "";
         const durationMark = ["videolayer", "image"].includes(type) ? clipDurationMarkup(c) : "";
-        return `<div class="clip ${escapeHtml(visualType)}${issueClass}${actionClass}${narrow} ${isSelected(type, c.id) ? "selected" : ""}" data-type="${escapeHtml(type)}" data-id="${escapeHtml(c.id)}" data-track-id="${escapeHtml(c.trackId || (type === "review" ? "review" : type))}"${reviewHit}${type === "review" ? "" : ` title="${escapeHtml(displayText)}"`} style="${clipGeometryStyle(c, lane, laneCount)}"><i class="trim-handle start" data-trim="start"></i>${soloMark}${inner}${durationMark}${replace}<i class="trim-handle end" data-trim="end"></i></div>`;
+        return `<div class="clip ${escapeHtml(visualType)}${issueClass}${actionClass}${narrow} ${isSelected(type, c.id) ? "selected" : ""}" data-type="${escapeHtml(type)}" data-id="${escapeHtml(c.id)}" data-track-id="${escapeHtml(c.trackId || (type === "review" ? "review" : type))}"${type === "review" ? "" : ` title="${escapeHtml(displayText)}"`} style="${clipGeometryStyle(c, lane, laneCount)}"><i class="trim-handle start" data-trim="start"></i>${soloMark}${inner}${durationMark}${replace}<i class="trim-handle end" data-trim="end"></i></div>`;
       }
       const waveformViewportCache = new WeakMap();
       function waveformViewportCovered(canvas, left, right, height, scrollOnly) {

@@ -1,3 +1,10 @@
+function refreshCaptionMeaningDialog() {
+  if(!reviewDetailsDialog?.open)return;
+  const review=state.reviewCaptions.find(r=>r.id===reviewDetailsDialog.reviewId);
+  const detail=reviewDetailsDialog.querySelector('.review-details-text');
+  if(review && detail)detail.textContent=reviewClipDetails(review);
+}
+
 var captionReviewShowAll=false;
 $('reviewPendingOnly').onclick=()=>{captionReviewShowAll=false;renderIssues();};
 $('reviewAll').onclick=()=>{captionReviewShowAll=true;renderIssues();};

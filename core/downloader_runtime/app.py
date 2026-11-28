@@ -27,6 +27,7 @@ from tkinter import ttk, filedialog, messagebox
 from app_settings import PALETTES, apply_appearance, read_settings, update_settings, settings_location, seed_user_data, rebase_local_fonts, sync_appearance, canva_page_cache_fallback_path
 from desktop_ui import icon_button, icon_menu, DarkPopupMenu, add_theme_menu, set_window_icon, ToolTip, bind_scale_wheel
 from template_translation import DEFAULT_LANGUAGE, LANGUAGES, LANGUAGE_CODES
+from core.media_runtime import media_binary
 
 _drive_guard = threading.Lock()
 _drive_locks = {}
@@ -3492,7 +3493,7 @@ class App:
                                       on_retry=retry_status, on_wait=waiting_status,
                                       max_bytes=min(2 * 1024 * 1024 * 1024,batch_limit-downloaded_bytes),
                                       browser_auth=browser_auth,
-                                      ffprobe=self.resource_dir / 'ffmpeg' / 'ffprobe.exe'):
+                                      ffprobe=media_binary(self.resource_dir, 'ffprobe')):
                             skipped += 1
                         else:
                             output_name=video_output_filename(filename)

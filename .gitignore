@@ -2,6 +2,9 @@
 .build/
 release/
 core/editor_runtime/node_modules/
+.env
+.env.*
+!.env.example
 /版本备份/
 __pycache__/
 core/__pycache__/

@@ -1,3 +1,26 @@
+      if ($('renameCurrentProject')) $('renameCurrentProject').onclick = async () => {
+        const id=state.projectId;
+        if (!id) return;
+        const input=await openRenameProjectDialog(state.projectName || '未命名工程');
+        if (input===null) return;
+        const name=input.trim().slice(0,80);
+        if (!name) { toast('工程名称不能为空'); return; }
+        const button=$('renameCurrentProject'); button.disabled=true;
+        try {
+          await flushAutoSave();
+          if (state.projectId!==id) return;
+          const result=await nativeCall('renameProject',{projectId:id,name});
+          if (state.projectId===id) {
+            state.projectName=result.name;
+            $('projectName').textContent=result.name;
+            $('projectName').title=result.name;
+            queueAutosave();
+          }
+          window.__projectItems=(window.__projectItems || []).map(item=>item.id===id?{...item,name:result.name}:item);
+          toast('工程名称已修改');
+        } catch(error) {toast(error.message);}
+        finally {button.disabled=false;}
+      };
       renderRecognizedCopy();
       async function copyRecognizedText(id) {
         const field=$(id), text=String(field?.value || '');

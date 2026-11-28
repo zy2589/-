@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { applicationDataRoot } from './app-paths.mjs';
 const currentPrefix = 'DPAPI2:';
 const legacyPrefix = 'DPAPI1:';
+const macKeychainPrefix = 'KEYCHAIN1:';
 const currentEntropy = 'ClipAssistant/secrets/v2';
 const legacyEntropy = 'EditorAssistant/secrets/v1';
 const bundledCredentialNames = ['gemini-api-key.txt', 'deepgram-api-key.txt'];
@@ -84,9 +85,39 @@ function transform(mode, value, entropy = currentEntropy) {
   if (result.error || result.status !== 0) throw new Error('Windows 凭证保护不可用，未保存明文凭证。');
   return result.stdout;
 }
+function keychainAccount(file) {
+  return crypto.createHash('sha256').update(path.resolve(file)).digest('hex');
+}
+function macKeychain(mode, file, value = '') {
+  const helper = process.env.CLIPASSIST_KEYCHAIN_HELPER || path.resolve(
+    path.dirname(file), '..', 'runtime', 'keychain-helper',
+  );
+  if (!fs.existsSync(helper)) throw new Error('macOS 钥匙串保护组件不可用，未保存明文凭证。');
+  const result = spawnSync(helper, [mode, keychainAccount(file)], {
+    input: String(value), encoding: 'utf8', timeout: 15000, maxBuffer: 2 * 1024 * 1024,
+  });
+  if (result.error || result.status !== 0)
+    throw new Error('macOS 钥匙串操作失败，未保存明文凭证。');
+  return result.stdout || '';
+}
 export function writeProtectedSecret(file, value) {
   try { seedBundledCredentials(file); } catch { /* bundled credentials are optional */ }
-  if (!value) { fs.rmSync(file, {force:true}); cache.delete(file); return; }
+  if (!value) {
+    if (process.platform === 'darwin') macKeychain('delete', file);
+    fs.rmSync(file, {force:true}); cache.delete(file); return;
+  }
+  if (process.platform === 'darwin') {
+    const account = keychainAccount(file);
+    macKeychain('set', file, String(value));
+    fs.mkdirSync(path.dirname(file), {recursive:true, mode:0o700});
+    const temporary = `${file}.${crypto.randomUUID()}.tmp`;
+    try {
+      fs.writeFileSync(temporary, `${macKeychainPrefix}${account}\n`, {encoding:'utf8',mode:0o600,flag:'wx'});
+      fs.renameSync(temporary,file);
+    } finally { fs.rmSync(temporary,{force:true}); }
+    cache.delete(file);
+    return;
+  }
   const stored = `${currentPrefix}${transform('protect', String(value), currentEntropy).trim()}`;
   fs.mkdirSync(path.dirname(file), {recursive:true});
   const temporary = `${file}.${crypto.randomUUID()}.tmp`;
@@ -99,7 +130,19 @@ export function readProtectedSecret(file) {
   if (!fs.existsSync(file)) { cache.delete(file); return ''; }
   const stored = fs.readFileSync(file,'utf8').trim();
   if (!stored) return '';
+  if (process.platform === 'darwin' && stored.startsWith(macKeychainPrefix)) {
+    const account = stored.slice(macKeychainPrefix.length);
+    if (!/^[a-f0-9]{64}$/.test(account) || account !== keychainAccount(file))
+      throw new Error('macOS 钥匙串凭证索引无效，未加载凭证。');
+    const saved = cache.get(file);
+    if (saved?.stored === stored) return saved.value;
+    const value = macKeychain('get', file).replace(/\r?\n$/, '');
+    cache.set(file, {stored,value});
+    return value;
+  }
   if (stored.startsWith(currentPrefix)) {
+    if (process.platform === 'darwin')
+      throw new Error('此凭证由另一台 Windows 设备保护，无法在 Mac 解密；请在 Mac 重新输入。');
     const saved = cache.get(file);
     if (saved?.stored === stored) return saved.value;
     const value = transform('unprotect', stored.slice(currentPrefix.length), currentEntropy);
@@ -107,6 +150,8 @@ export function readProtectedSecret(file) {
     return value;
   }
   if (stored.startsWith(legacyPrefix)) {
+    if (process.platform === 'darwin')
+      throw new Error('此凭证由另一台 Windows 设备保护，无法在 Mac 解密；请在 Mac 重新输入。');
     const value = transform('unprotect', stored.slice(legacyPrefix.length), legacyEntropy);
     try { writeProtectedSecret(file, value); } catch { /* retain the readable existing credential */ }
     return value;
@@ -121,6 +166,11 @@ export function readProtectedSecret(file) {
       // Preserve the legacy file, but do not silently use it without DPAPI.
       throw new Error('Windows 凭证保护不可用，未加载未保护的凭证；现有凭证文件已保留。');
     }
+  }
+  if (process.platform === 'darwin') {
+    // Migrate an old non-Windows plaintext credential to Keychain on first use.
+    writeProtectedSecret(file, stored);
+    return stored;
   }
   return stored;
 }

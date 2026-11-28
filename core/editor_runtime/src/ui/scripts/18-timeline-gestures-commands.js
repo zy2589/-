@@ -440,8 +440,11 @@ function scaleTimelineClipGeometry(ratio) {
         }
         const insertReview = e.target.closest("[data-insert-review]");
         if (insertReview) {
-          seekTimeline(state.reviewCaptions.find(item => item.id === insertReview.dataset.insertReview)?.start || state.currentTime || 0);
-          showReviewDetails(insertReview.dataset.insertReview);
+          if (isTrackLocked("review")) {
+            toast("待处理片段轨道已锁定");
+            return;
+          }
+          insertReviewSegment(insertReview.dataset.insertReview);
           e.preventDefault();
           e.stopPropagation();
           return;
@@ -480,10 +483,10 @@ function scaleTimelineClipGeometry(ratio) {
         const clip = e.target.closest(".clip");
         if (clip) {
           timelineGapSelection = null;
-          if (clip.dataset.type === 'review') {
+          if (clip.dataset.type === 'review' && editTool !== 'blade' && !e.target.closest('[data-trim]') &&
+              !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
             showReviewDetails(clip.dataset.id);
             e.preventDefault();
-            e.stopPropagation();
             return;
           }
           if (editTool === "blade") {
@@ -1147,8 +1150,6 @@ function scaleTimelineClipGeometry(ratio) {
               const length = item.originEnd - item.originStart;
               item.obj.start = item.originStart + appliedDelta;
               item.obj.end = item.obj.start + length;
-              if (item.type === "caption" || item.type === "review")
-                shiftCaptionWordTimes(item.obj, appliedDelta);
               updateTimelineClipGeometry(item.type, item.id, item.obj);
             }
           }
@@ -1172,16 +1173,6 @@ function scaleTimelineClipGeometry(ratio) {
       document.addEventListener('pointerup',()=>flushTimelinePointerMove(false),true);
       document.addEventListener("pointerup", (e) => {
         if (timelineDrag?.pointer === e.pointerId) {
-          const drag = timelineDrag;
-          let captionReviewToOpen = null;
-          if (drag.element?.dataset.type === "caption" && !drag.trim && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey &&
-              Math.hypot(e.clientX - Number(drag.startX || e.clientX), e.clientY - Number(drag.startY || e.clientY)) <= 3) {
-            const caption = state.captions.find(item => item.id === drag.element.dataset.id);
-            if (caption) captionReviewToOpen = state.reviewCaptions.find(item =>
-              (!item.captionTrackId || item.captionTrackId === (caption.trackId || "caption")) &&
-              (!item.ownerClipId || !caption.ownerClipId || item.ownerClipId === caption.ownerClipId) &&
-              Number(item.start) < Number(caption.end) && Number(item.end) > Number(caption.start)) || null;
-          }
           const collapseSelectedCaption = shouldCollapseSelectedCaptionOnClick(timelineDrag, e);
           hideTrimAudioDetail();
           hideSnapGuide();
@@ -1443,10 +1434,6 @@ function scaleTimelineClipGeometry(ratio) {
           updateInspector();
           timelineDrag = null;
           queueAutosave();
-          if (captionReviewToOpen) {
-            seekTimeline(captionReviewToOpen.start);
-            showReviewDetails(captionReviewToOpen.id);
-          }
         }
         if (objectDrag?.pointer === e.pointerId) {
           if (objectDrag.framePending) cancelAnimationFrame(objectDrag.framePending);
@@ -2016,14 +2003,7 @@ function scaleTimelineClipGeometry(ratio) {
         "lineHeight",
         "fontColor",
         "highlightColor",
-        "highlightStyle",
         "highlightEnabled",
-        "highlightBlockWidth",
-        "highlightBlockHeight",
-        "highlightBlockScale",
-        "highlightBlockX",
-        "highlightBlockY",
-        "highlightBlockRadius",
         "strokeColor",
         "stroke",
         "shadowColor",
@@ -2058,22 +2038,7 @@ function scaleTimelineClipGeometry(ratio) {
           s.color = $("fontColor").value;
           s.highlight = $("highlightColor").value;
           s.highlightColor = $("highlightColor").value;
-          s.highlightStyle = $("highlightStyle").value === "block" ? "block" : "text";
           s.highlightEnabled = $("highlightEnabled").checked;
-          s.highlightBlockWidth = Number($("highlightBlockWidth").value);
-          s.highlightBlockHeight = Number($("highlightBlockHeight").value);
-          s.highlightBlockScale = Number($("highlightBlockScale").value) / 100;
-          s.highlightBlockX = Number($("highlightBlockX").value);
-          s.highlightBlockY = Number($("highlightBlockY").value);
-          s.highlightBlockRadius = Number($("highlightBlockRadius").value);
-          const blockControls = $("highlightBlockControls");
-          if (blockControls) blockControls.style.display = s.highlightStyle === "block" && s.highlightEnabled ? "" : "none";
-          $("highlightBlockWidthOut").textContent = s.highlightBlockWidth;
-          $("highlightBlockHeightOut").textContent = s.highlightBlockHeight;
-          $("highlightBlockScaleOut").textContent = `${Math.round(s.highlightBlockScale * 100)}%`;
-          $("highlightBlockXOut").textContent = s.highlightBlockX;
-          $("highlightBlockYOut").textContent = s.highlightBlockY;
-          $("highlightBlockRadiusOut").textContent = s.highlightBlockRadius;
           s.strokeColor = $("strokeColor").value;
           s.stroke = Number($("stroke").value);
           s.shadowColor = $("shadowColor").value;

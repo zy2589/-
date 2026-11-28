@@ -21,34 +21,6 @@ export function mergeCaptionPhraseReviews(captions, reviews) {
     for(const {word} of group){word.issueId=review.issueId||review.id;word.acronymReviewId=word.issueId;word.issueType='mismatch';word.referenceExpected=review.expectedText;word.expectedDisplay=review.expectedText;}
     Object.assign(review,{start:group[0].word.start,end:group.at(-1).word.end,sourceStart:group[0].word.sourceStart,sourceEnd:group.at(-1).word.sourceEnd,spokenText:group.map(e=>e.word.recognizedDisplay||e.word.originalDisplay||e.word.display).join(' '),captionCorrectionReview:true});
   }
-  // A single alignment issue can be mapped to multiple word-sized review clips.
-  // Keep those adjacent fragments as one actionable review item, so navigation
-  // and dismiss/replace actions do not present the same issue more than once.
-  const mismatchFragments = result.filter(r=>r.type==='mismatch' && (r.issueId || r.id)).sort((a,b)=>a.start-b.start);
-  for (let i=0;i<mismatchFragments.length;i++) {
-    const first=mismatchFragments[i]; if (!result.includes(first)) continue;
-    const issueId=String(first.issueId || first.id);
-    for (let j=i+1;j<mismatchFragments.length;j++) {
-      const next=mismatchFragments[j]; if (!result.includes(next)) continue;
-      if (Number(next.start)-Number(first.end)>.12) break;
-      if (String(next.issueId || next.id)!==issueId || key(next.expectedText)!==key(first.expectedText) ||
-          key(next.spokenText)!==key(first.spokenText)) continue;
-      if (['captionTrackId','sourceMediaId','transcriptId'].some(field=>String(next[field]||'')!==String(first[field]||''))) continue;
-      const nextOwner=String(next.ownerClipId||''), firstOwner=String(first.ownerClipId||'');
-      if (nextOwner && firstOwner && nextOwner!==firstOwner) continue;
-      first.start=Math.min(Number(first.start),Number(next.start));
-      first.end=Math.max(Number(first.end),Number(next.end));
-      if (Number.isFinite(Number(next.sourceStart))) first.sourceStart=Math.min(Number(first.sourceStart??next.sourceStart),Number(next.sourceStart));
-      if (Number.isFinite(Number(next.sourceEnd))) first.sourceEnd=Math.max(Number(first.sourceEnd??next.sourceEnd),Number(next.sourceEnd));
-      const words=[...(first.words||[]),...(next.words||[])].sort((a,b)=>Number(a.start)-Number(b.start));
-      first.words=[...new Map(words.map(word=>[`${word.start}:${word.end}:${word.display||word.text||''}`,word])).values()];
-      first.text=String(first.spokenText||first.text||'').trim();
-      if (!first.ownerClipId) first.ownerClipId=next.ownerClipId;
-      if (!first.ownerClipType) first.ownerClipType=next.ownerClipType;
-      aliases.set(String(next.id||''),issueId);
-      result.splice(result.indexOf(next),1);
-    }
-  }
   const sorted = result.filter(r => r.type === 'mismatch').sort((a,b)=>a.start-b.start);
   for (let i=0;i<sorted.length;i++) {
     const first=sorted[i]; if (!result.includes(first)) continue;

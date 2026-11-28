@@ -8,19 +8,6 @@ export function surplusTakeIssues(operations=[]){
  const tokens=spoken.map(o=>norm(o.spoken)),seen=new Map(),candidates=[];
  const same=(a,b)=>a===b || /^[a-z]+$/.test(a) && /^[a-z]+$/.test(b) && !captionReviewDiffers(a,b);
  const safeVariation=(a,b)=>/^[a-z]+$/.test(a) && /^[a-z]+$/.test(b) && ![a,b].some(w=>/^(?:no|not|never|without|cannot|cant|dont|wont)$/.test(w));
- const cardinalValues=new Map('zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty'.split(' ').map((word,index)=>[word,index]));
- const numberValue=word=>/^\d+$/.test(word)?Number(word):cardinalValues.get(word);
- const expectedSpan=(phrase,start,n)=>{
-  let spokenAt=0,expectedAt=start,changes=0;
-  while(spokenAt<n&&expectedAt<expected.length){
-   if(same(phrase[spokenAt],expected[expectedAt])){spokenAt++;expectedAt++;continue;}
-   const nextNumber=numberValue(phrase[spokenAt+1]||'');
-   if(phrase[spokenAt]==='number'&&spokenAt+1<n&&nextNumber!=null&&nextNumber===numberValue(expected[expectedAt])){spokenAt+=2;expectedAt++;continue;}
-   if(n>=12&&changes<2&&safeVariation(phrase[spokenAt],expected[expectedAt])){changes++;spokenAt++;expectedAt++;continue;}
-   return 0;
-  }
-  return spokenAt===n&&changes/n<=.1?expectedAt-start:0;
- };
  for(let i=0;i+6<=tokens.length;i++){
   const key=tokens.slice(i,i+6).join('|');if(!key.replaceAll('|',''))continue;
   const earlier=seen.get(key)||[];
@@ -40,19 +27,15 @@ export function surplusTakeIssues(operations=[]){
     break;
    }
    const first=j-left,second=i-left;n+=left;
-   // A repeated passage is a take only when the speaker restarts locally.
-   // Do not pair the same sentence across a separate thought or paragraph.
-   const interveningWords=second-first-n;
-   const silence=Number(spoken[second]?.spoken?.start)-Number(spoken[first+n-1]?.spoken?.end);
-   if(interveningWords<0||interveningWords>3||!Number.isFinite(silence)||silence>4)continue;
    if(changes && (n<12 || changes/n>.1))continue;
    if([first,second].every(at=>spoken.slice(at,at+n).every(o=>o.expected && same(norm(o.spoken),norm(o.expected)))))continue;
    const score=at=>spoken.slice(at,at+n).filter(o=>o.expected&&['match','near'].includes(o.type)).length;
    const referenceAt=score(first)>score(second)?first:second;
    const phrase=tokens.slice(referenceAt,referenceAt+n);let count=0;
-   for(let k=0;k<expected.length;){
-    const consumed=expectedSpan(phrase,k,n);
-    if(consumed){count++;k+=consumed;}else k++;
+   for(let k=0;k+n<=expected.length;k++){
+    let different=0;
+    const fits=phrase.every((t,x)=>same(t,expected[k+x]) || n>=12 && safeVariation(t,expected[k+x]) && ++different<=2);
+    if(fits && different/n<=.1){count++;k+=n-1;}
    }
    if(count!==1)continue;
    // A reread normally repairs the first take; review the earlier occurrence.

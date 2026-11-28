@@ -107,19 +107,6 @@ export function captionWrapLineLimit(value) {
   return 2;
 }
 
-export function captionEffectiveBoxWidth(boxWidth, lineMode = 2, canvasWidth = 0) {
-  const configuredWidth = Math.max(80, Number(boxWidth || 860));
-  const canvas = Number(canvasWidth || 0);
-  if (
-    captionWrapLineLimit(lineMode) !== 1 ||
-    !Number.isFinite(canvas) ||
-    canvas <= 0
-  ) {
-    return configuredWidth;
-  }
-  return Math.max(configuredWidth, canvas * 0.9);
-}
-
 export function captionMatchLineLimit(value) {
   return captionWrapLineLimit(value);
 }
@@ -275,14 +262,14 @@ export function packWordsIntoLines(words = [], style = {}, maxWidth = 860, scale
   return lines;
 }
 
-export function wrapCaptionWordList(words = [], style = {}, boxWidth = 860, lineMode = 2, scale = 1, canvasWidth = 0) {
+export function wrapCaptionWordList(words = [], style = {}, boxWidth = 860, lineMode = 2, scale = 1) {
   const displays = (words || [])
     .map((word) => (typeof word === "string" ? word : String(word?.display || "")).trim())
     .filter(Boolean);
   if (!displays.length) return [];
   // The selected line count is a layout target, not permission for text to
   // overflow the final line. Keep wrapping until every word fits its box.
-  const maxWidth = captionEffectiveBoxWidth(boxWidth, lineMode, canvasWidth);
+  const maxWidth = Math.max(80, Number(boxWidth || 860));
   const fontSize = Math.max(10, Number(style?.fontSize || 54) * Math.max(0.2, Number(scale || 1)));
   const lines = [];
   let start = 0;
@@ -301,22 +288,18 @@ export function wrapCaptionWordList(words = [], style = {}, boxWidth = 860, line
   return lines;
 }
 
-export function wrapWords(text, style, maxWidth, maxLines = 2, scale = 1, canvasWidth = 0) {
+export function wrapWords(text, style, maxWidth, maxLines = 2, scale = 1) {
   const words = String(text || "").split(/\s+/).filter(Boolean);
   if (!words.length) return [""];
-  return wrapCaptionWordList(words, style, maxWidth, maxLines, scale, canvasWidth).map((line) => line.join(" "));
+  return wrapCaptionWordList(words, style, maxWidth, maxLines, scale).map((line) => line.join(" "));
 }
 
 export function captionLayoutMetrics(caption, style, canvasWidth, layout = {}) {
   const scale = Math.max(0.2, Number(caption?.scale || 1));
   const widthScale = Math.max(0.5, Math.min(2.5, Number(style?.captionWidthScale || 1)));
+  const maxWidth = Math.max(160, Math.min(canvasWidth, Number(caption?.width || canvasWidth * 0.90 * widthScale)));
   const maxLines = captionWrapLineLimit(layout?.maxLines ?? style?.captionLines ?? 2);
-  const maxWidth = captionEffectiveBoxWidth(
-    Math.max(160, Math.min(canvasWidth, Number(caption?.width || canvasWidth * 0.90 * widthScale))),
-    maxLines,
-    canvasWidth,
-  );
-  const lines = wrapWords(caption?.text || "", style, maxWidth, maxLines, scale, canvasWidth);
+  const lines = wrapWords(caption?.text || "", style, maxWidth, maxLines, scale);
   return { scale, widthScale, maxWidth, maxLines, lines };
 }
 
@@ -417,11 +400,7 @@ export function layoutCaptionPaint(input = {}) {
   const configuredPadding = backgroundEnabled
     ? Math.max(0, Number(style.backgroundWidth ?? style.padding ?? 14) * scale)
     : 0;
-  const lineMode = input.lineMode ?? style.captionLines ?? 2;
-  const maxWidth = Math.max(
-    80,
-    captionEffectiveBoxWidth(input.boxWidth || 860, lineMode, input.canvasWidth) - configuredPadding * 2,
-  );
+  const maxWidth = Math.max(80, Number(input.boxWidth || 860) - configuredPadding * 2);
   let widths = items.map((item) => measure(item.display, item));
   const isZeroGapWord = (item) => /^[:;,.)!?]/.test(typeof item === "string" ? item : item?.display || "");
   const gapBefore = (index) => index > 0 && !isZeroGapWord(items[index]) ? gap : 0;

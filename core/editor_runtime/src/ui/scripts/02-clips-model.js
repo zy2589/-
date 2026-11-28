@@ -145,89 +145,14 @@ function baseMainClips() {
         captionInspectorKey = "";
         return dropped;
       }
-      function captionSourceOwner(caption) {
-        const ownerId = String(caption?.ownerClipId || "");
-        const clips = [
-          ...mainClips(),
-          ...(state.avLinked ? [] : mainAudioClips()),
-          ...(state.videoLayers || []),
-          ...(state.audioAssets || []),
-        ];
-        return clips.find((clip) => String(clip.id || "") === ownerId) || null;
-      }
-      function captionSourceRate(caption) {
-        const owner = captionSourceOwner(caption);
-        const timelineSpan = Number(owner?.end) - Number(owner?.start);
-        const sourceSpan = Number(owner?.sourceEnd) - Number(owner?.sourceStart);
-        return timelineSpan > 0 && sourceSpan > 0 ? sourceSpan / timelineSpan : 1;
-      }
-      function shiftCaptionWordTimes(caption, delta) {
-        if (!caption || !Array.isArray(caption.words) || !Number.isFinite(Number(delta))) return;
-        const amount = Number(delta);
-        const owner = captionSourceOwner(caption);
-        const rate = captionSourceRate(caption);
-        const sourceDelta = owner ? amount * rate : 0;
-        const timelineSpan = Number(owner?.end) - Number(owner?.start);
-        const sourceSpan = Number(owner?.sourceEnd) - Number(owner?.sourceStart);
-        const sourceAt = (time) => timelineSpan > 0 && sourceSpan > 0
-          ? Number(owner.sourceStart) + ((Number(time) - Number(owner.start)) / timelineSpan) * sourceSpan
-          : Number.NaN;
-        for (const word of caption.words) {
-          let sourceStart = word.sourceStart != null ? Number(word.sourceStart) : sourceAt(word.start);
-          let sourceEnd = word.sourceEnd != null ? Number(word.sourceEnd) : sourceAt(word.end);
-          if (Number.isFinite(Number(word.start))) word.start = Number(word.start) + amount;
-          if (Number.isFinite(Number(word.end))) word.end = Number(word.end) + amount;
-          if (Number.isFinite(sourceStart)) word.sourceStart = sourceStart + sourceDelta;
-          if (Number.isFinite(sourceEnd)) word.sourceEnd = sourceEnd + sourceDelta;
-        }
-        if (Number.isFinite(Number(caption.sourceStart))) caption.sourceStart = Number(caption.sourceStart) + sourceDelta;
-        if (Number.isFinite(Number(caption.sourceEnd))) caption.sourceEnd = Number(caption.sourceEnd) + sourceDelta;
-      }
       function clampCaptionWordsToBounds(caption) {
-        if (!caption || !Array.isArray(caption.words) || !caption.words.length) return;
-        const requestedStart = Number(caption.start || 0);
-        const requestedEnd = Math.max(requestedStart + 0.001, Number(caption.end || requestedStart));
-        const oldWords = caption.words;
-        const retainedIndexes = [];
-        const retained = oldWords.filter((word, index) => {
-          const keep = Number(word.end) > requestedStart && Number(word.start) < requestedEnd;
-          if (keep) retainedIndexes.push(index);
-          return keep;
+        if (!caption || !Array.isArray(caption.words)) return;
+        caption.words = caption.words.flatMap((word) => {
+          const start = Math.max(Number(caption.start), Number(word.start));
+          const end = Math.min(Number(caption.end), Number(word.end));
+          return end > start + 0.001 ? [{ ...word, start, end }] : [];
         });
-        if (!retained.length) {
-          caption.words = [];
-          caption.text = "";
-          caption.lineBreaks = [];
-          caption.lineCount = 1;
-          delete caption.sourceStart;
-          delete caption.sourceEnd;
-          return;
-        }
-        const owner = captionSourceOwner(caption);
-        const timelineSpan = Number(owner?.end) - Number(owner?.start);
-        const sourceSpan = Number(owner?.sourceEnd) - Number(owner?.sourceStart);
-        if (timelineSpan > 0 && sourceSpan > 0) {
-          const sourceAt = (time) => Number(owner.sourceStart) +
-            ((Number(time) - Number(owner.start)) / timelineSpan) * sourceSpan;
-          for (const word of retained) {
-            if (word.sourceStart == null || !Number.isFinite(Number(word.sourceStart))) word.sourceStart = sourceAt(word.start);
-            if (word.sourceEnd == null || !Number.isFinite(Number(word.sourceEnd))) word.sourceEnd = sourceAt(word.end);
-          }
-        }
-        const oldBreaks = Array.isArray(caption.lineBreaks) ? caption.lineBreaks.map(Number) : [];
-        caption.words = retained;
-        caption.start = Number(retained[0].start);
-        caption.end = Math.max(caption.start + 0.04, Number(retained.at(-1).end));
-        caption.text = joinCaptionWords(retained);
-        caption.lineBreaks = oldBreaks
-          .map((breakIndex) => retainedIndexes.filter((index) => index < breakIndex).length)
-          .filter((breakIndex, index, all) => breakIndex > 0 && breakIndex < caption.words.length && all.indexOf(breakIndex) === index);
-        caption.lineCount = Math.max(1, caption.lineBreaks.length + 1);
-        const first = retained[0], last = retained.at(-1);
-        if (first.sourceStart != null && Number.isFinite(Number(first.sourceStart))) caption.sourceStart = Number(first.sourceStart);
-        else delete caption.sourceStart;
-        if (last.sourceEnd != null && Number.isFinite(Number(last.sourceEnd))) caption.sourceEnd = Number(last.sourceEnd);
-        else delete caption.sourceEnd;
+        if (caption.words.length) caption.text = joinCaptionWords(caption.words);
       }
       function mainContentEnd() {
         if (!state.video) return 0;

@@ -56,6 +56,26 @@ test("local editor RPC requires the loopback host, origin, and session token", (
     method: "POST",
     headers: { host: `127.0.0.1:${port}`, origin: `http://127.0.0.1:${port}` },
   }, port, token).status, 403);
+  assert.equal(authorizeRequest({
+    url: "/rpc/ping",
+    method: "POST",
+    headers: {
+      host: `127.0.0.1:${port}`,
+      origin: `http://127.0.0.1:${port}`,
+      cookie: `clipassistant-session=${token}`,
+      "content-type": "application/json",
+    },
+  }, port, token).status, undefined);
+  assert.equal(authorizeRequest({
+    url: "/rpc/ping",
+    method: "POST",
+    headers: {
+      host: `127.0.0.1:${port}`,
+      origin: `http://127.0.0.1:${port}`,
+      cookie: `clipassistant-session=${token}; clipassistant-session=attacker`,
+      "content-type": "application/json",
+    },
+  }, port, token).status, 403);
 });
 
 test("request framing rejects conflicting or malformed lengths", () => {

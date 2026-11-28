@@ -736,7 +736,6 @@ async function placeLibraryAsset(
             if (spliceStyle?.clipPath) element.style.clipPath = spliceStyle.clipPath;
           }
           updatePreviewTransformOnly(false);
-          if (!state.playing) window.requestMltTimelinePreview?.(state.currentTime);
           return;
         }
         const retainedVideos = new Map(
@@ -968,8 +967,6 @@ async function placeLibraryAsset(
           "--active",
           state.captionStyle.highlight || "#ffd21f",
         );
-        preview.style.setProperty("--stroke-color", state.captionStyle.strokeColor || "#000000");
-        preview.dataset.highlightStyle = state.captionStyle.highlightStyle === "block" ? "block" : "text";
         preview.classList.toggle("no-highlight", state.captionStyle.highlightEnabled === false);
         const captionTransform = `translate(calc(-50% + ${state.captionTransform.x * px}px),calc(-50% + ${state.captionTransform.y * py}px)) scale(${state.captionTransform.scale || 1})`;
         preview.style.transform = captionTransform;
@@ -990,7 +987,6 @@ async function placeLibraryAsset(
         reviewPreview.style.transform = reviewTransform(px, py);
         previewSceneKey = sceneKey;
         updateSelectionBox();
-        if (!state.playing) window.requestMltTimelinePreview?.(state.currentTime);
       }
       let captionPaintState = { key: "", layout: null, style: null, pad: 0, caption: null };
       

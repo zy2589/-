@@ -11,6 +11,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Callable
+from core.media_runtime import media_binary
 
 
 FPS = 30
@@ -257,8 +258,8 @@ def transcode_mp4(video: Path, *, resource_dir: Path, cancel=None,
     staged MP4 passes validation.
     """
     video = Path(video)
-    ffmpeg = Path(resource_dir) / "ffmpeg" / "ffmpeg.exe"
-    ffprobe = Path(resource_dir) / "ffmpeg" / "ffprobe.exe"
+    ffmpeg = media_binary(Path(resource_dir), "ffmpeg")
+    ffprobe = media_binary(Path(resource_dir), "ffprobe")
     if not video.is_file():
         raise RuntimeError(f"转码源文件不存在：{video.name}")
     if not ffmpeg.is_file() or not ffprobe.is_file():

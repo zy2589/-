@@ -2,10 +2,13 @@ yt-dlp==2026.7.4
 gdown==6.4.1
 Pillow==13.0.0
 numpy==2.5.4
-onnxruntime-gpu[cuda,cudnn]==1.30.0
+onnxruntime-gpu[cuda,cudnn]==1.31.1; sys_platform == "win32"
+onnxruntime==1.31.1; sys_platform == "darwin"
 tkinterdnd2==0.6.3
 pyinstaller==6.22.3
-pythonnet==3.1.0
+pythonnet==3.1.0; sys_platform == "win32"
+pyobjc-framework-Cocoa==13.0; sys_platform == "darwin"
+pyobjc-framework-WebKit==13.0; sys_platform == "darwin"
 requests>=2.32.2
 urllib3>=2.8.0
 certifi>=2026.10.19

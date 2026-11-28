@@ -12,6 +12,8 @@ def settings_location():
     configured = os.environ.get('VIDEO_DOWNLOADER_DATA_DIR')
     if configured:
         return Path(configured) / 'settings.json'
+    if sys.platform == 'darwin':
+        return Path.home() / 'Library' / 'Application Support' / '剪辑助手' / 'Downloader' / 'settings.json'
     directory = Path(__file__).parent
     if getattr(sys, 'frozen', False):
         directory = Path(sys.executable).parent
@@ -23,16 +25,18 @@ def settings_location():
 def global_template_fallback_path():
     """Store only the shared visual style in writable per-user app data if Documents is blocked."""
     local_app_data = os.environ.get('LOCALAPPDATA')
-    if not local_app_data:
-        return None
+    if not local_app_data and sys.platform == 'darwin':
+        local_app_data = str(Path.home() / 'Library' / 'Application Support' / 'ClipAssistant')
+    if not local_app_data: return None
     return Path(local_app_data) / 'ClipAssistant' / 'Downloader' / 'global-template.json'
 
 
 def canva_page_cache_fallback_path():
     """Store the private page cache in writable per-user data when Documents is protected."""
     local_app_data = os.environ.get('LOCALAPPDATA')
-    if not local_app_data:
-        return None
+    if not local_app_data and sys.platform == 'darwin':
+        local_app_data = str(Path.home() / 'Library' / 'Application Support' / 'ClipAssistant')
+    if not local_app_data: return None
     return Path(local_app_data) / 'ClipAssistant' / 'Downloader' / 'canva-page-audit.json'
 
 

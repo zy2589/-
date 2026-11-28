@@ -1301,7 +1301,7 @@
         for (const [day, projects] of groups.entries()) {
           template.innerHTML = `<section class="projectday"><div class="projectdayhead"><span>📁 ${escapeHtml(day)}</span><span class="small">${projects.length} 个工程</span></div><div class="projectdaygrid">${projects.map(
             (item) =>
-            `<div class="projectcard" data-project-id="${item.id}" tabindex="0">${homeSelectionMode ? `<input type="checkbox" data-select-project="${item.id}" aria-label="选择 ${escapeHtml(item.name)}" style="position:absolute;top:10px;left:10px;z-index:3;width:18px;height:18px;accent-color:#df6666">` : `<button type="button" class="projectrename" data-rename-project="${item.id}" title="重命名工程" aria-label="重命名工程">✎</button><button type="button" class="projectdelete" data-delete-project="${item.id}" title="删除工程" aria-label="删除工程">×</button>`}<div class="projectthumb">${item.thumbnailUrl ? `<img loading="lazy" decoding="async" src="${escapeHtml(item.thumbnailUrl)}" alt="工程预览" data-hide-on-error>` : escapeHtml(item.ratio || "9:16")}</div><b class="ellipsis" title="${escapeHtml(item.name || "未命名工程")}">${escapeHtml(item.name || "未命名工程")}</b><div class="projectmeta ellipsis">${escapeHtml(item.videoName || "尚未导入视频")}</div><div class="projectmeta">更新于 ${projectDate(item.updatedAt)}</div></div>`,
+            `<div class="projectcard" data-project-id="${escapeHtml(item.id)}" tabindex="0">${homeSelectionMode ? `<input type="checkbox" data-select-project="${escapeHtml(item.id)}" aria-label="选择 ${escapeHtml(item.name)}" style="position:absolute;top:10px;left:10px;z-index:3;width:18px;height:18px;accent-color:#df6666">` : `<button type="button" class="projectrename" data-rename-project="${escapeHtml(item.id)}" title="重命名工程" aria-label="重命名工程">✎</button><button type="button" class="projectdelete" data-delete-project="${escapeHtml(item.id)}" title="删除工程" aria-label="删除工程">×</button>`}<div class="projectthumb">${item.thumbnailUrl ? `<img loading="lazy" decoding="async" src="${escapeHtml(item.thumbnailUrl)}" alt="工程预览" data-hide-on-error>` : escapeHtml(item.ratio || "9:16")}</div><b class="ellipsis" title="${escapeHtml(item.name || "未命名工程")}">${escapeHtml(item.name || "未命名工程")}</b><div class="projectmeta ellipsis">${escapeHtml(item.videoName || "尚未导入视频")}</div><div class="projectmeta">更新于 ${projectDate(item.updatedAt)}</div></div>`,
           ).join("")}</div></section>`;
           fragment.appendChild(template.content.firstElementChild);
         }
@@ -1835,8 +1835,8 @@
         };
         const spoken = short(item.spokenText || item.spoken || item.text);
         const expected = short(item.expectedText);
-        const kind = item.type === 'unverifiedAddition' ? '额外口语已加入' : item.type === 'repeat' ? '疑似重复' : item.type === 'missing' || item.action === 'missing'
-          ? item.confirmedMissing ? '文案缺读（已确认）' : '文案词待核实' : ['addition','extra'].includes(item.type) ? '疑似多读' : '疑似读错';
+        const kind = item.type === 'repeat' ? '疑似重复' : item.type === 'missing' || item.action === 'missing'
+          ? '疑似漏读' : ['addition','extra'].includes(item.type) ? '疑似多读' : '疑似读错';
         if (item.type !== 'mismatch') return `${kind}\n${item.type === 'missing' || item.action === 'missing' ? expected || '需试听核对' : spoken || '需试听核对'}`;
         const left = String(item.spokenText || item.spoken || '').trim().split(/\s+/).filter(Boolean);
         const right = String(item.expectedText || '').trim().split(/\s+/).filter(Boolean);
@@ -1848,23 +1848,26 @@
         const spoken = String(item.spokenText || item.spoken || '').replace(/^\s*[—-]\s*$/, '').trim();
         const expected = String(item.expectedText || "").replace(/^\s*[—-]\s*$/, "").trim();
         if (item.type === 'mismatch') {
-          return `识别文案：${item.spokenPhrase || spoken || '未识别到'}\n正确文案：${item.expectedPhrase || expected || '无对应内容'}`;
+          const meaningLabel = item.meaningMode === 'dictionary' ? '词义参考' : '中文';
+          const lines = [`识别：${item.spokenPhrase || spoken || '未识别到'}`];
+          if (item.spokenZh) lines.push(`${meaningLabel}：${item.spokenZh}`);
+          lines.push(`正确：${item.expectedPhrase || expected || '无对应内容'}`);
+          if (item.expectedZh) lines.push(`${meaningLabel}：${item.expectedZh}`);
+          return lines.join("\n");
         }
-        if(item.type==='repeat') return `识别文案：${spoken || '未识别到'}\n试听确认后，可删除这段重复口播及对应音视频。`;
-        if(item.type==='unverifiedAddition') return `识别文案：${spoken || '未识别到'}\n已自动加入主字幕预览；试听后可确认保留，或删除对应音视频片段。`;
-        const kind = item.type === 'unverifiedAddition'
-          ? '文案外口语待确认'
-          : item.scripture
+        if(item.type==='repeat') return `疑似重复\n识别：${spoken || '未识别到'}\n请试听核对是否仍有两次相邻口播。`;
+        const kind =
+          item.scripture
             ? "📖 经文差异，请自行核对（不影响导出）"
             : item.type === "repeat"
-              ? "重复阅读"
-              : item.type === "missing" || item.action === "missing"
-                ? item.confirmedMissing ? "已确认录音未读出" : "未识别到，待试听确认是否漏读"
-                : ['addition','extra'].includes(item.type)
-                  ? "识别多出，文案无对应内容"
-                  : "用词不一致，需试听核对";
+            ? "重复阅读"
+            : item.type === "missing" || item.action === "missing"
+            ? item.needsAudioReview ? "未识别到，需试听核对" : "疑似漏读，需试听核对"
+            : ['addition','extra'].includes(item.type)
+              ? "识别多出，文案无对应内容"
+              : "用词不一致，需试听核对";
         const reason = item.type === 'missing' || item.action === 'missing'
-          ? item.confirmedMissing ? '已确认录音没有读出这段文案；紫色表示确实缺读。' : '文案有这段内容，但识别结果没有找到对应口播；黄色表示需要试听确认是识别遗漏还是真正缺读。'
+          ? '识别结果缺少这段内容，可能漏读或识别遗漏；试听后确认。'
           : item.type === 'mismatch'
             ? '识别内容与此位置的文案不一致，可能读法、识别或对齐有误；核对后再修改。'
             : ['addition','extra'].includes(item.type)
@@ -1874,7 +1877,7 @@
       }
       function repairScriptDifferenceLinks() {
         state.reviewCaptions = (state.reviewCaptions || [])
-          .filter((item) => ["missing","repeat","mismatch","addition","extra","unverifiedAddition"].includes(item.type))
+          .filter((item) => ["missing","repeat","mismatch","addition","extra"].includes(item.type))
           .filter((item) =>
             item.action === "cut" ||
             item.type === "missing" ||
@@ -1883,7 +1886,7 @@
           .map((item) => ({
             ...item,
             text: reviewClipText(item),
-            action: item.type === "missing" ? "missing" : item.type === "repeat" ? "review" : item.type === "unverifiedAddition" || item.unverifiedAddition ? "insert" : "replace",
+            action: item.type === "missing" ? "missing" : item.type === "repeat" ? "review" : "replace",
           }));
         for (const caption of state.captions || [])
           for (const word of caption.words || []) {

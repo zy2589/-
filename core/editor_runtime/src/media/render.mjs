@@ -297,7 +297,7 @@ export function colorAdjustmentsAreDefault(color = {}) {
 export function buildExportGraph(config, info) {
   const width = Math.max(320, Math.round(config.width || 1080));
   const height = Math.max(320, Math.round(config.height || 1920));
-  let fps = Math.max(1, Math.min(240, Number(config.fps || 30)));
+  const fps = Math.max(1, Math.min(240, Number(config.fps || 30)));
   const segments = keptSegments(info.duration, config.removals || []);
   if (!segments.length && !(config.videoLayers||[]).length && !(config.images||[]).length) throw new Error("所有视频内容都被删除了，无法导出。");
   const graph = [];
@@ -321,7 +321,7 @@ export function buildExportGraph(config, info) {
   // Keep adjacent edit boundaries on the output frame grid. Tiny sub-frame gaps
   // caused by speed conversion / floating-point rounding must never expose the
   // black composition canvas between two clips. Preserve deliberate gaps.
-  let frameDuration = 1 / fps;
+  const frameDuration = 1 / fps;
   // Normalize all edit points on one integer frame grid. Pause-cut can create a
   // very large number of adjacent clips; speed conversion then leaves tiny
   // floating-point gaps unless every boundary is derived from frame numbers.
@@ -333,8 +333,6 @@ export function buildExportGraph(config, info) {
       ? config.mainAudioClips
       : rawMainVideoClips,
   }, info));
-  fps = manifest.fps;
-  frameDuration = manifest.frameDuration;
   const mainVideoClips = manifest.video;
   // The muxer, video graph and audio graph must stop on the same output-frame
   // boundary. A fractional -t that falls between frames can otherwise request

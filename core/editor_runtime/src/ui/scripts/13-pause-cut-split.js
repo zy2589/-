@@ -743,8 +743,7 @@
           .filter((hole) => hole && hole.end > hole.start + 0.001)
           .sort((a, b) => b.start - a.start);
         for (const clip of selectedMainClips) {
-          const dismissed = dismissTrimmedIssues(clip.start, clip.end) || [];
-          if (dismissed.length && typeof deleteSelected.onDismissIssues === "function") deleteSelected.onDismissIssues(dismissed);
+          dismissTrimmedIssues(clip.start, clip.end);
           state.removals.push({
             start: clip.sourceStart,
             end: clip.sourceEnd,
@@ -759,10 +758,7 @@
         );
         for (const clip of audioOnly) {
           state.audioMutes.push({ start: clip.start, end: clip.end });
-          if (ripple) {
-            const dismissed = rippleSubtitleTimeline(clip.start, clip.end) || [];
-            if (dismissed.length && typeof deleteSelected.onDismissIssues === "function") deleteSelected.onDismissIssues(dismissed);
-          }
+          if (ripple) rippleSubtitleTimeline(clip.start, clip.end);
         }
         const layerIds = ids("videolayer");
         const audioAssetIds = ids("audioasset");
@@ -826,10 +822,7 @@
         const keptArchiveIndexes=new Set(archiveDeletion.captions.map(entry=>Number(entry.id)));
         state.captionRecoveryArchive=archiveRecords.filter((record,index)=>
           keptArchiveIndexes.has(index)&&!selectedCaptionIds.has(record?.caption?.id));
-        for (const clip of removedMedia) {
-          const dismissed = dismissTrimmedIssues(clip.start, clip.end, removedOwners) || [];
-          if (dismissed.length && typeof deleteSelected.onDismissIssues === "function") deleteSelected.onDismissIssues(dismissed);
-        }
+        for (const clip of removedMedia) dismissTrimmedIssues(clip.start, clip.end, removedOwners);
         const keep = (type) => (item) => !ids(type).has(item.id);
         state.videoLayers = state.videoLayers.filter((item) => !layerIds.has(item.id));
         state.audioAssets = state.audioAssets.filter((item) => !audioAssetIds.has(item.id));
@@ -890,11 +883,8 @@
           ? { type: "video", id: "main" }
           : { type: "", id: "" };
         seekTimeline(Math.min(state.currentTime, state.duration));
-        if (!deleteSelected.deferRender) {
-          renderAll();
-          toast(`已删除 ${selected.length} 个所选片段${selected.length < requested.length ? "；锁定轨道已跳过" : ""}${ripple ? "，并前移启用联动的轨道" : ""}`);
-        }
-        return true;
+        renderAll();
+        toast(`已删除 ${selected.length} 个所选片段${selected.length < requested.length ? "；锁定轨道已跳过" : ""}${ripple ? "，并前移启用联动的轨道" : ""}`);
       }
       function shiftTracks(at, len) {
         rippleShiftAllTracks(state,at+len,-len);

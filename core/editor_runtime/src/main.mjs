@@ -416,6 +416,13 @@ function startAssetServer() {
       if (request.method === "GET" && (requestUrl.pathname === "/" || requestUrl.pathname === "/index.html")) {
         response.setHeader("Content-Type", "text/html; charset=utf-8");
         response.setHeader("Cache-Control", "no-store");
+        // WKWebView cannot add a custom authorization header to every
+        // subresource. A native-only bootstrap request may establish an
+        // HttpOnly, same-site cookie; all later requests still pass the same
+        // constant-time session-token check in authorizeRequest().
+        if (request.headers["x-editor-session"] === sessionToken) {
+          response.setHeader("Set-Cookie", `clipassistant-session=${sessionToken}; HttpOnly; SameSite=Strict; Path=/; Max-Age=3600`);
+        }
         response.writeHead(200);
         try {
           const freshHtml = fs.readFileSync(path.join(currentDir, "ui.html"), "utf8")
@@ -499,7 +506,21 @@ const filterPreviewPath = path.resolve(
 const filterPreviewUrl = fs.existsSync(filterPreviewPath)
   ? registerAsset(filterPreviewPath).url
   : "";
-const bridgeScript = `<script>window.ClipAssistantPresetSafety = {sanitizePresetStyle: ${sanitizePresetStyle.toString()}, sanitizeSvgPaint: ${sanitizeSvgPaint.toString()}};
+const macOSBridgeBootstrap = process.env.CLIPASSIST_DESKTOP_PLATFORM === "macos" ? `
+  window.chrome = window.chrome || {};
+  const nativeMessageListeners = new Set();
+  window.chrome.webview = {
+    postMessage: message => window.webkit.messageHandlers.clipassistant.postMessage(message),
+    addEventListener: (type, listener) => { if (type === 'message' && typeof listener === 'function') nativeMessageListeners.add(listener); },
+    removeEventListener: (type, listener) => { if (type === 'message') nativeMessageListeners.delete(listener); },
+  };
+  window.__clipAssistantReceive = message => {
+    const event = {data: message};
+    for (const listener of [...nativeMessageListeners]) { try { listener(event); } catch (error) { console.error(error); } }
+  };
+` : "";
+const bridgeScript = `<script>${macOSBridgeBootstrap}
+window.ClipAssistantPresetSafety = {sanitizePresetStyle: ${sanitizePresetStyle.toString()}, sanitizeSvgPaint: ${sanitizeSvgPaint.toString()}};
 (() => {
   ${fs.readFileSync(path.join(currentDir,"large-json-codec.mjs"),"utf8").replace(/^export /gm, "")}
   const rpc = async (name, args) => {

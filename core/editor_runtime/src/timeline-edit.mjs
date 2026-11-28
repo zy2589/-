@@ -127,43 +127,15 @@ export function joinCaptionWords(words) {
 
 export function splitTimedItem(item, time, nextId) {
   if (!item || !playheadInside(item, time)) return null;
-  const left = { ...item };
-  const right = { ...item, id: nextId };
+  const left = { ...item, end: time };
+  const right = { ...item, id: nextId, start: time };
   if (Array.isArray(item.words) && item.words.length) {
-    const leftIndexes = [], rightIndexes = [];
-    item.words.forEach((word, index) => {
-      const start = Number(word.start), end = Number(word.end);
-      if (!(end > start)) return;
-      ((start + end) / 2 < Number(time) ? leftIndexes : rightIndexes).push(index);
-    });
-    if (!leftIndexes.length || !rightIndexes.length) return null;
-    const setPart = (part, indexes) => {
-      part.words = indexes.map(index => ({ ...item.words[index] }));
-      part.start = Number(part.words[0].start);
-      part.end = Math.max(part.start + 0.04, Number(part.words.at(-1).end));
+    for (const part of [left, right]) {
+      part.words = item.words.filter(word => Number(word.start) < part.end && Number(word.end) > part.start)
+        .map(word => ({ ...word, start: Math.max(part.start, Number(word.start)), end: Math.min(part.end, Number(word.end)) }));
       part.text = joinCaptionWords(part.words);
-      const firstSource = Number(part.words[0].sourceStart);
-      const lastSource = Number(part.words.at(-1).sourceEnd);
-      if (part.words[0].sourceStart != null && Number.isFinite(firstSource)) part.sourceStart = firstSource;
-      if (part.words.at(-1).sourceEnd != null && Number.isFinite(lastSource)) part.sourceEnd = lastSource;
-    };
-    setPart(left, leftIndexes);
-    setPart(right, rightIndexes);
-    if (Array.isArray(item.lineBreaks)) {
-      const breaks = item.lineBreaks.map(Number).filter(Number.isInteger);
-      left.lineBreaks = breaks
-        .map(value => leftIndexes.filter(index => index < value).length)
-        .filter((value, index, all) => value > 0 && value < leftIndexes.length && all.indexOf(value) === index);
-      right.lineBreaks = breaks
-        .map(value => rightIndexes.filter(index => index < value).length)
-        .filter((value, index, all) => value > 0 && value < rightIndexes.length && all.indexOf(value) === index);
-      left.lineCount = Math.max(1, left.lineBreaks.length + 1);
-      right.lineCount = Math.max(1, right.lineBreaks.length + 1);
     }
-    return { left, right };
   }
-  left.end = Number(time);
-  right.start = Number(time);
   return { left, right };
 }
 
@@ -918,10 +890,7 @@ export function slipClipSource(clip = {}, deltaSource = 0, minSource = 0, maxSou
 
 export function rippleShiftAllTracks(collections = {}, fromTimelineTime = 0, deltaTimeline = 0) {
   if (Math.abs(deltaTimeline) <= 0.001) return collections;
-  const shiftedLists = new Set();
   const shiftList = (list) => {
-    if (!list || shiftedLists.has(list)) return;
-    shiftedLists.add(list);
     for (const item of list || []) {
       if (Number(item.start || 0) >= fromTimelineTime - 0.002) {
         item.start = Math.max(0, Number(item.start || 0) + deltaTimeline);
@@ -943,7 +912,6 @@ export function rippleShiftAllTracks(collections = {}, fromTimelineTime = 0, del
   shiftList(collections.reviewCaptions);
   shiftList(collections.audioMutes);
   shiftList(collections.issues);
-  shiftList(collections.matchIssues);
   return collections;
 }
 

@@ -52,9 +52,10 @@ def resource_root() -> Path:
         return Path(frozen_root) / "resources"
     project_root = Path(__file__).resolve().parent.parent
     built_resources = project_root / ".build" / "package-resources"
+    executable_suffix = ".exe" if os.name == "nt" else ""
     if (
-        (built_resources / "ffmpeg" / "ffmpeg.exe").is_file()
-        and (built_resources / "ffmpeg" / "ffprobe.exe").is_file()
+        (built_resources / "ffmpeg" / f"ffmpeg{executable_suffix}").is_file()
+        and (built_resources / "ffmpeg" / f"ffprobe{executable_suffix}").is_file()
     ):
         return built_resources
     return project_root / "resources"
@@ -65,14 +66,21 @@ def bundle_root() -> Path:
 
 
 def data_root() -> Path:
-    profile = Path(os.environ.get("USERPROFILE") or Path.home())
-    path = profile / "Documents" / "ChatGPT" / "剪辑助手" / "用户数据"
+    if sys.platform == "darwin":
+        path = Path.home() / "Library" / "Application Support" / "剪辑助手" / "用户数据"
+    else:
+        profile = Path(os.environ.get("USERPROFILE") or Path.home())
+        path = profile / "Documents" / "ChatGPT" / "剪辑助手" / "用户数据"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 class ClipAssistant:
     def __init__(self) -> None:
+        if sys.platform == "darwin":
+            app_support = Path.home() / "Library" / "Application Support" / "剪辑助手"
+            os.environ.setdefault("VIDEO_DOWNLOADER_DATA_DIR", str(app_support / "Downloader"))
+            os.environ.setdefault("LOCALAPPDATA", str(app_support))
         self._set_app_user_model_id()
         self.root = TkinterDnD.Tk() if TkinterDnD else tk.Tk()
         # Tk creates the native top-level before the rest of the Python UI is
@@ -150,7 +158,7 @@ class ClipAssistant:
         self._page_diag_events = []
         self._page_diag_widgets = set()
         self.application_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
-        self.editor_engine_dir = self.application_dir / "剪辑助手内核"
+        self.editor_engine_dir = Path(os.environ.get("CLIPASSIST_ENGINE_DIR") or self.application_dir / "剪辑助手内核")
         if not getattr(sys, "frozen", False):
             # The source launcher lives in the repository, while the complete
             # WebView2/Node editor kernel is staged beside the packaged app.
@@ -163,10 +171,32 @@ class ClipAssistant:
                 self.application_dir / "release" / "剪辑助手" / "剪辑助手内核",
                 local_app_data / "Programs" / "剪辑助手" / "剪辑助手内核",
             )
+            executable = "node.exe" if os.name == "nt" else "node"
             required = (
-                Path("runtime") / "node" / "node.exe",
-                Path("剪辑助手.WebView.dll"),
+                Path("runtime") / "node" / executable,
                 Path("Modules") / "剪辑助手" / "剪辑界面" / "src" / "bootstrap.mjs",
+            ) + ((Path("剪辑助手.WebView.dll"),) if os.name == "nt" else ())
+            mac_bundle_candidates = ()
+            if sys.platform == "darwin" and getattr(sys, "frozen", False):
+                executable_dir = Path(sys.executable).resolve().parent
+                mac_bundle_candidates = (
+                    executable_dir.parent / "Resources" / "剪辑助手内核",
+                    executable_dir.parent.parent / "Resources" / "剪辑助手内核",
+                )
+            for candidate in (*mac_bundle_candidates, *candidates):
+                if all((candidate / relative).is_file() for relative in required):
+                    self.editor_engine_dir = candidate
+                    break
+        elif sys.platform == "darwin" and not os.environ.get("CLIPASSIST_ENGINE_DIR"):
+            # PyInstaller .app keeps the shared Node editor kernel in the
+            # bundle's Resources directory, outside the read-only executable.
+            required = (
+                Path("runtime") / "node" / "node",
+                Path("Modules") / "剪辑助手" / "剪辑界面" / "src" / "bootstrap.mjs",
+            )
+            candidates = (
+                self.application_dir.parent / "Resources" / "剪辑助手内核",
+                self.application_dir.parent.parent / "Resources" / "剪辑助手内核",
             )
             for candidate in candidates:
                 if all((candidate / relative).is_file() for relative in required):
@@ -179,6 +209,13 @@ class ClipAssistant:
         self.editor_open_pending = False
         self._editor_open_generation = 0
         self._editor_open_started_at = 0.0
+        if sys.platform == "darwin":
+            engine_media = self.editor_engine_dir / "Modules" / "剪辑助手" / "media"
+            os.environ["CLIPASSIST_ENGINE_DIR"] = str(self.editor_engine_dir)
+            os.environ["CLIPASSIST_MEDIA_ROOT"] = str(engine_media)
+            os.environ["CLIPASSIST_KEYCHAIN_HELPER"] = str(
+                self.editor_engine_dir / "runtime" / "keychain-helper"
+            )
         self.user_settings = self._read_settings()
         self.default_output = self.user_settings.get("output", str(Path.home() / "Downloads"))
         try:
@@ -860,7 +897,7 @@ class ClipAssistant:
         self.embedded_editor_frame = host
         self.embedded_editor = EmbeddedEditor(
             self.root, host, self.editor_engine_dir, data_root(),
-            self.editor_engine_dir / "runtime" / "node" / "node.exe", self._editor_embed_failed,
+            self.editor_engine_dir / "runtime" / "node" / ("node.exe" if os.name == "nt" else "node"), self._editor_embed_failed,
             native_parent=host,
             on_main_area_requested=self._handle_editor_main_area_request,
             on_download_project_completed=self._handle_download_project_completed,

@@ -1,6 +1,7 @@
 """Small media and title-image smoke check run before packaging."""
 import json
 import hashlib
+import os
 import queue
 import shutil
 import subprocess
@@ -16,8 +17,9 @@ from PIL import Image, ImageStat
 
 ROOT = Path(__file__).resolve().parents[1]
 RESOURCE_DIR = ROOT / "resources"
-FFMPEG = RESOURCE_DIR / "ffmpeg" / "ffmpeg.exe"
-FFPROBE = RESOURCE_DIR / "ffmpeg" / "ffprobe.exe"
+EXE_SUFFIX = ".exe" if os.name == "nt" else ""
+FFMPEG = RESOURCE_DIR / "ffmpeg" / f"ffmpeg{EXE_SUFFIX}"
+FFPROBE = RESOURCE_DIR / "ffmpeg" / f"ffprobe{EXE_SUFFIX}"
 sys.path.insert(0, str(ROOT / "core" / "downloader_runtime"))
 sys.path.insert(0, str(ROOT))
 

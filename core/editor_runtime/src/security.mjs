@@ -10,7 +10,16 @@ export function authorizeRequest(request, port, token) {
   const host = request.headers.host;
   if (typeof host !== 'string' || host.trim().toLowerCase() !== `127.0.0.1:${port}` || url.origin !== origin) return { status: 403 };
   if (request.headers.origin && request.headers.origin !== origin) return { status: 403 };
-  const supplied = Buffer.from(String(request.headers['x-editor-session'] || ''));
+  const headerToken = request.headers['x-editor-session'];
+  const cookieHeader = request.headers.cookie;
+  let cookieToken = '';
+  if (typeof cookieHeader === 'string') {
+    const matching = cookieHeader.split(';').map((part) => part.trim())
+      .filter((part) => part.startsWith('clipassistant-session='));
+    if (matching.length === 1) cookieToken = matching[0].slice('clipassistant-session='.length);
+    else if (matching.length > 1) return { status: 403 };
+  }
+  const supplied = Buffer.from(String(headerToken || cookieToken));
   const expected = Buffer.from(token);
   if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) return { status: 403 };
   if (url.pathname.startsWith('/rpc/') && request.method === 'POST' &&

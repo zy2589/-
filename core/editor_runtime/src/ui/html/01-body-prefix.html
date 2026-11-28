@@ -18,7 +18,7 @@
       }
       .app {
         display: none;
-        grid-template-rows: var(--top) minmax(225px, 1fr) minmax(
+        grid-template-rows: auto minmax(225px, 1fr) minmax(
             180px,
             var(--timeline)
           ) var(--footer);
@@ -238,11 +238,6 @@
         background: #1c1e21;
         transform: translateY(-1px);
       }
-      .projectcard.drop-target {
-        border-color: var(--blue);
-        background: #20252a;
-        box-shadow: 0 0 0 2px rgba(93, 153, 218, .48);
-      }
       .projectthumb {
         width: 88px;
         height: 62px;
@@ -274,7 +269,8 @@
         margin-top: auto;
         padding-top: 2px;
       }
-      .projectdelete {
+      .projectdelete,
+      .projectrename {
         position: absolute;
         top: 8px;
         right: 8px;
@@ -287,21 +283,9 @@
         background: rgba(22,24,26,.92);
         opacity: 1;
       }
-      .projectrename {
-        position: absolute;
-        top: 8px;
-        right: 42px;
-        z-index: 3;
-        width: 28px;
-        height: 28px;
-        border: 1px solid #454a50;
-        border-radius: 6px;
-        color: #c8ccd2;
-        background: rgba(22,24,26,.92);
-        opacity: 1;
-      }
-      .projectrename:hover { color: #fff; background: #354f70; border-color: #54749b; }
       .projectdelete:hover { color: #fff; background: #a8373e; border-color: #a8373e; }
+      .projectrename { right: 42px; }
+      .projectrename:hover { color: #fff; background: #246ca6; border-color: #3b8fd0; }
       .emptyprojects {
         flex: 1;
         display: none;
@@ -478,10 +462,6 @@
       .clip.review.insert {
         background: rgba(18, 112, 76, 0.76);
         border-color: #31d49a;
-      }
-      .clip.review.unverifiedAddition {
-        background: #a56a19;
-        border-color: #ffc05b;
       }
       .clip.review.missing {
         background: #6445b8;
@@ -702,28 +682,6 @@
         -webkit-text-stroke: 0.08em var(--active, #ff4f9a);
         color: #fff;
       }
-      .captionobject[data-highlight-style="block"] .word.active {
-        color: inherit;
-        padding: 0;
-        isolation: isolate;
-        -webkit-text-stroke: inherit;
-      }
-      .captionobject[data-highlight-style="block"] .word { position: relative; }
-      .captionobject[data-highlight-style="block"] .word.active::before {
-        content: "";
-        position: absolute;
-        z-index: -1;
-        inset: calc(-1 * var(--highlight-block-padding-y, 3px)) calc(-1 * var(--highlight-block-padding-x, 5px));
-        background: var(--active, #ffd21f);
-        border-radius: var(--highlight-block-radius, 4px);
-        transform: translate(var(--highlight-block-x, 0px), var(--highlight-block-y, 0px)) scale(var(--highlight-block-scale, 1));
-        transform-origin: center;
-        pointer-events: none;
-      }
-      .captionobject.no-highlight[data-highlight-style="block"] .word.active {
-        color: inherit;
-      }
-      .captionobject.no-highlight[data-highlight-style="block"] .word.active::before { display: none; }
       .captionobject.anim-enter {
         animation: var(--caption-animation, 0.22s ease-out both);
       }
@@ -1473,19 +1431,13 @@
         border-left: 3px solid #52c41a;
       }
       .polish-card.spoken-diff {
-        border-left: 3px solid #ff4d4f;
-      }
-      .polish-card.spoken-diff.unverified-addition {
-        border-left-color: #f2c15c;
+        border-left: 3px solid #06b6d4;
       }
       .polish-card.repeat-suggest {
-        border-left: 3px solid #ff4d4f;
+        border-left: 3px solid #f97316;
       }
       .polish-card.missing-suggest {
-        border-left: 3px solid #9f8ddd;
-      }
-      .polish-card.missing-suggest.audio-unverified {
-        border-left-color: #f2c15c;
+        border-left: 3px solid #ec4899;
       }
       .polish-card-header {
         display: flex;
@@ -1522,21 +1474,16 @@
         color: #73d13d;
       }
       .polish-badge.spoken-diff {
-        background: rgba(255, 77, 79, 0.2);
-        color: #ff7875;
-      }
-      .polish-badge.unverified-addition,
-      .polish-badge.missing.audio-unverified {
-        background: rgba(242, 193, 92, 0.2);
-        color: #f2c15c;
+        background: rgba(6, 182, 212, 0.2);
+        color: #67e8f9;
       }
       .polish-badge.repeat {
-        background: rgba(255, 77, 79, 0.2);
-        color: #ff7875;
+        background: rgba(249, 115, 22, 0.2);
+        color: #fb923c;
       }
       .polish-badge.missing {
-        background: rgba(159, 141, 221, 0.2);
-        color: #cf9bff;
+        background: rgba(236, 72, 153, 0.2);
+        color: #f472b6;
       }
       .polish-badge.notes {
         background: rgba(156, 163, 175, 0.2);
@@ -1640,22 +1587,20 @@
         font-weight: 500;
       }
       .diff-diagnosis.repeat {
-        border-left-color: #ff4d4f;
-        background: rgba(255, 77, 79, 0.08);
-        color: #ff9292;
+        border-left-color: #f97316;
+        background: rgba(249, 115, 22, 0.08);
+        color: #fdba74;
       }
       .diff-diagnosis.missing {
-        border-left-color: #9f8ddd;
-        background: rgba(159, 141, 221, 0.08);
-        color: #cf9bff;
+        border-left-color: #ec4899;
+        background: rgba(236, 72, 153, 0.08);
+        color: #f472b6;
       }
-      .diff-diagnosis.missing.audio-unverified { border-left-color:#f2c15c; background:rgba(242,193,92,.08); color:#f2c15c; }
       .diff-diagnosis.spoken-diff {
-        border-left-color: #ff4d4f;
-        background: rgba(255, 77, 79, 0.08);
-        color: #ff9292;
+        border-left-color: #06b6d4;
+        background: rgba(6, 182, 212, 0.08);
+        color: #67e8f9;
       }
-      .diff-diagnosis.spoken-diff.unverified-addition { border-left-color:#f2c15c; background:rgba(242,193,92,.08); color:#f2c15c; }
       .diff-diagnosis.pause {
         border-left-color: #3b82f6;
         background: rgba(59, 130, 246, 0.08);
@@ -1904,8 +1849,6 @@
       .zoom { accent-color: #8d8f94; }
       @media (max-height: 780px) { :root { --timeline: 310px; --timeline-track-h: 48px; } }
       /* The startup proportions take precedence over legacy fixed-width breakpoints. */
-      /* Open project tabs can wrap onto additional rows; size the header from
-         its content so the second tab row stays visible instead of clipping. */
       .app { grid-template-rows: auto minmax(0, 1fr) var(--footer); }
       .workspace {
         grid-template-columns: var(--side) 5px minmax(0, 1fr) 5px var(--inspector);

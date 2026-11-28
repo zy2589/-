@@ -71,10 +71,13 @@ def save_translation_cache(path, cache):
 
 
 def _translation_runtime():
+    executable = 'node.exe' if os.name == 'nt' else 'node'
     if getattr(sys, 'frozen', False):
-        install_root = Path(sys.executable).resolve().parent
-        node = install_root / '剪辑助手内核' / 'runtime' / 'node' / 'node.exe'
-        module = (install_root / '剪辑助手内核' / 'Modules' / '剪辑助手' /
+        install_root = Path(os.environ.get('CLIPASSIST_ENGINE_DIR') or Path(sys.executable).resolve().parent / '剪辑助手内核')
+        if sys.platform == 'darwin' and not os.environ.get('CLIPASSIST_ENGINE_DIR'):
+            install_root = Path(sys.executable).resolve().parent.parent / 'Resources' / '剪辑助手内核'
+        node = install_root / 'runtime' / 'node' / executable
+        module = (install_root / 'Modules' / '剪辑助手' /
                   '剪辑界面' / 'src' / 'template-translation.mjs')
     else:
         core_root = Path(__file__).resolve().parents[1]

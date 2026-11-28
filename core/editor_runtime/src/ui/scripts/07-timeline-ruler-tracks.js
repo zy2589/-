@@ -37,7 +37,7 @@ function rulerTickPlan(zoom) {
       function timelineGapItems(trackId) {
         if (trackId === "video") return trackItems(trackId);
         if (trackId === "audio")
-          return [...mainAudioClips().filter((clip) => !state.mainAudioTrackMap?.[clip.id] || state.mainAudioTrackMap[clip.id] === "audio"), ...state.audioAssets.filter(clip => clip.trackId === trackId)];
+          return [...mainAudioClips().filter((clip) => !state.mainAudioTrackMap?.[clip.id]), ...state.audioAssets.filter(clip => clip.trackId === trackId)];
         return trackItems(trackId);
       }
       let timelineGapSelection = null;
@@ -113,9 +113,7 @@ function rulerTickPlan(zoom) {
         for (const issue of (state.issues || []).filter(issue => Number(issue?.start) >= fromTick * rulerStep && Number(issue?.start) <= lastTick * rulerStep)) {
           const issueStart = Number(issue.start);
           if (!Number.isFinite(issueStart) || issueStart < 0) continue;
-          const pendingAudioCheck = (issue.type === 'missing' || issue.action === 'missing') && !issue.confirmedMissing && issue.needsAudioReview !== false;
-          const markerClasses = [issue.type, pendingAudioCheck ? 'audio-unverified' : ''].filter(Boolean).join(' ');
-          html += `<span class="marker ${escapeHtml(markerClasses)}" data-issue="${escapeHtml(issue.id)}" title="${escapeHtml(issue.label)}" style="left:${issueStart * state.zoom}px"></span>`;
+          html += `<span class="marker ${escapeHtml(issue.type)}" data-issue="${escapeHtml(issue.id)}" title="${escapeHtml(issue.label)}" style="left:${issueStart * state.zoom}px"></span>`;
         }
         for (const marker of state.timelineMarkers || [])
           html += `<span class="marker timeline-marker" data-timeline-marker="${escapeHtml(marker.id)}" title="${escapeHtml(marker.label || '时间线标记')} ${formatTimecode(Number(marker.time || 0))}" style="left:${Number(marker.time) * state.zoom}px"></span>`;
@@ -149,8 +147,8 @@ function rulerTickPlan(zoom) {
         let count = 0;
         if (key === "review") count = (state.reviewCaptions || []).length;
         else if (key === "caption") count = (state.captions || []).filter((item) => !item.trackId || item.trackId === "caption").length;
-        else if (key === "video") count = mainClips().filter(clip => !state.mainVideoTrackMap?.[clip.id] || state.mainVideoTrackMap[clip.id] === key).length + state.videoLayers.filter(clip => clip.trackId === key).length + state.images.filter(clip => clip.trackId === key).length + state.titles.filter(clip => clip.trackId === key).length;
-        else if (key === "audio") count = mainAudioClips().filter(clip => !state.mainAudioTrackMap?.[clip.id] || state.mainAudioTrackMap[clip.id] === key).length + state.audioAssets.filter(clip => clip.trackId === key).length;
+        else if (key === "video") count = mainClips().filter(clip => !state.mainVideoTrackMap?.[clip.id]).length + state.videoLayers.filter(clip => clip.trackId === key).length + state.images.filter(clip => clip.trackId === key).length + state.titles.filter(clip => clip.trackId === key).length;
+        else if (key === "audio") count = mainAudioClips().filter(clip => !state.mainAudioTrackMap?.[clip.id]).length + state.audioAssets.filter(clip => clip.trackId === key).length;
         else count = (trackItems(key) || []).length;
         return `${count} 个片段`;
       }
@@ -187,7 +185,7 @@ function rulerTickPlan(zoom) {
               ? `${meta.kind === "video" ? "视频" : "音频"} ${badge.slice(1)}`
               : meta.label;
             const labelTitle = key === "review"
-              ? "待处理片段：点击查看详情；试听后可选择保留或剪掉"
+              ? "待处理片段：点击试听，Alt+点击替换为识别口播，Ctrl+点击保留，Shift+点击删除"
               : trackName;
             return `<div class="tracklabel ${escapeHtml(meta.className)}${familyStart ? " track-family-start" : ""}${reviewCaptionGroupStart ? " track-section-start" : ""}${reviewCaptionGroupEnd ? " track-section-end" : ""}" draggable="true" data-track-key="${escapeHtml(key)}" data-track-kind="${escapeHtml(meta.kind)}"><div class="track-header-bar"><span class="trackhandle" title="拖动调整轨道顺序">⠿</span><span class="track-badge" title="${escapeHtml(labelTitle)}">${escapeHtml(badge)}</span><div class="track-controls"><button class="tracklock ${locked ? "on" : ""}" data-lock-track="${escapeHtml(key)}" title="${locked ? "解锁轨道" : "锁定轨道"}">${locked ? "■" : "□"}</button><button class="tracksync ${isTrackSyncLocked(key) ? "on" : ""}" data-sync-track="${escapeHtml(key)}" aria-pressed="${isTrackSyncLocked(key)}" title="同步锁：决定其他轨道波纹剪辑时此轨是否同步调整">↔</button><button class="trackauto ${autoSelected ? "on" : ""}" data-auto-track="${escapeHtml(key)}" title="自动轨道选择器：决定选择后方、全选等命令是否作用于此轨">⇥</button>${audioTrack ? `<button class="tracksolo ${soloed ? "on" : ""}" data-solo-track="${escapeHtml(key)}" title="独听此轨">S</button><button class="trackmute ${muted ? "on" : ""}" data-mute-track="${escapeHtml(key)}" title="静音此轨">M</button><span class="audio-channel-tag">2.0</span>` : ""}<button class="visibility ${visible ? "" : "off"}" data-toggle-track="${escapeHtml(key)}" title="${visible ? "关闭轨道" : "显示轨道"}">${symbol}</button>${remove}</div></div><div class="track-info-body"><span class="track-title" title="${escapeHtml(labelTitle)}">${escapeHtml(trackName)}</span><span class="track-clip-count">${clipCount}</span></div><span class="track-resize-grip" data-resize-track="${escapeHtml(key)}" title="按住拖动自由调节轨道高度；双击恢复默认高度"></span></div>`;
           })
@@ -313,7 +311,7 @@ function rulerTickPlan(zoom) {
             `<div class="clip video ${isSelected("video", clip.id) ? "selected" : ""}" data-type="video" data-id="${escapeHtml(clip.id)}" data-track-id="${escapeHtml(trackId)}" style="${clipGeometryStyle(clip)}"><i class="trim-handle start" data-trim="start"></i><span class="clip-sticky">${escapeHtml(state.video?.name || "视频")}</span>${clipDurationMarkup(clip)}<i class="trim-handle end" data-trim="end"></i></div>`;
           if (key === "video")
             html = mainClips()
-              .filter((clip) => visible(clip) && (!state.mainVideoTrackMap?.[clip.id] || state.mainVideoTrackMap[clip.id] === key))
+              .filter((clip) => visible(clip) && !state.mainVideoTrackMap?.[clip.id])
               .map((clip) => videoClipMarkup(clip, "video"))
               .join("") + state.videoLayers.filter(clip => visible(clip) && clip.trackId === key).map(clip => clipHtml(clip,"videolayer")).join("") +
               state.images.filter(clip => visible(clip) && clip.trackId === key).map(clip => clipHtml(clip,"image")).join("") +
@@ -321,7 +319,7 @@ function rulerTickPlan(zoom) {
           else if (key === "audio")
             html =
               mainAudioClips()
-                .filter((clip) => visible(clip) && (!state.mainAudioTrackMap?.[clip.id] || state.mainAudioTrackMap[clip.id] === key))
+                .filter((clip) => visible(clip) && !state.mainAudioTrackMap?.[clip.id])
                 .map((clip) => audioClipHtml(clip, "audio", "audio"))
                 .join("") + state.audioAssets.filter(clip => visible(clip) && clip.trackId === key).map(clip => audioClipHtml(clip,"audioasset",key)).join("") +
               state.audioMutes

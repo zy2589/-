@@ -404,13 +404,6 @@
       .clip.text {
         background: #9a651d;
       }
-      .clip.review.missing { background: #68539a; }
-      .clip.review.missing.audio-unverified,
-      .clip.review.unverifiedAddition,
-      .clip.review.addition,
-      .clip.review.extra { background: #8a6b22; }
-      .clip.review.mismatch,
-      .clip.review.repeat { background: #963b42; }
       .clip.caption {
         background: rgba(12, 83, 59, 0.78);
         color: #fff;
@@ -464,14 +457,9 @@
       .marker.repeat {
         background: var(--red);
       }
-      .marker.mismatch { background: var(--red); }
       .marker.missing {
         background: var(--violet);
       }
-      .marker.missing.audio-unverified,
-      .marker.unverifiedAddition,
-      .marker.addition,
-      .marker.extra { background: #f2c15c; }
       .marker.timeline-marker {
         background: #5aaddc;
         width: 2px;

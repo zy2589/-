@@ -10,51 +10,34 @@
         const cached = state.denoisedAudio;
         return !!(cached?.path && !cached.missing && cached.sourcePath === state.video?.path);
       }
-      function manuscriptSourceVideo() {
-        if (state.video?.path) return state.video;
-        const selected = state.selected?.type === "videolayer"
-          ? (state.videoLayers || []).find(item => item.id === state.selected.id && item.path)
-          : null;
-        if (selected) return selected;
-        const candidates = (state.videoLayers || []).filter(item => item?.path && !item.missing)
-          .sort((left, right) => Number(left.start || 0) - Number(right.start || 0));
-        return candidates.find(item => (state.audioAssets || []).some(audio =>
-          audio.path === item.path || audio.sourceMediaId === item.path)) || candidates[0] || null;
-      }
-      function manuscriptSourceDuration(media = manuscriptSourceVideo()) {
-        return Math.max(0, Number(media?.sourceDuration || media?.duration ||
-          (Number(media?.sourceEnd || 0) - Number(media?.sourceStart || 0)) ||
-          (Number(media?.end || 0) - Number(media?.start || 0)) || 0));
-      }
       function autoCaptionSourcePath() {
         // Match the manuscript entry point: denoising may erase quiet syllables.
-        return manuscriptSourceVideo()?.path || "";
+        return state.video?.path;
       }
       function autoCaptionTimelineSignature() {
         return [...mainClips(),...mainAudioClips(),...state.videoLayers,...state.audioAssets].map((clip) => [clip.id,clip.path||'',clip.trackId||'',Number(clip.start||0).toFixed(7), Number(clip.end||0).toFixed(7), Number(clip.sourceStart||0).toFixed(7), Number(clip.sourceEnd||0).toFixed(7)]).join("|");
       }
       function autoCaptionMediaSignature() {
-        const v = manuscriptSourceVideo() || {};
-        return [v.path || "", v.url || "", v.id || "", v.name || "", manuscriptSourceDuration(v).toFixed(4)].join("|");
+        const v = state.video || {};
+        return [v.path || "", v.url || "", v.id || "", v.name || "", Number(state.sourceDuration||0).toFixed(4)].join("|");
       }
       function manuscriptSourceClips() {
-        const path=autoCaptionSourcePath();
+        const path=state.video?.path;
         const audio=[...mainAudioClips().map(c=>({...c,ownerClipType:"audio"})),...(state.audioAssets||[]).filter(c=>c.path===path||c.sourceMediaId===path).map(c=>({...c,ownerClipType:"audioasset"}))];
         return audio.map(c=>({...c,sourceStart:Number(c.sourceStart||0),sourceEnd:Number(c.sourceEnd??(Number(c.sourceStart||0)+(c.end-c.start)*Number(state.audio.speed||1)))}));
       }
       function bindMatchedCaptionSources(captions, clips) {
-        const sourcePath=autoCaptionSourcePath();
         return (captions||[]).flatMap(caption=>clips.flatMap(clip=>{
           const rate=(clip.sourceEnd-clip.sourceStart)/(clip.end-clip.start);
           const words=(caption.words||[]).filter(w=>(w.start+w.end)/2>=clip.start&&(w.start+w.end)/2<clip.end).map(w=>({...w,sourceStart:clip.sourceStart+(Math.max(w.start,clip.start)-clip.start)*rate,sourceEnd:clip.sourceStart+(Math.min(w.end,clip.end)-clip.start)*rate,start:Math.max(w.start,clip.start),end:Math.min(w.end,clip.end)}));
-          return words.length?[{...caption,id:uid(),ownerClipId:clip.id,ownerClipType:clip.ownerClipType,sourceMediaId:sourcePath,start:words[0].start,end:words.at(-1).end,sourceStart:words[0].sourceStart,sourceEnd:words.at(-1).sourceEnd,text:joinCaptionWords(words.map(w=>w.display)),words}]:[];
+          return words.length?[{...caption,id:uid(),ownerClipId:clip.id,ownerClipType:clip.ownerClipType,sourceMediaId:state.video.path,start:words[0].start,end:words.at(-1).end,sourceStart:words[0].sourceStart,sourceEnd:words.at(-1).sourceEnd,text:joinCaptionWords(words.map(w=>w.display)),words}]:[];
         }));
       }
       function createAutoCaptionContext() {
         return {
           projectId: state.projectId,
           sessionRevision: typeof currentProjectSessionRevision === "function" ? currentProjectSessionRevision() : 0,
-          videoPath: autoCaptionSourcePath(),
+          videoPath: state.video?.path || "",
           mediaSignature: autoCaptionMediaSignature(),
           timelineSignature: autoCaptionTimelineSignature(),
           transcriptSourcePath: autoCaptionSourcePath(),
@@ -63,7 +46,6 @@
         };
       }
       function bindMatchedReviewSources(reviews, clips = manuscriptSourceClips()) {
-        const sourcePath=autoCaptionSourcePath();
         return (reviews || []).flatMap(review => {
           const words=review.words?.length ? review.words.map(w=>({...w,display:w.display || w.text})) : [];
           return clips.flatMap(clip=>{
@@ -71,7 +53,7 @@
             if(end<=start)return [];
             const rate=(clip.sourceEnd-clip.sourceStart)/(clip.end-clip.start);
             const bound=words.filter(w=>w.start<end&&w.end>start).map(w=>({...w,start:Math.max(w.start,start),end:Math.min(w.end,end),sourceStart:clip.sourceStart+(Math.max(w.start,start)-clip.start)*rate,sourceEnd:clip.sourceStart+(Math.min(w.end,end)-clip.start)*rate}));
-            return [{...review,id:uid(),issueId:review.issueId||review.id,ownerClipId:clip.id,ownerClipType:clip.ownerClipType,sourceMediaId:sourcePath,start,end,sourceStart:clip.sourceStart+(start-clip.start)*rate,sourceEnd:clip.sourceStart+(end-clip.start)*rate,words:bound,text:bound.length?joinCaptionWords(bound.map(w=>w.display)):review.text}];
+            return [{...review,id:uid(),issueId:review.issueId||review.id,ownerClipId:clip.id,ownerClipType:clip.ownerClipType,sourceMediaId:state.video.path,start,end,sourceStart:clip.sourceStart+(start-clip.start)*rate,sourceEnd:clip.sourceStart+(end-clip.start)*rate,words:bound,text:bound.length?joinCaptionWords(bound.map(w=>w.display)):review.text}];
           });
         });
       }
@@ -214,7 +196,7 @@
         return result;
       }
       function mapTranscribedCaptionsToTimeline(captions = []) {
-        const sourcePath=autoCaptionSourcePath();
+        const sourcePath=state.video?.path;
         const audioClips=[...mainAudioClips(),...(state.audioAssets||[]).filter(c=>c.path===sourcePath||c.sourceMediaId===sourcePath)];
         const ownerClipType=audioClips.length?'audio':'video';
         const clips=(audioClips.length?audioClips:[...mainClips(),...(state.videoLayers||[]).filter(c=>c.path===sourcePath||c.sourceMediaId===sourcePath)]).map(c=>({...c,sourceEnd:Number(c.sourceEnd??(Number(c.sourceStart||0)+(c.end-c.start)*Number(state.audio.speed||1)))}));
@@ -271,7 +253,7 @@
           <button class="auto-transcript-time" type="button" data-auto-caption-seek="${Number(caption.start) || 0}" title="跳到这句">${formatTime(caption.start, false)}</button>
             <textarea class="auto-transcript-edit" data-auto-caption-edit="${escapeHtml(caption.id)}" aria-label="转录第 ${index + 1} 段">${escapeHtml(caption.text || "")}</textarea>
             ${renderCaptionReferenceChanges(caption)}
-            ${captionMismatchReviewGroups(caption).map(group => `<div class="auto-transcript-mismatch small status"><span>${escapeHtml(group.spokenText)}（识别文案） → ${escapeHtml(group.expectedText)}（正确文案）</span></div>`).join("")}
+            ${(caption.words || []).map((word, wordIndex) => word.issueType === "mismatch" && captionCorrectionDiffers(word.recognizedDisplay||word.originalDisplay||word.display,word.expectedDisplay) ? `<div class="auto-transcript-mismatch small status"><span>${escapeHtml(word.recognizedDisplay||word.originalDisplay||word.display)}（识别文案） → ${escapeHtml(word.expectedDisplay)}（正确文案）</span></div>` : "").join("")}
           </div>`).join("");
         requestAnimationFrame(() => list.querySelectorAll("textarea").forEach(fitCaptionTextarea));
       }
@@ -350,22 +332,11 @@
               const reviewWords=review.words?.length?review.words:[{display:review.expectedText||review.text||"需补录",start:review.start,end:review.end}];
               const mapped = result.timelinePlaced ? bindMatchedReviewSources([{...review,words:reviewWords}],manuscriptSourceClips()) : mapTranscribedCaptionsToTimeline([{...review,words:reviewWords}]);
               for (const part of mapped) {
-                const alreadyKept=review.type==='unverifiedAddition'&&(part.words||[]).length&&(part.words||[]).every(candidate=>(state.captions||[]).some(caption=>
-                  caption.transcriptId===transcriptId&&(!part.ownerClipId||caption.ownerClipId===part.ownerClipId)&&
-                  (caption.words||[]).some(word=>word.userKept&&(word.matchType==='spoken_addition'||word.matchType==='edited'||word.issueType==='edited-timing'||word.issueType==='addition')&&
-                    Math.max(0,Math.min(Number(word.end),Number(candidate.end))-Math.max(Number(word.start),Number(candidate.start)))/
-                    Math.max(.01,Math.min(Number(word.end)-Number(word.start),Number(candidate.end)-Number(candidate.start)))>=.5)));
-                if(alreadyKept)continue;
                 const id = uid();
                 const pending = {...review,...part,id,issueId:id,captionTrackId:trackId,transcriptId:transcriptId || ""};
                 for (const caption of state.captions.filter(c=>c.transcriptId===transcriptId && c.ownerClipId===part.ownerClipId)) {
                   for (const word of caption.words || []) if (word.issueId === (review.issueId || review.id) &&
                     word.start < part.end && word.end > part.start) word.issueId=id;
-                }
-                if (pending.type === 'unverifiedAddition' || pending.unverifiedAddition) {
-                  pending.autoAddedToCaption = true;
-                  pending.reason = '已自动加入主字幕预览；试听后可确认保留，或删除对应音视频片段。';
-                  keepSpokenReviewInCaptions(pending, { pendingExtra: true });
                 }
                 state.reviewCaptions.push(pending);
                 state.issues.push({...pending,trackId:"review"});
@@ -373,7 +344,7 @@
             }
       }
       async function generateAutoCaptions({forceRecognition = false} = {}) {
-        if (!autoCaptionSourcePath()) return toast("请先导入视频或音频");
+        if (!state.video?.path) return toast("请先导入视频或音频");
         if (state.autoTranscript?.trackId && isTrackLocked(state.autoTranscript.trackId))
           return toast("CC 字幕轨道已锁定，请先解锁再重新识别");
         const proofread=$("ccProofread").checked;
@@ -394,7 +365,7 @@
           }
           const started = unwrap(await window.native.startAutoCaptionAnalysis({
             inputPath: autoCaptionSourcePath(),
-            duration: manuscriptSourceDuration() || state.sourceDuration || state.duration,
+            duration: state.sourceDuration || state.duration,
             captionLines: state.captionLines,
             script: correctScript,
             scriptLanguage: $("manuscriptLanguage")?.value || "",
@@ -464,7 +435,7 @@
             renderAutoTranscript();
             const pendingCount = (current.result.reviewCaptions || []).length;
             status.textContent = pendingCount
-              ? `已按正确文案生成 ${generated.length} 段字幕；${pendingCount} 处需要试听确认，文案外词未自动加入字幕。`
+              ? `已对照正确文案生成 ${generated.length} 段字幕，${pendingCount} 处差异已标注；字幕完整保留，加添内容已标绿。`
               : defaultTrackOccupied
               ? `正确文案字幕轨道已有内容；已新建字幕轨道并生成 ${generated.length} 段。`
               : `已在“正确文案字幕”轨道生成 ${generated.length} 段。`;
@@ -486,7 +457,7 @@
         }
       }
       async function forceAlignScriptCaptions() {
-        if (!autoCaptionSourcePath()) return toast("请先导入视频或音频");
+        if (!state.video?.path) return toast("请先导入视频或音频");
         const script = String($("scriptText")?.value || "").trim();
         if (!script) return toast("请先粘贴正确文案");
         const model = unwrap(await window.native.modelStatus());
@@ -505,7 +476,7 @@
           const context = createAutoCaptionContext();
           const started = unwrap(await window.native.startAutoCaptionAnalysis({
             inputPath: autoCaptionSourcePath(),
-            duration: manuscriptSourceDuration() || state.sourceDuration || state.duration,
+            duration: state.sourceDuration || state.duration,
             captionLines: state.captionLines,
             script,
             scriptLanguage: $("manuscriptLanguage")?.value || "en",

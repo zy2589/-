@@ -69,7 +69,6 @@ function captionTextLayout() {
             words,
             style,
             boxWidth,
-            canvasWidth: Number(state.width || 1080),
             scale,
             lineMode: state.captionLines,
             measure: (text, _style, measuredFontSize, _scale, word) => {
@@ -92,19 +91,6 @@ function captionTextLayout() {
         if (typeof ctx.roundRect === "function") ctx.roundRect(x, y, width, height, next);
         else ctx.rect(x, y, width, height);
         ctx.fill();
-      }
-      function captionHighlightBlockOverflow(layout, style, scale = 1) {
-        if (style.highlightStyle !== "block" || style.highlightEnabled === false || !layout?.lines?.length) return 0;
-        const blockScale = clamp(Number(style.highlightBlockScale ?? 1), 0.5, 2.5);
-        const wordScale = clamp(Number(style.highlightScale ?? 1), 1, 1.5);
-        const padX = Math.max(0, Number(style.highlightBlockWidth ?? 5)) * scale * wordScale * blockScale;
-        const padY = Math.max(0, Number(style.highlightBlockHeight ?? 3)) * scale * wordScale * blockScale;
-        const offsetX = Math.abs(Number(style.highlightBlockX || 0)) * scale;
-        const offsetY = Math.abs(Number(style.highlightBlockY || 0)) * scale;
-        const maxWordWidth = Math.max(0, ...layout.lines.flatMap((line) => line.words.map((word) => Number(word.width || 0))));
-        const horizontal = padX + offsetX + Math.max(0, maxWordWidth * (wordScale * blockScale - 1) / 2);
-        const vertical = padY + offsetY + Math.max(0, layout.fontSize * 1.02 * (wordScale * blockScale - 1) / 2);
-        return Math.ceil(Math.max(horizontal, vertical));
       }
       function applyCaptionCanvasShadow(ctx, style, scale = 1) {
         const strength = clamp(Number(style.shadow ?? 0), 0, 10);
@@ -156,7 +142,6 @@ function captionTextLayout() {
         // highlight switch is authoritative; interpolated forced-alignment words still
         // own useful timestamps and should highlight while they are spoken.
         const highlightOn = style.highlightEnabled !== false;
-        const highlightStyle = style.highlightStyle === "block" ? "block" : "text";
         const fill = style.color || "#ffffff";
         const active = style.highlight || style.highlightColor || "#ffd21f";
         const strokeColor = style.strokeColor || "#000000";
@@ -213,31 +198,12 @@ function captionTextLayout() {
             const selected = style.keywordMode === true
               ? highlightOn && word.emphasis === true
               : highlightOn && status === "active";
-            const scrollHighlight = scrolling && status === "active" && highlightOn;
-            const blockHighlight = highlightStyle === "block" && (selected || scrollHighlight);
-            const color = selected && !blockHighlight ? active : fill;
+            const color = selected ? active : fill;
             const wordScale = selected
               ? clamp(Number(style.highlightScale ?? 1), 1, 1.5)
               : 1;
-            const pillHighlight = animation === "word-pill" && status === "active" && !blockHighlight;
-            if (blockHighlight) {
-              ctx.save();
-              ctx.shadowColor = "transparent";
-              const blockScale = clamp(Number(style.highlightBlockScale ?? 1), 0.5, 2.5);
-              const padX = Math.max(0, Number(style.highlightBlockWidth ?? 5)) * scale * wordScale;
-              const padY = Math.max(0, Number(style.highlightBlockHeight ?? 3)) * scale * wordScale;
-              const centerX = word.x + word.width / 2;
-              const contentTop = word.y + layout.fontSize * 0.06 * wordScale;
-              const contentHeight = layout.fontSize * 1.02 * wordScale;
-              const blockWidth = (word.width * wordScale + padX * 2) * blockScale;
-              const blockHeight = (contentHeight + padY * 2) * blockScale;
-              const x = centerX - blockWidth / 2 + Number(style.highlightBlockX || 0) * scale;
-              const y = contentTop + contentHeight / 2 - blockHeight / 2 + Number(style.highlightBlockY || 0) * scale;
-              const radius = Math.max(0, Number(style.highlightBlockRadius ?? 4)) * scale * blockScale;
-              ctx.fillStyle = active;
-              fillCaptionRoundRect(ctx, x, y, blockWidth, blockHeight, radius);
-              ctx.restore();
-            } else if (pillHighlight || scrollHighlight) {
+        const scrollHighlight = scrolling && status === "active" && highlightOn;
+            if ((animation === "word-pill" && status === "active") || scrollHighlight) {
               ctx.save();
               ctx.shadowColor = "transparent";
               ctx.fillStyle = scrollHighlight ? (style.scrollHighlightBackground || "#111111") : active;
@@ -266,11 +232,9 @@ function captionTextLayout() {
               ctx.strokeText(word.display, word.x, word.y + baseline);
             }
             ctx.fillStyle =
-              highlightStyle === "block"
-                ? fill
-                : scrollHighlight
+              scrollHighlight
                 ? (style.scrollHighlightText || "#ffffff")
-                : pillHighlight ? "#101010" : color;
+                : animation === "word-pill" && status === "active" ? "#101010" : color;
             ctx.fillText(word.display, word.x, word.y + baseline);
             ctx.restore();
           }
@@ -283,7 +247,6 @@ function captionTextLayout() {
           text: caption?.text || "",
           words: captionWordsOf(caption).map((word) => [word.display, word.start, word.end, word.emphasis === true]),
           boxWidth,
-          canvasWidth: Number(state.width || 1080),
           scale,
           lines: state.captionLines,
           timingReliable: caption?.timingReliable !== false,
@@ -300,12 +263,6 @@ function captionTextLayout() {
             style.textCase,
             style.textAlign,
             style.highlightScale,
-            style.highlightBlockWidth,
-            style.highlightBlockHeight,
-            style.highlightBlockScale,
-            style.highlightBlockX,
-            style.highlightBlockY,
-            style.highlightBlockRadius,
           style.captionMotion,
           style.captionScrollAbove,
           style.captionScrollBelow,
@@ -313,15 +270,8 @@ function captionTextLayout() {
           paint: [
             style.color,
             style.highlight,
-            style.highlightStyle,
             style.highlightEnabled,
             style.highlightScale,
-            style.highlightBlockWidth,
-            style.highlightBlockHeight,
-            style.highlightBlockScale,
-            style.highlightBlockX,
-            style.highlightBlockY,
-            style.highlightBlockRadius,
             style.keywordMode,
             style.stroke,
             style.strokeColor,
@@ -376,11 +326,8 @@ function captionTextLayout() {
         const layout = layoutCaptionForCanvas(paintCaption, style, boxWidth * scale, scale);
         const overflow =
           typeof api.captionPaintOverflow === "function"
-            ? Math.max(api.captionPaintOverflow(style, scale), captionHighlightBlockOverflow(layout, style, scale))
-            : Math.max(
-                Math.ceil(Math.max(0, Number(style.stroke || 0)) * scale + 8),
-                captionHighlightBlockOverflow(layout, style, scale),
-              );
+            ? api.captionPaintOverflow(style, scale)
+            : Math.ceil(Math.max(0, Number(style.stroke || 0)) * scale + 8);
         const width = Math.max(2, Math.ceil(layout.boxWidth + overflow * 2));
         const viewportHeight = style.captionMotion === "vertical-scroll" && layout.lines.length > 1
           ? captionScrollGeometry(layout, style, time).viewportHeight
@@ -420,8 +367,8 @@ function captionTextLayout() {
           const api = captionTextLayout();
           const pad =
             typeof api.captionPaintOverflow === "function"
-              ? Math.max(api.captionPaintOverflow(style, 1), captionHighlightBlockOverflow(layout, style, 1))
-              : Math.max(8, captionHighlightBlockOverflow(layout, style, 1));
+              ? api.captionPaintOverflow(style, 1)
+              : 8;
           captionPaintState = { key, layout, style, pad, caption: paintCaption };
         }
         const layout = captionPaintState.layout;
@@ -764,14 +711,6 @@ function captionTextLayout() {
         el.style.textAlign = s.textAlign || "center";
         el.style.color = s.color || "#fff";
         el.style.setProperty("--active", s.highlight || s.highlightColor || "#ffd21f");
-        el.style.setProperty("--stroke-color", s.strokeColor || "#000000");
-        el.style.setProperty("--highlight-block-padding-x", `${Math.max(0, Number(s.highlightBlockWidth ?? 5)) * px}px`);
-        el.style.setProperty("--highlight-block-padding-y", `${Math.max(0, Number(s.highlightBlockHeight ?? 3)) * px}px`);
-        el.style.setProperty("--highlight-block-scale", String(clamp(Number(s.highlightBlockScale ?? 1), 0.5, 2.5)));
-        el.style.setProperty("--highlight-block-x", `${Number(s.highlightBlockX || 0) * px}px`);
-        el.style.setProperty("--highlight-block-y", `${Number(s.highlightBlockY || 0) * px}px`);
-        el.style.setProperty("--highlight-block-radius", `${Math.max(0, Number(s.highlightBlockRadius ?? 4)) * px}px`);
-        el.dataset.highlightStyle = s.highlightStyle === "block" ? "block" : "text";
         el.classList.toggle("no-highlight", s.highlightEnabled === false);
         // CSS strokes are geometrically centred on the glyph.  Painting the
         // fill after a stroke that is twice as wide hides the inner half and
